@@ -1,4 +1,7 @@
-import * as Tool from "effect/unstable/ai/Tool";
+// apps/server/src/mcp/toolkits/cartographer/handlers.test.ts
+// checks authorized read-only cartographer tools
+
+import * as Tool from "effect/ai/Tool";
 import {
   EnvironmentId,
   ProviderInstanceId,
@@ -12,6 +15,7 @@ import * as Stream from "effect/Stream";
 import * as Result from "effect/Result";
 import { CartographerService, unavailable } from "../../../cartographer/CartographerService.ts";
 import { McpInvocationContext, type McpCapability } from "../../McpInvocationContext.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
 import { CartographerToolkit } from "./tools.ts";
 import { CartographerToolkitHandlersLive } from "./handlers.ts";
 
@@ -51,16 +55,24 @@ it.effect("binds graph queries to the credential task and never starts analysis"
         }),
     });
     const toolkit = yield* CartographerToolkit.pipe(
-      Effect.provide(CartographerToolkitHandlersLive.pipe(Layer.provide(service))),
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(CartographerToolkitHandlersLive).pipe(
+          Layer.provide(service),
+        ),
+      ),
     );
     const results = yield* toolkit.handle("architecture_graph_diff", {}).pipe(
       Stream.unwrap,
       Stream.runCollect,
       Effect.provideService(McpInvocationContext, {
         environmentId: EnvironmentId.make("environment"),
-        threadId,
-        providerSessionId: "session",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        thread: {
+          threadId,
+          providerSessionId: "session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        requestNamespace: "fixture",
         capabilities: new Set<McpCapability>(["cartographer"]),
         issuedAt: 0,
       }),
@@ -77,16 +89,24 @@ it.effect("rejects a missing capability before reading cached resources", () =>
       get: () => Effect.die("Unauthorized cache read."),
     });
     const toolkit = yield* CartographerToolkit.pipe(
-      Effect.provide(CartographerToolkitHandlersLive.pipe(Layer.provide(service))),
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(CartographerToolkitHandlersLive).pipe(
+          Layer.provide(service),
+        ),
+      ),
     );
     const result = yield* toolkit.handle("architecture_graph_diff", {}).pipe(
       Stream.unwrap,
       Stream.runCollect,
       Effect.provideService(McpInvocationContext, {
         environmentId: EnvironmentId.make("environment"),
-        threadId,
-        providerSessionId: "session",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        thread: {
+          threadId,
+          providerSessionId: "session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        requestNamespace: "fixture",
         capabilities: new Set<McpCapability>(),
         issuedAt: 0,
       }),
@@ -100,16 +120,20 @@ it.effect("rejects a missing capability before reading cached resources", () =>
 it.effect("returns a preparation action when analysis is missing", () =>
   Effect.gen(function* () {
     const toolkit = yield* CartographerToolkit.pipe(
-      Effect.provide(CartographerToolkitHandlersLive),
+      Effect.provide(McpToolAccess.HandlersLayer.layer(CartographerToolkitHandlersLive)),
     );
     const result = yield* toolkit.handle("architecture_graph_diff", {}).pipe(
       Stream.unwrap,
       Stream.runCollect,
       Effect.provideService(McpInvocationContext, {
         environmentId: EnvironmentId.make("environment"),
-        threadId,
-        providerSessionId: "session",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        thread: {
+          threadId,
+          providerSessionId: "session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        requestNamespace: "fixture",
         capabilities: new Set<McpCapability>(["cartographer"]),
         issuedAt: 0,
       }),

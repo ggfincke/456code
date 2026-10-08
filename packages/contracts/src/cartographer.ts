@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import * as Rpc from "effect/unstable/rpc/Rpc";
+import * as Rpc from "effect/rpc/Rpc";
 import { ThreadId, TrimmedNonEmptyString, NonNegativeInt } from "./baseSchemas.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
 

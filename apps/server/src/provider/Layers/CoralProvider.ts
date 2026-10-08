@@ -15,7 +15,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import {
   buildCoralAcpEnvironment,
@@ -33,7 +33,7 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
-import { HttpClient, HttpClientResponse, HttpIncomingMessage } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse, HttpIncomingMessage } from "effect/http";
 
 const CORAL_PRESENTATION = {
   displayName: "Coral",

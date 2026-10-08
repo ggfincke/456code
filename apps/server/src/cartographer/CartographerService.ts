@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { HostProcessIsExecutable } from "@t3tools/shared/hostProcess";
 import { SnapshotStore, type Comparison } from "@t3tools/cartographer-core/snapshots";
+import * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -49,6 +50,7 @@ const failure = (cause: unknown): CartographerError =>
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
   const config = yield* ServerConfig.ServerConfig;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
@@ -137,14 +139,18 @@ export const make = Effect.gen(function* () {
           completedRuns.has(checkpoint.runId),
       );
       const rootScope = context.checkpointScopes.find((scope) => scope.kind === "root_run");
-      const ref = (count: number) =>
-        count === 0
+      const ref = Effect.fnUntraced(function* (count: number) {
+        return count === 0
           ? rootScope === undefined
             ? undefined
-            : checkpointRefForScopeOrdinal({ scopeId: rootScope.id, ordinalWithinScope: 0 })
+            : yield* checkpointRefForScopeOrdinal({
+                scopeId: rootScope.id,
+                ordinalWithinScope: 0,
+              }).pipe(Effect.provideService(Crypto.Crypto, crypto))
           : checkpoints.find((checkpoint) => checkpoint.appRunOrdinal === count)?.ref;
-      const baseRef = ref(selected.fromTurnCount);
-      const headRef = ref(selected.toTurnCount);
+      });
+      const baseRef = yield* ref(selected.fromTurnCount);
+      const headRef = yield* ref(selected.toTurnCount);
       if (!baseRef || !headRef)
         return yield* new CartographerError({
           detail:

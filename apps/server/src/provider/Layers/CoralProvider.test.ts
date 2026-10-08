@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/CoralProvider.test.ts
+// checks coral compatibility and model discovery
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { CoralSettings } from "@t3tools/contracts";
@@ -6,7 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { checkCoralProviderStatus } from "./CoralProvider.ts";
 
 const decodeSettings = Schema.decodeUnknownEffect(CoralSettings);

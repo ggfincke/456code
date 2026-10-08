@@ -22,8 +22,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { ChildProcessSpawner } from "effect/unstable/process";
-import { SqlitePersistenceMemory } from "../../../../apps/server/src/persistence/Layers/Sqlite.ts";
+import { ChildProcessSpawner } from "effect/process";
+import * as Sqlite from "../../../../apps/server/src/persistence/Sqlite.ts";
 import { makeCoralAdapter } from "../../../../apps/server/src/provider/Layers/CoralAdapter.ts";
 import { CodexProviderCapabilitiesV2 } from "../../../../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { resolveMessageDispatchIntent } from "../../../../apps/server/src/orchestration-v2/CommandPolicy.ts";
@@ -34,7 +34,7 @@ import * as ProjectionStore from "../../../../apps/server/src/orchestration-v2/P
 import type { ProviderAdapterV2Shape } from "../../../../apps/server/src/orchestration-v2/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../../../../apps/server/src/orchestration-v2/ProviderAdapterRegistry.ts";
 import {
-  makeOrchestratorV2ReplayLayerWithRegistry,
+  layerWithRegistry,
   makeReplayServerConfig,
 } from "../../../../apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "../../../../apps/server/src/orchestration-v2/testkit/ReplayFixtureWorkspace.ts";
@@ -62,16 +62,19 @@ const registryLayer = Layer.unwrap(
       planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
       openSession: noProviderProcess,
     };
-    return ProviderAdapterRegistry.makeLayer([{ ...coral, openSession: noProviderProcess }, codex]);
+    return ProviderAdapterRegistry.layerFromAdapters([
+      { ...coral, openSession: noProviderProcess },
+      codex,
+    ]);
   }),
 ).pipe(Layer.provide(Layer.merge(NodeServices.layer, IdAllocator.layer)));
 
-const database = SqlitePersistenceMemory;
+const database = Sqlite.layerMemory;
 const testLayer = Layer.mergeAll(
   ProjectionStore.layer.pipe(Layer.provide(database)),
   EffectOutbox.layer.pipe(Layer.provide(database)),
   registryLayer,
-  makeOrchestratorV2ReplayLayerWithRegistry({ name: "coral-queued-turns" }, registryLayer, {
+  layerWithRegistry({ name: "coral-queued-turns" }, registryLayer, {
     databaseLayer: database,
     runEffectWorker: false,
   }),

@@ -7,8 +7,8 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import {
   annotateEnvironmentRequest,
@@ -17,7 +17,8 @@ import {
   failEnvironmentNotFound,
   requireEnvironmentScope,
 } from "../auth/http.ts";
-import * as OrchestrationEventStore from "../persistence/Services/OrchestrationEventStore.ts";
+import { traceLocalHandlerWork } from "../cloud/traceRelayRequest.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import {
   buildBoundedThreadProjection,
@@ -30,7 +31,8 @@ import {
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
-import { buildActiveShellSnapshot } from "./ShellStream.ts";
+import { buildActiveShellSnapshot, loadShellSnapshotParts } from "./ShellStream.ts";
+import { boundedSnapshotResponseFields } from "./ThreadStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
 
 function isThreadNotFound(error: unknown): boolean {
@@ -63,7 +65,7 @@ function selectHistoryPageFromCursorOrError(
  * compressible and cacheable — and then resume the WebSocket subscription via
  * `afterSequence`.
  */
-export const orchestrationHttpApiLayer = HttpApiBuilder.group(
+export const layer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "orchestration",
   Effect.fnUntraced(function* (handlers) {
@@ -93,14 +95,12 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
     );
 
     const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(function* () {
-      const base = yield* sql.withTransaction(
-        Effect.gen(function* () {
-          const threads = yield* threadManagement.getShellSnapshot({ location: "active" });
-          return buildActiveShellSnapshot({
-            projects: yield* projectStore.listShells(),
-            threads,
-            snapshotSequence: yield* applicationEvents.latestApplicationSequence,
-          });
+      const base = buildActiveShellSnapshot(
+        yield* loadShellSnapshotParts({
+          sql,
+          readThreads: threadManagement.readShellSnapshot({ location: "active" }),
+          listProjects: projectStore.listShells(),
+          latestSequence: applicationEvents.latestApplicationSequence,
         }),
       );
       const projects = yield* enrichProjectShells(base.projects);
@@ -174,6 +174,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           return yield* loadShellSnapshot().pipe(
+            traceLocalHandlerWork,
             Effect.catch((cause) =>
               failEnvironmentInternal("orchestration_snapshot_failed", cause),
             ),
@@ -188,7 +189,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           const snapshot = yield* loadThreadSnapshot(
             args.params.threadId,
             "orchestration_thread_snapshot_failed",
-          );
+          ).pipe(traceLocalHandlerWork);
           return {
             snapshotSequence: snapshot.snapshotSequence,
             projection: snapshot.projection,
@@ -200,18 +201,19 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.threadBoundedSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          const snapshot = yield* loadThreadSnapshotWindow(args.params.threadId);
+          const snapshot = yield* loadThreadSnapshotWindow(args.params.threadId).pipe(
+            traceLocalHandlerWork,
+          );
           const bounded = buildBoundedThreadProjection({
             projection: snapshot.projection,
             snapshotSequence: snapshot.snapshotSequence,
           });
           return {
             snapshotSequence: snapshot.snapshotSequence,
-            projection: bounded.projection,
-            historyCursor: bounded.historyCursor,
-            hasMoreHistory: bounded.hasMoreHistory,
-            latestLocalTurnOrdinal: bounded.latestLocalTurnOrdinal,
-            payloadBudgetExceeded: bounded.payloadBudgetExceeded,
+            ...boundedSnapshotResponseFields({
+              bounded,
+              compactTurnItems: args.query.compactTurnItems === "1",
+            }),
           };
         }),
       )
@@ -234,7 +236,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
             args.params.threadId,
             anchorItemId,
             ThreadId.make(decodedCursor.st),
-          );
+          ).pipe(traceLocalHandlerWork);
           const pageOrError = selectHistoryPageFromCursorOrError({
             items: snapshot.projection.visibleTurnItems,
             cursor: args.query.cursor,

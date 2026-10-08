@@ -10,6 +10,7 @@
     ".": {
       // Keep vendored reference repositories outside the root project.
       "project": ["*.{js,mjs,cjs,ts,mts,cts}"],
+      "entry": [".coderabbit.config.ts"],
     },
     "scripts": {
       // knip loads its preprocessor through a cli option; these other helpers
@@ -82,6 +83,7 @@
         "plugins/*.cjs",
         "scripts/generate-device-stream.mts",
         "src/features/devices/device-stream.browser.ts!",
+        "src/features/browser/preview-stream.browser.ts!",
       ],
       // Fonts are configured as asset paths; Expo autolinks the native packages.
       "ignoreDependencies": [
