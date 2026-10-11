@@ -16,46 +16,37 @@ import {
   TurnItemId,
   type OrchestrationV2Run,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { ChildProcessSpawner } from "effect/process";
 import * as Sqlite from "../../../../apps/server/src/persistence/Sqlite.ts";
 import { makeCoralAdapter } from "../../../../apps/server/src/provider/Layers/CoralAdapter.ts";
 import { CodexProviderCapabilitiesV2 } from "../../../../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { resolveMessageDispatchIntent } from "../../../../apps/server/src/orchestration-v2/CommandPolicy.ts";
 import * as EffectOutbox from "../../../../apps/server/src/orchestration-v2/EffectOutbox.ts";
-import * as IdAllocator from "../../../../apps/server/src/orchestration-v2/IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as Orchestrator from "../../../../apps/server/src/orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../../apps/server/src/orchestration-v2/ProjectionStore.ts";
-import type { ProviderAdapterV2Shape } from "../../../../apps/server/src/orchestration-v2/ProviderAdapter.ts";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderAdapterRegistry from "../../../../apps/server/src/orchestration-v2/ProviderAdapterRegistry.ts";
-import {
-  layerWithRegistry,
-  makeReplayServerConfig,
-} from "../../../../apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts";
-import { checkpointWorkspace } from "../../../../apps/server/src/orchestration-v2/testkit/ReplayFixtureWorkspace.ts";
+import { layerWithRegistry } from "../../../../apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts";
+import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 
 const coralInstanceId = ProviderInstanceId.make("coral");
 const codexInstanceId = ProviderInstanceId.make("codex");
 const decodeCoralSettings = Schema.decodeSync(CoralSettings);
 const registryLayer = Layer.unwrap(
   Effect.gen(function* () {
-    const coral = makeCoralAdapter(decodeCoralSettings({ enabled: true }), {
+    const coral = yield* makeCoralAdapter(decodeCoralSettings({ enabled: true }), {
       instanceId: coralInstanceId,
-      crypto: yield* Crypto.Crypto,
-      fileSystem: yield* FileSystem.FileSystem,
-      childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
-      idAllocator: yield* IdAllocator.IdAllocatorV2,
-      serverConfig: yield* makeReplayServerConfig("coral-queued-turns"),
       selfInvocation: { command: "unused", entrypoint: undefined },
       environment: {},
     });
     const noProviderProcess = () => Effect.die("queue ownership needs no provider process");
-    const codex: ProviderAdapterV2Shape = {
+    const codex: ProviderAdapter.ProviderAdapterV2["Service"] = {
       instanceId: codexInstanceId,
       driver: ProviderDriverKind.make("codex"),
       getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
@@ -67,7 +58,16 @@ const registryLayer = Layer.unwrap(
       codex,
     ]);
   }),
-).pipe(Layer.provide(Layer.merge(NodeServices.layer, IdAllocator.layer)));
+).pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      NodeServices.layer,
+      IdAllocator.layer,
+      McpProviderSessions.layer,
+      TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
+    ),
+  ),
+);
 
 const database = Sqlite.layerMemory;
 const testLayer = Layer.mergeAll(

@@ -9,8 +9,8 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import { expandHomePath } from "../../pathExpansion.ts";
-import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
 const DEFAULT_CORAL_OLLAMA_HOST = "http://localhost:11434";
 export const DEFAULT_CORAL_MODEL = "qwen3.8:27b-mlx";
@@ -52,12 +52,13 @@ export function normalizeCoralOllamaHost(value: string | null | undefined): stri
 
 export function buildCoralAcpEnvironment(
   coralSettings: Pick<CoralSettings, "homePath"> | null | undefined,
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv,
+  homeDirectory: string,
 ): NodeJS.ProcessEnv {
   const homePath = coralSettings?.homePath.trim();
   return {
     ...environment,
-    ...(homePath ? { CORAL_HOME: expandHomePath(homePath) } : {}),
+    ...(homePath ? { CORAL_HOME: expandHomePath(homePath, homeDirectory) } : {}),
   };
 }
 

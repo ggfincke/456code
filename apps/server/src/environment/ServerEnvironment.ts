@@ -1,14 +1,12 @@
+// apps/server/src/environment/ServerEnvironment.ts
+// describes environment identity and available fork capabilities
 import {
   EnvironmentId,
   ORCHESTRATION_PROTOCOL_VERSION,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
-import {
-  HostProcessArchitecture,
-  HostProcessPlatform,
-  HostProcessIsExecutable,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -190,8 +188,8 @@ export const make = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const identity = yield* ServerEnvironmentIdentity;
-  const hostPlatform = yield* HostProcessPlatform;
-  const hostArchitecture = yield* HostProcessArchitecture;
+  const hostPlatform = yield* HostProcess.Platform;
+  const hostArchitecture = yield* HostProcess.Architecture;
   const environmentId = yield* identity.getEnvironmentId;
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
@@ -220,7 +218,7 @@ export const make = Effect.gen(function* () {
     serverVersion: packageJson.version,
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     capabilities: {
-      cartographer: !(yield* HostProcessIsExecutable),
+      cartographer: !(yield* HostProcess.IsExecutable),
       repositoryIdentity: true,
       connectionProbe: true,
       attachmentUploads: true,
@@ -233,10 +231,13 @@ export const make = Effect.gen(function* () {
       threadSettlement: true,
       threadAutoSettlement: true,
       storageCleanup: true,
+      storageCleanupRun: true,
+      otlpEndpointCheck: true,
       projectWorktreeCleanup: true,
       worktreesDirectory: true,
       threadRestartContinuation: true,
       projectSettingsOverrides: true,
+      projectProviderInstanceOverrides: true,
       threadSnooze: true,
       environmentThemes: true,
       usageLimitSources: true,

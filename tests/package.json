@@ -6,6 +6,8 @@
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@t3tools/contracts": "workspace:*",
+    "@t3tools/provider-core": "workspace:*",
+    "@t3tools/provider-testing": "workspace:*",
     "effect": "catalog:",
     "vite-plus": "catalog:"
   }

@@ -1,8 +1,9 @@
 // apps/server/src/provider/Drivers/CoralDriver.ts
 // registers isolated coral snapshots and v2 orchestration
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
-import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import {
   CoralSettings,
   ProviderDriverKind,
@@ -18,11 +19,9 @@ import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeCoralTextGeneration } from "../../textGeneration/CoralTextGeneration.ts";
 import { buildCoralAcpEnvironment } from "../acp/CoralAcpSupport.ts";
-import { ProviderDriverError } from "../Errors.ts";
+import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import { makeCoralAdapter } from "../Layers/CoralAdapter.ts";
 import {
   buildInitialCoralProviderSnapshot,
@@ -31,20 +30,20 @@ import {
   enrichCoralSnapshot,
   overlayCoralSessionModels,
 } from "../Layers/CoralProvider.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+} from "@t3tools/provider-core/server/driver";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
-import type { ServerProviderDraft } from "../providerSnapshot.ts";
+} from "@t3tools/provider-core/server/snapshotSettings";
+import type { ServerProviderDraft } from "@t3tools/provider-core/server/snapshotProbe";
 
 const decodeCoralSettings = Schema.decodeSync(CoralSettings);
 const DRIVER_KIND = ProviderDriverKind.make("coral");
@@ -54,15 +53,14 @@ const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
 });
 
 export type CoralDriverEnv =
-  | BackgroundPolicy.BackgroundPolicy
+  | Effect.Services<ReturnType<typeof makeCoralAdapter>>
+  | ProviderHost.ProviderHost
+  | ProviderLatestVersions.ProviderLatestVersions
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
-  | IdAllocator.IdAllocatorV2
-  | Path.Path
-  | ServerConfig
-  | ServerSettingsService;
+  | Path.Path;
 
 const withInstanceIdentity =
   (input: {
@@ -95,15 +93,13 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
       const crypto = yield* Crypto.Crypto;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettingsService;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const serverConfig = yield* ServerConfig;
+      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const selfInvocation = yield* resolveSelfInvocation();
-      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const effectiveConfig = { ...config, enabled } satisfies CoralSettings;
       const processEnv = buildCoralAcpEnvironment(
         effectiveConfig,
-        mergeProviderInstanceEnvironment(environment),
+        yield* mergeProviderInstanceEnvironment(environment),
+        yield* HostProcess.HomeDirectory,
       );
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -121,13 +117,8 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
         readonly getSnapshot: Effect.Effect<ServerProvider>;
         readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
       } | null>(null);
-      const orchestrationAdapter = makeCoralAdapter(effectiveConfig, {
-        crypto,
-        childProcessSpawner: spawner,
-        fileSystem,
-        serverConfig,
+      const orchestrationAdapter = yield* makeCoralAdapter(effectiveConfig, {
         selfInvocation,
-        idAllocator,
         environment: processEnv,
         instanceId,
         onSessionSetup: (sessionSetupResult) =>
@@ -156,7 +147,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CoralSettings>>({
         resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
         getSettings: snapshotSettings.getSettings,
@@ -183,7 +174,12 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
                 enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
                 publishSnapshot: publishWithSessionModels,
                 httpClient,
-              }),
+              }).pipe(
+                Effect.provideService(
+                  ProviderLatestVersions.ProviderLatestVersions,
+                  latestVersions,
+                ),
+              ),
             ),
           );
         },

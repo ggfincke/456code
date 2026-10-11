@@ -6,6 +6,8 @@ import type {
   ServerProvider,
   ServerProviderModel,
 } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import * as Schema from "effect/Schema";
@@ -28,11 +30,9 @@ import {
   buildServerProvider,
   isCommandMissingCause,
   type ServerProviderDraft,
-} from "../providerSnapshot.ts";
-import {
-  enrichProviderSnapshotWithVersionAdvisory,
-  type ProviderMaintenanceCapabilities,
-} from "../providerMaintenance.ts";
+} from "@t3tools/provider-core/server/snapshotProbe";
+import { enrichProviderSnapshotWithVersionAdvisory } from "@t3tools/provider-core/server/maintenanceResolver";
+import type { ProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenance";
 import { HttpClient, HttpClientResponse, HttpIncomingMessage } from "effect/http";
 
 const CORAL_PRESENTATION = {
@@ -130,7 +130,11 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
 > {
   if (!coralSettings.enabled) return yield* buildInitialCoralProviderSnapshot(coralSettings);
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  const runtimeEnvironment = buildCoralAcpEnvironment(coralSettings, environment);
+  const runtimeEnvironment = buildCoralAcpEnvironment(
+    coralSettings,
+    environment,
+    yield* HostProcess.HomeDirectory,
+  );
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const initialized = yield* Effect.gen(function* () {
     const runtime = yield* makeCoralAcpRuntime({
@@ -230,7 +234,7 @@ export const enrichCoralSnapshot = (input: {
   readonly enableProviderUpdateChecks?: boolean;
   readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   readonly httpClient: HttpClient.HttpClient;
-}): Effect.Effect<void> =>
+}): Effect.Effect<void, never, ProviderLatestVersions.ProviderLatestVersions> =>
   enrichProviderSnapshotWithVersionAdvisory(input.snapshot, input.maintenanceCapabilities, {
     enableProviderUpdateChecks: input.enableProviderUpdateChecks,
   }).pipe(

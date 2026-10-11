@@ -1,3 +1,6 @@
+// apps/web/src/cartographer/CartographerPanel.tsx
+// presents permitted repository analyses, dependencies, and captured source
+import { useAtomValue } from "@effect/atom-react";
 import type {
   CartographerView,
   CartographerDependencies,
@@ -27,6 +30,12 @@ export default function CartographerPanel({
   const analyze = useAtomCommand(cartographer.analyze);
   const dependencies = useAtomCommand(cartographer.dependencies);
   const source = useAtomCommand(cartographer.source);
+  const canRead = useAtomValue(cartographer.get.permissionAtom(threadRef.environmentId));
+  const canAnalyze = useAtomValue(cartographer.analyze.permissionAtom(threadRef.environmentId));
+  const canReadDependencies = useAtomValue(
+    cartographer.dependencies.permissionAtom(threadRef.environmentId),
+  );
+  const canReadSource = useAtomValue(cartographer.source.permissionAtom(threadRef.environmentId));
   const [view, setView] = useState<CartographerView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,6 +58,15 @@ export default function CartographerPanel({
   const load = useCallback(
     async (refresh = false, search = "", prepare = false) => {
       const token = ++request.current;
+      if (!canRead || (refresh && mode === "map" && !canAnalyze)) {
+        setBusy(false);
+        setError(
+          canRead
+            ? "This connection cannot analyze repositories."
+            : "This connection cannot read repository analyses.",
+        );
+        return;
+      }
       setBusy(true);
       setError(null);
       let result =
@@ -56,7 +74,7 @@ export default function CartographerPanel({
           ? await analyze({ environmentId, input: { threadId } })
           : await get({ environmentId, input: { threadId, mode, query: search } });
       if (token !== request.current) return;
-      if (result._tag === "Success" && !result.value && mode === "map" && prepare) {
+      if (result._tag === "Success" && !result.value && mode === "map" && prepare && canAnalyze) {
         result = await analyze({ environmentId, input: { threadId } });
       }
       if (token !== request.current) return;
@@ -72,7 +90,7 @@ export default function CartographerPanel({
       } else setError(formatEnvironmentQueryError(result.cause));
       setBusy(false);
     },
-    [analyze, get, environmentId, threadId, mode],
+    [analyze, get, environmentId, threadId, mode, canRead, canAnalyze],
   );
 
   useEffect(() => {
@@ -89,7 +107,7 @@ export default function CartographerPanel({
   }, [load]);
 
   const selectFile = async (file: string) => {
-    if (!view) return;
+    if (!view || !canReadDependencies) return;
     const token = ++detailRequest.current;
     setSelected(file);
     setSourceView(null);
@@ -105,7 +123,7 @@ export default function CartographerPanel({
     else setError(formatEnvironmentQueryError(result.cause));
   };
   const openSource = async (side: "base" | "target") => {
-    if (!view || !selected) return;
+    if (!view || !selected || !canReadSource) return;
     const token = ++detailRequest.current;
     setInitialCamera(camera.current);
     const result = await source({
@@ -176,7 +194,7 @@ export default function CartographerPanel({
           size="sm"
           variant="outline"
           className="ml-auto"
-          disabled={busy}
+          disabled={busy || (mode === "map" && !canAnalyze)}
           onClick={() => {
             if (mode === "impact") useRightPanelStore.getState().open(threadRef, "diff");
             else {
@@ -242,7 +260,7 @@ export default function CartographerPanel({
                   onChange={(event) => setQuery(event.target.value)}
                   maxLength={200}
                 />
-                <Button size="sm" variant="outline" type="submit" disabled={busy}>
+                <Button size="sm" variant="outline" type="submit" disabled={busy || !canRead}>
                   Search
                 </Button>
               </form>
@@ -284,6 +302,7 @@ export default function CartographerPanel({
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={!canReadSource}
                         onClick={() => {
                           void openSource("target");
                         }}
@@ -294,6 +313,7 @@ export default function CartographerPanel({
                         <Button
                           size="sm"
                           variant="outline"
+                          disabled={!canReadSource}
                           onClick={() => {
                             void openSource("base");
                           }}

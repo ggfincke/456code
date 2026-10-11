@@ -1,3 +1,5 @@
+// scripts/fincke-desktop.test.ts
+// verifies fork identity and supported protocol handlers
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -23,6 +25,9 @@ it.effect("packages a separate app and protocol without any update publication t
       expect(config.publish).toBeNull();
       expect((config[platform] as { protocols: unknown }).protocols).toEqual([
         { name: "456code", schemes: ["code456-thin", "code456-thin-dev"] },
+        ...(platform === "mac"
+          ? [{ name: "Web site URL", schemes: ["http", "https"], role: "Viewer" }]
+          : []),
       ]);
     }
   }),
