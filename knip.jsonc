@@ -38,10 +38,15 @@
         "src/provider/testFixtures/*.mjs",
       ],
       // Keep the transitive Effect runtime pinned for standalone npm installs.
-      // the Vite+ web build prerequisite
-      // The Cartographer worker bundles its engine but resolves this parser at runtime.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@t3tools/web", "dependency-cruiser"],
-      // Keep upstream self-update source intact while fork updates are disabled.
+      // the web build prerequisite and native runtime packages stay external
+      // the cartographer worker resolves its parser at runtime
+      "ignoreDependencies": [
+        "@effect/platform-node-shared",
+        "@t3tools/web",
+        "@napi-rs/keyring",
+        "dependency-cruiser",
+      ],
+      // preserve upstream update source while fork self-updates are disabled
       "ignoreIssues": { "src/cloud/selfUpdate.ts": ["exports"] },
     },
     "apps/desktop": {

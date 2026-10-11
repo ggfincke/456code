@@ -9,7 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import { makeCoralTextGeneration } from "../../../../apps/server/src/textGeneration/CoralTextGeneration.ts";
-import { writeFakeCli } from "../../../../apps/server/src/testUtils/fakeCli.ts";
+import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 
 it.effect("forwards title context and preserves refinement from a real child process", () =>
   Effect.gen(function* () {

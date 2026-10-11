@@ -1,3 +1,5 @@
+// apps/web/src/cartographer/state.ts
+// binds cartographer requests to the destination environment and its grants
 import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runtime";
 import { connectionAtomRuntime } from "../connection/runtime";
 

@@ -3,18 +3,19 @@
 import {
   ProviderDriverKind,
   type CoralSettings,
+  type ModelSelection,
   type OrchestrationV2ProviderCapabilities,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
-import type { ChildProcessSpawner } from "effect/process";
+import { ChildProcessSpawner } from "effect/process";
 
-import * as ProviderAdapter from "../../orchestration-v2/ProviderAdapter.ts";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,
   type AcpAdapterV2Options,
-} from "../../orchestration-v2/Adapters/AcpAdapterV2.ts";
+} from "@t3tools/provider-acp/server/adapter";
 import {
   applyCoralAcpModelSelection,
   applyCoralAcpRuntimeMode,
@@ -47,7 +48,6 @@ const CAPABILITIES = {
 } satisfies OrchestrationV2ProviderCapabilities;
 
 export interface CoralAdapterLiveOptions extends Omit<AcpAdapterV2Options, "flavor"> {
-  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly environment: NodeJS.ProcessEnv;
   readonly onSessionSetup?: (
     sessionSetupResult: Parameters<typeof coralModelsFromSessionSetup>[0],
@@ -65,11 +65,19 @@ const validatePolicy = (policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy) 
         }),
       );
 
-export function makeCoralAdapter(
+// coral only supports selecting a model; native acp options cannot override its fixed modes
+const nativeCoralModelSelection = ({ instanceId, model }: ModelSelection): ModelSelection => ({
+  instanceId,
+  model,
+});
+
+export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
   coralSettings: CoralSettings,
   options: CoralAdapterLiveOptions,
-): ProviderAdapter.ProviderAdapterV2Shape {
-  const adapter = makeAcpAdapterV2({
+) {
+  const crypto = yield* Crypto.Crypto;
+  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const adapter = yield* makeAcpAdapterV2({
     ...options,
     flavor: {
       driver: DRIVER,
@@ -81,10 +89,10 @@ export function makeCoralAdapter(
         makeCoralAcpRuntime({
           ...input,
           coralSettings,
-          childProcessSpawner: options.childProcessSpawner,
+          childProcessSpawner,
           environment: { ...options.environment, ...input.processEnvironment },
         }).pipe(
-          Effect.provideService(Crypto.Crypto, options.crypto),
+          Effect.provideService(Crypto.Crypto, crypto),
           Effect.map((runtime) => ({
             ...runtime,
             start: () =>
@@ -113,13 +121,30 @@ export function makeCoralAdapter(
         options.onSessionSetup?.({ configOptions }) ?? Effect.void,
     },
   });
-  return {
+  return ProviderAdapter.ProviderAdapterV2.of({
     ...adapter,
     openSession: (input) =>
       validatePolicy(input.runtimePolicy).pipe(
-        Effect.andThen(adapter.openSession(input)),
+        Effect.andThen(
+          adapter.openSession({
+            ...input,
+            modelSelection: nativeCoralModelSelection(input.modelSelection),
+          }),
+        ),
         Effect.map((session) => ({
           ...session,
+          ensureThread: (thread) =>
+            session.ensureThread({
+              ...thread,
+              modelSelection: nativeCoralModelSelection(thread.modelSelection),
+            }),
+          resumeThread: (thread) =>
+            session.resumeThread({
+              ...thread,
+              ...(thread.modelSelection === undefined
+                ? {}
+                : { modelSelection: nativeCoralModelSelection(thread.modelSelection) }),
+            }),
           startTurn: (turn) =>
             validatePolicy(turn.runtimePolicy).pipe(
               Effect.andThen(
@@ -130,7 +155,10 @@ export function makeCoralAdapter(
                         detail: "Coral does not support attachments yet.",
                       }),
                     )
-                  : session.startTurn(turn),
+                  : session.startTurn({
+                      ...turn,
+                      modelSelection: nativeCoralModelSelection(turn.modelSelection),
+                    }),
               ),
             ),
           respondToRuntimeRequest: (request) =>
@@ -151,5 +179,5 @@ export function makeCoralAdapter(
             ),
         })),
       ),
-  };
-}
+  });
+});

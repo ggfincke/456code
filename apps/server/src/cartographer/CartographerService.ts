@@ -10,7 +10,7 @@ import {
   type CartographerDependencies,
   type ThreadId,
 } from "@t3tools/contracts";
-import { HostProcessIsExecutable } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SnapshotStore, type Comparison } from "@t3tools/cartographer-core/snapshots";
 import * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
@@ -59,7 +59,7 @@ export const make = Effect.gen(function* () {
   const checkpointDiff = yield* CheckpointDiffQuery.CheckpointDiffQuery;
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
-  const executable = yield* HostProcessIsExecutable;
+  const executable = yield* HostProcess.IsExecutable;
   const worker = yield* path.fromFileUrl(
     new URL(
       import.meta.url.endsWith(".ts") ? "../cartographerWorker.ts" : "./cartographerWorker.mjs",

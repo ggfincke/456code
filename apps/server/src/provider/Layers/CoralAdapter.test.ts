@@ -16,7 +16,6 @@ import {
   type OrchestrationV2ProviderThread,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -28,14 +27,14 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcessSpawner } from "effect/process";
-import * as ServerConfig from "../../config.ts";
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type {
   ProviderAdapterV2Event,
   ProviderAdapterV2RuntimePolicy,
   ProviderAdapterV2TurnInput,
-} from "../../orchestration-v2/ProviderAdapter.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import { makeCoralAdapter } from "./CoralAdapter.ts";
 
 const decodeSettings = Schema.decodeSync(CoralSettings);
@@ -43,9 +42,8 @@ const instanceId = ProviderInstanceId.make("coral-fixture");
 const testLayer = Layer.mergeAll(
   NodeServices.layer,
   IdAllocator.layer,
-  ServerConfig.layerTest(process.cwd(), { prefix: "t3-coral-config-" }).pipe(
-    Layer.provide(NodeServices.layer),
-  ),
+  McpProviderSessions.layer,
+  TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
 );
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const fixture = Effect.fn("coral.test.fixture")(function* (
@@ -66,13 +64,8 @@ const fixture = Effect.fn("coral.test.fixture")(function* (
   );
   yield* fs.chmod(binaryPath, 0o755);
   const settings = decodeSettings({ enabled: true, binaryPath });
-  const adapter = makeCoralAdapter(settings, {
+  const adapter = yield* makeCoralAdapter(settings, {
     instanceId,
-    crypto: yield* Crypto.Crypto,
-    childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
-    fileSystem: fs,
-    idAllocator: yield* IdAllocator.IdAllocatorV2,
-    serverConfig: yield* ServerConfig.ServerConfig,
     selfInvocation: yield* resolveSelfInvocation(),
     environment: {
       ...process.env,

@@ -15,6 +15,7 @@ import {
   type WheelEvent,
 } from "react";
 
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 
 // graph controls own their appearance instead of restyling shared UI primitives
@@ -24,7 +25,7 @@ function CanvasControl({ className, ...props }: ComponentProps<"button">) {
       type="button"
       {...props}
       className={cn(
-        "inline-flex h-6 items-center justify-center rounded-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-3.5",
+        "inline-flex h-6 items-center justify-center rounded-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--architecture-accent)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-3.5",
         className,
       )}
     />
@@ -582,9 +583,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
     };
 
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
+    return observeResize(element, measure);
   }, []);
 
   useEffect(() => {
@@ -993,7 +992,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
               aria-label={curve.edge.ariaLabel}
               aria-pressed={selected}
               className={cn(
-                "absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--architecture-accent)] bg-[var(--architecture-overlay)] px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-opacity focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)]",
+                "absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--architecture-accent)] bg-[var(--architecture-overlay)] px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-opacity focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--architecture-accent)]",
                 active || curve.edge.showBadge
                   ? "pointer-events-auto opacity-100"
                   : "pointer-events-none opacity-0",
@@ -1053,7 +1052,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
               aria-label={point.node.ariaLabel}
               aria-pressed={selected}
               className={cn(
-                "absolute z-20 flex h-24 w-[236px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[11px] border px-3.75 pb-3 pt-2.75 text-left text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-[border-color,box-shadow,opacity] hover:border-[var(--architecture-accent)] hover:shadow-[var(--architecture-shadow-node-hover)] focus-visible:border-[var(--architecture-accent)] focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--architecture-page)]",
+                "absolute z-20 flex h-24 w-[236px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[11px] border px-3.75 pb-3 pt-2.75 text-left text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-[border-color,box-shadow,opacity] hover:border-[var(--architecture-accent)] hover:shadow-[var(--architecture-shadow-node-hover)] focus-visible:border-[var(--architecture-accent)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--architecture-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--architecture-page)]",
                 "border-[var(--architecture-node-edge)] bg-[var(--architecture-node-fill)]",
                 nodeStrokeClass(point.node.stroke),
                 selected &&
@@ -1116,7 +1115,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
         <button
           ref={minimapRef}
           aria-label="Architecture minimap. Click or drag to pan; activate with the keyboard to fit."
-          className="absolute bottom-[52px] start-3 z-40 cursor-crosshair touch-none overflow-hidden rounded-[11px] border border-[var(--architecture-border)] bg-[var(--architecture-overlay)]/90 shadow-[var(--architecture-shadow-node)] backdrop-blur-md outline-none focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)]"
+          className="absolute bottom-[52px] start-3 z-40 cursor-crosshair touch-none overflow-hidden rounded-[11px] border border-[var(--architecture-border)] bg-[var(--architecture-overlay)]/90 shadow-[var(--architecture-shadow-node)] backdrop-blur-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--architecture-accent)]"
           style={{ width: ARCHITECTURE_MINIMAP_WIDTH, height: minimapHeight }}
           type="button"
           onClick={(event) => {

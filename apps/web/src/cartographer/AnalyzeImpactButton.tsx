@@ -1,3 +1,6 @@
+// apps/web/src/cartographer/AnalyzeImpactButton.tsx
+// starts permitted impact analysis and opens its review surface
+import { useAtomValue } from "@effect/atom-react";
 import type { CartographerComparison, ScopedThreadRef } from "@t3tools/contracts";
 import { useState } from "react";
 import { Button } from "../components/ui/button";
@@ -14,6 +17,7 @@ export function AnalyzeImpactButton({
   comparison: CartographerComparison;
 }) {
   const analyze = useAtomCommand(cartographer.analyze);
+  const canAnalyze = useAtomValue(cartographer.analyze.permissionAtom(threadRef.environmentId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -21,8 +25,9 @@ export function AnalyzeImpactButton({
       <Button
         size="sm"
         variant="outline"
-        disabled={busy}
+        disabled={busy || !canAnalyze}
         onClick={async () => {
+          if (!canAnalyze) return;
           setBusy(true);
           setError(null);
           const result = await analyze({

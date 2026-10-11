@@ -1,8 +1,7 @@
 // apps/server/src/textGeneration/CoralTextGeneration.ts
 // generates structured text through isolated coral commands
-import type { CoralSettings, ModelSelection } from "@t3tools/contracts";
+import type { CoralSettings } from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
@@ -16,20 +15,9 @@ import {
   buildCoralAcpEnvironment,
   normalizeCoralOllamaHost,
 } from "../provider/acp/CoralAcpSupport.ts";
-import * as TextGeneration from "./TextGeneration.ts";
-import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildThreadTitlePrompt,
-} from "./TextGenerationPrompts.ts";
-import {
-  normalizeCliError,
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
-} from "./TextGenerationUtils.ts";
-
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
+import { normalizeCliError } from "@t3tools/provider-core/server/textGenerationUtils";
 const CORAL_TIMEOUT_MS = 180_000;
 
 const CoralExecResult = Schema.Struct({
@@ -48,20 +36,15 @@ export const makeCoralTextGeneration = Effect.fn("makeCoralTextGeneration")(func
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const runtimeEnvironment = buildCoralAcpEnvironment(coralSettings, environment);
+  const runtimeEnvironment = buildCoralAcpEnvironment(
+    coralSettings,
+    environment,
+    yield* HostProcess.HomeDirectory,
+  );
 
-  const runCoralJson = <S extends Schema.Top>(input: {
-    readonly operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle";
-    readonly cwd: string;
-    readonly prompt: string;
-    readonly attachments?: TextGeneration.BranchNameGenerationInput["attachments"];
-    readonly outputSchemaJson: S;
-    readonly modelSelection: ModelSelection;
-  }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
+  const runCoralJson = <S extends Schema.Top>(
+    input: TextGenerationOperations.Request<S>,
+  ): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
       if ((input.attachments?.length ?? 0) > 0) {
         return yield* new TextGenerationError({
@@ -190,7 +173,7 @@ export const makeCoralTextGeneration = Effect.fn("makeCoralTextGeneration")(func
         });
       }
 
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchemaJson));
+      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchema));
       return yield* decodeOutput(extractJsonObject(execResult.response)).pipe(
         Effect.mapError(
           (cause) =>
@@ -214,98 +197,8 @@ export const makeCoralTextGeneration = Effect.fn("makeCoralTextGeneration")(func
       Effect.scoped,
     );
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("CoralTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
-      const generated = yield* runCoralJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
-    });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("CoralTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-      const generated = yield* runCoralJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("CoralTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
-      const generated = yield* runCoralJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        attachments: input.attachments,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      return { branch: sanitizeBranchFragment(generated.branch) };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("CoralTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        attachments: input.attachments,
-        linkedContext: input.linkedContext,
-        previousTitle: input.previousTitle,
-      });
-      const generated = yield* runCoralJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        attachments: input.attachments,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      return {
-        title: sanitizeThreadTitle(generated.title),
-        needsRefinement: generated.needsRefinement,
-      };
-    });
-
-  return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-  } satisfies TextGeneration.TextGeneration["Service"];
+  return TextGenerationOperations.fromRunner(
+    "CoralTextGeneration",
+    TextGenerationOperations.withoutInvestigation("Coral", runCoralJson),
+  );
 });
