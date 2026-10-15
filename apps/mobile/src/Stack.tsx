@@ -31,6 +31,7 @@ import { useResolveClassNames } from "uniwind";
 import { AppText as Text } from "./components/AppText";
 import { getCompactBrandHeaderOptions } from "./components/CompactBrandTitle";
 import { WorkspaceRootScreen } from "./features/workspace/WorkspaceRootScreen";
+import { AndroidWorkspaceTabsProvider } from "./features/workspace/AndroidWorkspaceTabsProvider";
 import {
   PullRequestRouteScreen,
   PullRequestFileRouteScreen,
@@ -50,6 +51,7 @@ import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardi
 import { AttachmentFileScreen } from "./features/files/AttachmentFileScreen";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
+import { selectedPullRequestKey } from "./features/pull-requests/pullRequestSelection";
 import {
   HardwareKeyboardCommandOverlay,
   HardwareKeyboardCommandProvider,
@@ -168,6 +170,12 @@ const GLASS_HEADER_OPTIONS: AppScreenOptions = {
   headerTransparent: NATIVE_LIQUID_GLASS_SUPPORTED,
   scrollEdgeEffects: NATIVE_LIQUID_GLASS_SUPPORTED ? HEADER_SCROLL_EDGE_EFFECTS : undefined,
   unstable_navigationItemStyle: NATIVE_LIQUID_GLASS_SUPPORTED ? "editor" : undefined,
+};
+
+// Android PR screens render their own Material toolbar.
+const PULL_REQUEST_HEADER_OPTIONS: AppScreenOptions = {
+  ...GLASS_HEADER_OPTIONS,
+  headerShown: Platform.OS !== "android",
 };
 
 // SOLID: opaque sheet-colored header for surfaces that manage their own viewport.
@@ -647,13 +655,16 @@ function RootStackLayout(props: {
       <ThreadOutboxDrainWorker />
       <ShowcaseCaptureCoordinator pathname={pathname} />
       <ExistingThreadSettingsRouteProvider>
-        <AdaptiveWorkspaceLayout
-          pathname={workspaceLocation.pathname}
-          workspaceRouteKey={workspaceLocation.routeKey}
-        >
-          {props.children}
-          <HardwareKeyboardCommandOverlay />
-        </AdaptiveWorkspaceLayout>
+        <AndroidWorkspaceTabsProvider>
+          <AdaptiveWorkspaceLayout
+            pathname={workspaceLocation.pathname}
+            workspaceRouteKey={workspaceLocation.routeKey}
+            selectedPullRequestKey={selectedPullRequestKey(props.state)}
+          >
+            {props.children}
+            <HardwareKeyboardCommandOverlay />
+          </AdaptiveWorkspaceLayout>
+        </AndroidWorkspaceTabsProvider>
       </ExistingThreadSettingsRouteProvider>
     </HardwareKeyboardCommandProvider>
   );
@@ -721,15 +732,15 @@ const RootStackConfig = createWorkspaceStackNavigator({
         path: "pull-requests/:environmentId/:projectId/:repository/:number",
         parse: { number: Number },
       },
-      options: GLASS_HEADER_OPTIONS,
+      options: PULL_REQUEST_HEADER_OPTIONS,
     }),
     PullRequestGuideStop: createNativeStackScreen({
       screen: PullRequestGuideStopScreen,
-      options: GLASS_HEADER_OPTIONS,
+      options: PULL_REQUEST_HEADER_OPTIONS,
     }),
     PullRequestFile: createNativeStackScreen({
       screen: PullRequestFileRouteScreen,
-      options: GLASS_HEADER_OPTIONS,
+      options: PULL_REQUEST_HEADER_OPTIONS,
     }),
     PullRequestFiles: createNativeStackScreen({
       screen: PullRequestFilesRouteScreen,
@@ -743,7 +754,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
     PullRequestReviewers: createNativeStackScreen({
       screen: PullRequestReviewersScreen,
       options: {
-        ...GLASS_HEADER_OPTIONS,
+        ...PULL_REQUEST_HEADER_OPTIONS,
         ...FORM_SHEET_PRESENTATION_OPTIONS,
         sheetAllowedDetents: [0.75, 0.92],
         sheetGrabberVisible: true,
@@ -752,7 +763,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
     }),
     PullRequestDiscussion: createNativeStackScreen({
       screen: PullRequestDiscussionScreen,
-      options: GLASS_HEADER_OPTIONS,
+      options: PULL_REQUEST_HEADER_OPTIONS,
     }),
     PullRequestInlineComment: createNativeStackScreen({
       screen: PullRequestInlineCommentScreen,

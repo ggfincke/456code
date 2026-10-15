@@ -23,6 +23,7 @@ import {
 import { useCallback, useRef, useState, type ComponentProps } from "react";
 import { StyleSheet, View } from "react-native";
 import { FormSheet, Stack } from "react-native-screens";
+import { NativeScrollEdgeEffectsContext } from "./NativeScrollViewMarker";
 import { V5StackHeader } from "./V5StackHeader.ios";
 import type { AppNativeStackNavigationOptions } from "./StackHeader";
 import { NativeColumnContent } from "./NativeColumnContent.ios";
@@ -243,7 +244,9 @@ export function V5CardStackView(
                         .nativeContentInsetHorizontally
                     }
                   >
-                    {descriptor.render()}
+                    <NativeScrollEdgeEffectsContext value={descriptor.options.scrollEdgeEffects}>
+                      {descriptor.render()}
+                    </NativeScrollEdgeEffectsContext>
                   </NativeColumnContent>
                 </NavigationRouteContext>
               </NavigationContext>
@@ -269,10 +272,14 @@ export function V5StackView(props: V5StackViewProps) {
     groups.map((group) => {
       const first = group[0]!;
       const descriptor = props.descriptors[first.key]!;
+      const visibleRoute = group.at(-1)!;
       return [
         first.key,
         {
           ...descriptor,
+          navigation: props.descriptors[visibleRoute.key]!.navigation,
+          // Focus belongs to the pushed page inside this presentation group.
+          route: visibleRoute,
           options: modalEnvelopeOptions(descriptor.options),
           render: () => (
             <V5CardStackView
