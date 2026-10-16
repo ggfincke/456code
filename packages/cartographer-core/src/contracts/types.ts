@@ -9,14 +9,14 @@ export type ExportKind =
   | "namespace"
   | "default";
 
-// structured comment marker kinds: * important, ! warning, ? question, TODO
+// structured comment marker kinds: * important, ! warning, ? question, todo
 export type MarkerKind = "important" | "warning" | "question" | "todo";
 
 // one structured marker line lifted out of comment prose
 export interface CommentMarker {
   kind: MarkerKind;
   text: string;
-  // parsed from TODO(scope):; absent for bare TODO & the other kinds
+  // parsed from the todo(scope): form; absent for bare todo markers & the other kinds
   scope?: string;
 }
 
