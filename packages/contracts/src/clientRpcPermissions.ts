@@ -19,7 +19,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   "cartographer.source": AuthOrchestrationReadScope,
   "cartographer.dependencies": AuthOrchestrationReadScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
-  // Endpoint checks exist to configure exports, so they need the same grant as saving them.
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,
   [WS_METHODS.pullRequestsRunAction]: AuthSourceControlWriteScope,
   [WS_METHODS.pullRequestsUpdate]: AuthSourceControlWriteScope,

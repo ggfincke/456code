@@ -9,8 +9,6 @@ import { primaryServerConfigAtom } from "../state/server";
 export type SidebarStageBackdropVariant = "nightly" | "dev" | "fincke";
 export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
 
-// A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
-// more horizontal canvas instead of zooming the scene.
 const STAGE_BACKDROP_VIEW_BOX = "0 0 8192 96";
 
 export function resolveSidebarStageBackdropVariant(
@@ -47,7 +45,6 @@ export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBack
   return enabled ? "fincke" : null;
 }
 
-/** Stage-channel header art; palettes mirror the per-channel app icons in `assets/`. */
 export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdropVariant }) {
   return (
     <div
