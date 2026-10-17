@@ -2,7 +2,7 @@
 
 This private package owns static JavaScript/TypeScript graph analysis and immutable, extension-owned captures. The application uses only `./snapshots` and `./analysis-worker`. Build it before running the server; T3 task prerequisites do this automatically.
 
-The resolver, package export, nearest-config, coverage, and navigation accuracy work was selectively taken from the local Cartographer review. The former proposal engine and standalone agent tool/CLI entry points are removed. Existing analyzer support modules and major resolver tests remain private implementation details.
+The resolver, package export, nearest-config, coverage, and navigation accuracy work was selectively taken from the local Cartographer review. The former proposal engine and standalone agent tool/CLI entry points are removed.
 
 Analysis reads a captured tree, never the live repository after capture. Working-tree identities include actual source bytes; Git comparisons resolve both commit identities before analysis. Results and source are bound to their task, root and immutable capture ID. The app's read-only MCP tools never start analysis.
 
