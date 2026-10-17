@@ -75,30 +75,36 @@ export const make = Effect.gen(function* () {
       await Promise.allSettled(workers.values());
     }),
   );
+  const spawn = async (cwd: string, args: readonly string[]) => {
+    if (closed) throw new Error("The analysis service has stopped.");
+    const controller = new AbortController();
+    const work = Effect.runPromise(
+      runner.run({
+        command: process.execPath,
+        args: ["--max-old-space-size=1024", worker, ...args],
+        cwd,
+        timeout: "90 seconds",
+        maxOutputBytes: 64 * 1024,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      }),
+      { signal: controller.signal },
+    );
+    workers.set(controller, work);
+    try {
+      const result = await work;
+      if (result.code !== 0)
+        throw new Error(`Cartographer analysis failed: ${result.stderr.slice(0, 2000)}`);
+    } finally {
+      workers.delete(controller);
+    }
+  };
   const store = new SnapshotStore(
     path.join(config.stateDir, "cartographer"),
-    async (root, output, identity) => {
-      if (closed) throw new Error("The analysis service has stopped.");
-      const controller = new AbortController();
-      const work = Effect.runPromise(
-        runner.run({
-          command: process.execPath,
-          args: ["--max-old-space-size=1024", worker, root, output, identity],
-          cwd: root,
-          timeout: "90 seconds",
-          maxOutputBytes: 64 * 1024,
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-        }),
-        { signal: controller.signal },
-      );
-      workers.set(controller, work);
-      try {
-        const result = await work;
-        if (result.code !== 0)
-          throw new Error(`Cartographer analysis failed: ${result.stderr.slice(0, 2000)}`);
-      } finally {
-        workers.delete(controller);
-      }
+    {
+      analyzeTree: (root, output, identity, map) =>
+        spawn(root, [root, output, identity, ...(map ? [map] : [])]),
+      layoutScope: (map, scopeId, output) =>
+        spawn(path.dirname(map), ["--layout", map, scopeId, output]),
     },
     // the state dir can sit inside a project root (the fork's dev state dir does), so keep
     // it and the materialized copies it holds out of every capture even when git does not
