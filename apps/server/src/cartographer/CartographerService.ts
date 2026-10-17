@@ -100,6 +100,9 @@ export const make = Effect.gen(function* () {
         workers.delete(controller);
       }
     },
+    // the state dir can sit inside a project root (the fork's dev state dir does), so keep
+    // it and the materialized copies it holds out of every capture even when git does not
+    [config.stateDir],
   );
   const context = Effect.fn("Cartographer.context")(function* (threadId: ThreadId) {
     const thread = yield* threads.getThreadShell(threadId);
