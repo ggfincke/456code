@@ -6,7 +6,7 @@ The resolver, package export, nearest-config, coverage, and navigation accuracy 
 
 Analysis reads a captured tree, never the live repository after capture. Working-tree identities include actual source bytes; Git comparisons resolve both commit identities before analysis. Results and source are bound to their task, root and immutable capture ID. The app's read-only MCP tools never start analysis.
 
-Limits: 8,000 source/config files, 2 MiB per file, 64 MiB per capture, two simultaneous analyses, a 90-second worker deadline, 250 visible graph nodes, 600 edges, and bounded dependency/source responses. Refresh failures retain the last completed resource. Cache generations remain available for immutable source navigation; the entire extension cache is rebuildable and can be removed while the app is stopped. It contains captured source and must be treated as project data.
+Limits: 8,000 source/config files, 2 MiB per file, 64 MiB per capture, two simultaneous analyses, a 90-second worker deadline, 250 visible graph nodes, 600 edges, and bounded dependency/source responses. Refresh failures retain the last completed resource. The newest two generations per comparison are kept, plus any generation a pointer still names, so the previous result stays navigable; the entire extension cache is rebuildable and can be removed while the app is stopped. It contains captured source and must be treated as project data.
 
 Focused checks:
 

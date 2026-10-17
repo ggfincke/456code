@@ -1,3 +1,5 @@
+// packages/cartographer-core/src/snapshots/capture.ts
+// captures immutable file trees from a worktree or git ref for analysis
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
@@ -50,14 +52,41 @@ export async function resolveCommit(root: string, ref: string): Promise<string> 
   return (await git(root, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`])).trim();
 }
 
-async function readTree(root: string, ref?: string): Promise<CapturedTree> {
+// absolute directories whose contents never enter a capture, even when git does not
+// ignore them. the server's own state dir lives inside some project roots (the fork's dev
+// state dir is <repo>/.456code) and holds materialized copies of earlier captures.
+async function excludedPrefixes(root: string, exclude: readonly string[]): Promise<string[]> {
+  const prefixes: string[] = [];
+  for (const entry of exclude) {
+    let canonical = NodePath.resolve(entry);
+    try {
+      canonical = await NodeFSP.realpath(canonical);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const relative = NodePath.relative(root, canonical).split(NodePath.sep).join("/");
+    if (relative && !relative.startsWith("../") && relative !== "..") prefixes.push(`${relative}/`);
+  }
+  return prefixes;
+}
+
+async function readTree(
+  root: string,
+  ref: string | undefined,
+  exclude: readonly string[],
+): Promise<CapturedTree> {
   root = await NodeFSP.realpath(root);
+  const prefixes = await excludedPrefixes(root, exclude);
+  const included = (name: string) =>
+    INCLUDED.test(name) &&
+    !EXCLUDED.test(name) &&
+    !prefixes.some((prefix) => name.startsWith(prefix));
   const head = await resolveCommit(root, ref ?? "HEAD");
   const archived = new Map<string, { oid: string; size: number }>();
   if (ref) {
     for (const entry of (await git(root, ["ls-tree", "-r", "-l", "-z", head])).split("\0")) {
       const match = /^(100[0-7]{3}) blob ([a-f0-9]+) +([0-9]+)\t([\s\S]+)$/.exec(entry);
-      if (match && INCLUDED.test(match[4]!) && !EXCLUDED.test(match[4]!)) {
+      if (match && included(match[4]!)) {
         archived.set(match[4]!, { oid: match[2]!, size: Number(match[3]) });
       }
     }
@@ -66,7 +95,7 @@ async function readTree(root: string, ref?: string): Promise<CapturedTree> {
     ? [...archived.keys()]
     : (await git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]))
         .split("\0")
-        .filter((name) => name && INCLUDED.test(name) && !EXCLUDED.test(name));
+        .filter((name) => name && included(name));
   const unique = [...new Set(names)].sort();
   if (unique.length > MAX_FILES) throw new Error(`Analysis exceeds the ${MAX_FILES}-file limit.`);
   let archivedBytes: Buffer<ArrayBufferLike> = Buffer.alloc(0);
@@ -125,10 +154,14 @@ async function readTree(root: string, ref?: string): Promise<CapturedTree> {
   return { root, head, identity, files };
 }
 
-export async function captureTree(root: string, ref?: string): Promise<CapturedTree> {
-  const first = await readTree(root, ref);
+export async function captureTree(
+  root: string,
+  ref?: string,
+  exclude: readonly string[] = [],
+): Promise<CapturedTree> {
+  const first = await readTree(root, ref, exclude);
   if (ref) return first;
-  const second = await readTree(root);
+  const second = await readTree(root, undefined, exclude);
   if (first.identity !== second.identity) {
     throw new Error("The worktree changed during capture. Wait for writes to finish and refresh.");
   }

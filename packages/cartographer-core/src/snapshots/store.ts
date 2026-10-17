@@ -1,3 +1,5 @@
+// packages/cartographer-core/src/snapshots/store.ts
+// immutable per-task analysis snapshots: capture, publish, retain, and project views
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -67,16 +69,26 @@ const MAX_RESULTS = 100;
 const NO_ANALYSIS =
   "No completed analysis for this task and worktree. Open Repository Map or Analyze Impact to prepare it.";
 
+// generations kept per pointer (owner+root+comparison) beyond those a pointer still references:
+// the one just published and the previous last-good, so a client mid-view of the old id resolves
+const RETAINED_GENERATIONS = 2;
+
 export class SnapshotStore {
   private readonly running = new Map<string, Promise<SnapshotView>>();
+  // ids whose directories are still being written; retention never touches them
+  private readonly building = new Set<string>();
   readonly cache: string;
   readonly analyzeTree: (root: string, output: string, identity: string) => Promise<void>;
+  // absolute directories kept out of every capture; the cache itself is always one of them
+  readonly exclude: readonly string[];
   constructor(
     cache: string,
     analyzeTree: (root: string, output: string, identity: string) => Promise<void>,
+    exclude: readonly string[] = [],
   ) {
     this.cache = cache;
     this.analyzeTree = analyzeTree;
+    this.exclude = [cache, ...exclude];
   }
 
   private directory(owner: string, id: string): string {
@@ -167,13 +179,16 @@ export class SnapshotStore {
     const target = await captureTree(
       request.root,
       !comparison || comparison.kind === "working-tree" ? undefined : head,
+      this.exclude,
     );
     if (target.head !== head)
       throw new Error("HEAD changed during analysis capture. Refresh the comparison.");
-    const before = base ? await captureTree(request.root, base) : null;
+    const before = base ? await captureTree(request.root, base, this.exclude) : null;
     const id = NodeCrypto.randomUUID();
     const directory = this.directory(request.owner, id);
     await NodeFSP.mkdir(directory, { recursive: true });
+    this.building.add(id);
+    let view: SnapshotView;
     try {
       const targetRoot = NodePath.join(directory, "target");
       await NodeFSP.mkdir(targetRoot);
@@ -208,7 +223,7 @@ export class SnapshotStore {
       await NodeFSP.writeFile(NodePath.join(directory, "manifest.json"), JSON.stringify(manifest), {
         flag: "wx",
       });
-      const view = await this.view(request.owner, request.root, id);
+      view = await this.view(request.owner, request.root, id);
       // Publish only complete artifacts. A failed rebuild leaves the last-good pointer intact.
       await request.validateCapture?.();
       const pointer = this.pointer(request);
@@ -222,10 +237,57 @@ export class SnapshotStore {
       );
       await NodeFSP.writeFile(`${latest}.${id}.tmp`, JSON.stringify(id), { flag: "wx" });
       await NodeFSP.rename(`${latest}.${id}.tmp`, latest);
-      return view;
     } catch (error) {
       await NodeFSP.rm(directory, { recursive: true, force: true });
       throw error;
+    } finally {
+      this.building.delete(id);
+    }
+    // the build is already published, so retention is best effort: it runs outside the try so
+    // it cannot roll the build back, and any failure (unreadable owner dir, a stray non-uuid
+    // directory, rm racing another process) must not turn a successful analysis into a rejection
+    await this.prune(request.owner, JSON.stringify([target.root, comparison ?? null])).catch(
+      () => undefined,
+    );
+    return view;
+  }
+
+  // removes older generations sharing this pointer key (root + comparison, as `pointer` hashes
+  // it). kept: the newest RETAINED_GENERATIONS, anything a pointer file still names, and
+  // in-flight builds (no manifest yet or still building)
+  private async prune(owner: string, key: string): Promise<void> {
+    const ownerDirectory = NodePath.join(this.cache, digest(owner));
+    const referenced = new Set<string>();
+    const generations: { id: string; createdAt: string }[] = [];
+    for (const entry of await NodeFSP.readdir(ownerDirectory, { withFileTypes: true })) {
+      try {
+        if (entry.isFile() && entry.name.endsWith(".json")) {
+          const id = JSON.parse(
+            await NodeFSP.readFile(NodePath.join(ownerDirectory, entry.name), "utf8"),
+          ) as unknown;
+          if (typeof id === "string") referenced.add(id);
+        } else if (entry.isDirectory() && !this.building.has(entry.name)) {
+          const manifest = JSON.parse(
+            await NodeFSP.readFile(
+              NodePath.join(ownerDirectory, entry.name, "manifest.json"),
+              "utf8",
+            ),
+          ) as SnapshotManifest;
+          if (
+            manifest.id === entry.name &&
+            JSON.stringify([manifest.root, manifest.comparison]) === key
+          )
+            generations.push({ id: entry.name, createdAt: manifest.createdAt });
+        }
+      } catch {
+        // an entry that cannot be read or parsed (half-written pointer, corrupt or missing
+        // manifest, foreign file) is simply not a retention candidate; skipping keeps it intact
+      }
+    }
+    generations.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    for (const { id } of generations.slice(RETAINED_GENERATIONS)) {
+      if (referenced.has(id)) continue;
+      await NodeFSP.rm(this.directory(owner, id), { recursive: true, force: true });
     }
   }
 
@@ -240,7 +302,7 @@ export class SnapshotStore {
           : base;
       return head !== manifest.head || resolvedBase !== manifest.base;
     }
-    return (await captureTree(root)).identity !== manifest.identity;
+    return (await captureTree(root, undefined, this.exclude)).identity !== manifest.identity;
   }
 
   async view(
