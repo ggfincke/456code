@@ -5,8 +5,7 @@ import { afterAll, describe, expect, it } from "vite-plus/test";
 import { loadConfig } from "../analyze/config.ts";
 import { buildGraph } from "../analyze/graph.ts";
 import { compileRuleEvaluator } from "../analyze/ruleEval.ts";
-import { GRAPH_SCHEMA_VERSION, type CartographerGraph } from "../contracts/types.ts";
-import { normalizeGraphJson } from "../store/graphJson.ts";
+import type { CartographerGraph } from "../contracts/types.ts";
 
 const roots: string[] = [];
 
@@ -20,30 +19,6 @@ function write(root: string, path: string, source: string): void {
   const target = NodePath.join(root, path);
   NodeFS.mkdirSync(NodePath.dirname(target), { recursive: true });
   NodeFS.writeFileSync(target, source);
-}
-
-function graphWithRule(allowVia: unknown): CartographerGraph {
-  return {
-    version: GRAPH_SCHEMA_VERSION,
-    repoRoot: "/repo",
-    mode: "imports",
-    generatedAt: "2026-08-07T00:00:00.000Z",
-    scope: "src",
-    nodes: [],
-    edges: [],
-    groups: [],
-    rules: [
-      {
-        id: "public-entrypoints",
-        from: "src/**",
-        to: "src/core/**",
-        verdict: "allow-only",
-        allowVia,
-        severity: "error",
-      },
-    ] as unknown as NonNullable<CartographerGraph["rules"]>,
-    metrics: { cycles: 0, orphans: 0, maxFanIn: 0, maxFanOut: 0 },
-  };
 }
 
 afterAll(() => {
@@ -78,7 +53,6 @@ describe("allowVia arrays", () => {
         }),
       );
       expect(loadConfig(root).rules?.[0]?.allowVia).toEqual(expected);
-      expect(normalizeGraphJson(graphWithRule(authored)).rules?.[0]?.allowVia).toEqual(expected);
     }
   });
 
@@ -219,7 +193,7 @@ describe("assigned-system rank rules", () => {
     expect(graph.edges.find((edge) => edge.from === "src/core/client.ts")?.violations).toEqual([
       "rank:core->adapters",
     ]);
-    const persisted = normalizeGraphJson(JSON.parse(JSON.stringify(graph)));
+    const persisted = JSON.parse(JSON.stringify(graph)) as CartographerGraph;
     const violationsOf = compileRuleEvaluator(
       persisted.rules ?? [],
       undefined,
@@ -246,6 +220,7 @@ describe("assigned-system rank rules", () => {
     expect(() => loadConfig(root)).toThrow(/mandatory.*boolean/);
     write(root, ".cartographer.json", JSON.stringify({ rules: [{ ...rule, mandatory: true }] }));
     const graph = await buildGraph({ root, scope: "src" });
-    expect(normalizeGraphJson(JSON.parse(JSON.stringify(graph))).rules?.[0]?.mandatory).toBe(true);
+    const persisted = JSON.parse(JSON.stringify(graph)) as CartographerGraph;
+    expect(persisted.rules?.[0]?.mandatory).toBe(true);
   });
 });

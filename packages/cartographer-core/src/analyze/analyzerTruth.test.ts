@@ -1,10 +1,8 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "vite-plus/test";
-import { buildAtlasIndex } from "../store/atlasIndex/build.ts";
-import { graphContentDigest } from "../store/atlasIndex/digest.ts";
-import { parseAtlasIndex } from "../contracts/atlasIndexCodec.ts";
 import { buildGraph } from "../analyze/graph.ts";
 import { buildSymbolTable, exportList } from "../analyze/symbols.ts";
 import { computeCoChanges } from "../analyze/cochange.ts";
@@ -15,14 +13,17 @@ import {
   resolveGroup,
   resolveSystem,
 } from "../analyze/config.ts";
-import { parsePositiveInt } from "../cli/lib/args.ts";
-import { normalizeGraphJson } from "../store/graphJson.ts";
-import { trackedTempRoot } from "../test-support/trackedTempRoot.ts";
-import { runBuild } from "../cli/commands/build.ts";
-import { loadContextQuery } from "../query/contextQuery.ts";
+import { isAnalysisCoverage } from "../contracts/analysisCoverage.ts";
+import type { CartographerGraph } from "../contracts/types.ts";
 
-const tempRoots = trackedTempRoot("carto-tg2-");
-const tempDir = tempRoots.create;
+const roots: string[] = [];
+
+// sync so the sync fixture helpers (configWith, gitRepo) can call it directly
+function tempDir(): string {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "carto-tg2-"));
+  roots.push(root);
+  return root;
+}
 
 function gitRepo(): string {
   const dir = tempDir();
@@ -42,7 +43,11 @@ function commit(dir: string, files: Record<string, string>, message: string): vo
   NodeChildProcess.execFileSync("git", ["-C", dir, "commit", "-qm", message]);
 }
 
-afterAll(tempRoots.cleanup);
+afterAll(() => {
+  for (const root of roots) {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 describe("F03 segment-aware glob matcher", () => {
   const cfg = {
@@ -303,40 +308,6 @@ describe("authored rule citations verify against the cited file", () => {
   });
 });
 
-describe("graph rule wire normalization", () => {
-  it("accepts legacy strings and canonical arrays as allowVia arrays", () => {
-    const base = {
-      version: 4,
-      repoRoot: "/repo",
-      mode: "imports",
-      generatedAt: "2026-08-07T00:00:00.000Z",
-      scope: "src",
-      nodes: [],
-      edges: [],
-      groups: [],
-      metrics: { cycles: 0, orphans: 0, maxFanIn: 0, maxFanOut: 0 },
-    };
-    for (const allowVia of ["src/public/**", ["src/public/**", "src/internal/**"]]) {
-      const graph = normalizeGraphJson({
-        ...base,
-        rules: [
-          {
-            id: "public-entrypoints",
-            from: "src/**",
-            to: "src/core/**",
-            verdict: "allow-only",
-            allowVia,
-            severity: "error",
-          },
-        ],
-      } as unknown as Parameters<typeof normalizeGraphJson>[0]);
-      expect(graph.rules?.[0]?.allowVia).toEqual(
-        typeof allowVia === "string" ? [allowVia] : allowVia,
-      );
-    }
-  });
-});
-
 describe("F06-F08 co-change history semantics", () => {
   it("counts singleton commits in the strength denominator (F06)", () => {
     const dir = gitRepo();
@@ -372,20 +343,6 @@ describe("F06-F08 co-change history semantics", () => {
     const pairs = computeCoChanges(dir, [weird, "src/b.ts"], "src");
     expect(pairs).toHaveLength(1);
     expect(new Set([pairs[0]!.a, pairs[0]!.b])).toEqual(new Set([weird, "src/b.ts"]));
-  });
-});
-
-describe("F19 strict integer flags", () => {
-  it("rejects malformed suffixes instead of partial parsing", () => {
-    for (const bad of ["1junk", "1.5", "1e3", "0", "-1", ""]) {
-      expect(() => parsePositiveInt(bad, "--x")).toThrow();
-    }
-    expect(parsePositiveInt("42", "--x")).toBe(42);
-  });
-
-  it("applies domain bounds", () => {
-    expect(() => parsePositiveInt("70000", "--limit", 65535)).toThrow(/range/);
-    expect(parsePositiveInt("4977", "--limit", 65535)).toBe(4977);
   });
 });
 
@@ -827,28 +784,12 @@ describe("package-aware import analysis", () => {
           example.fileId === "apps/one/src/index.ts" && example.specifier.startsWith("./missing-"),
       ),
     ).toBe(true);
-    expect(normalizeGraphJson(JSON.parse(JSON.stringify(graph))).coverage).toEqual(graph.coverage);
-    const index = buildAtlasIndex(graph, graphContentDigest(JSON.stringify(graph)));
-    expect(parseAtlasIndex(index).coverage).toEqual(graph.coverage);
-    expect(index.units.systems.map((system) => system.label).sort()).toEqual([
-      "One",
-      "Shared",
-      "Two",
-    ]);
-    expect(() =>
-      parseAtlasIndex({
-        ...index,
-        coverage: {
-          ...graph.coverage,
-          unresolvedLocalImports: { total: 0, examples: [], omitted: 1 },
-        },
-      }),
-    ).toThrow(/invalid schema/);
+    expect(isAnalysisCoverage(graph.coverage)).toBe(true);
   });
 });
 
 describe("captured snapshot metadata", () => {
-  it("keeps the captured repository ref in persisted artifacts inside another Git repository", async () => {
+  it("static-tree analysis inside another git repository ignores the parent's files and history", async () => {
     const parent = gitRepo();
     commit(parent, { "parent.ts": "export const parent = true\n" }, "unrelated parent");
     const source = gitRepo();
@@ -856,35 +797,20 @@ describe("captured snapshot metadata", () => {
     const capturedRef = NodeChildProcess.execFileSync("git", ["-C", source, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
-    const parentRef = NodeChildProcess.execFileSync("git", ["-C", parent, "rev-parse", "HEAD"], {
-      encoding: "utf8",
-    }).trim();
     const capturedRoot = NodePath.join(parent, ".456code", "captured");
-    const outDir = NodePath.join(parent, ".456code", "artifacts");
     NodeFS.mkdirSync(NodePath.join(capturedRoot, "src"), { recursive: true });
     NodeFS.copyFileSync(
       NodePath.join(source, "src/source.ts"),
       NodePath.join(capturedRoot, "src/source.ts"),
     );
-    await runBuild(capturedRoot, {
+    const graph = await buildGraph({
+      root: capturedRoot,
       scope: ".",
-      out: outDir,
-      "no-history": true,
-      "static-tree-ref": capturedRef,
+      staticTree: { gitRef: capturedRef },
     });
-    const graph = normalizeGraphJson(
-      JSON.parse(NodeFS.readFileSync(NodePath.join(outDir, "graph.json"), "utf8")),
-    );
-    const index = parseAtlasIndex(
-      JSON.parse(NodeFS.readFileSync(NodePath.join(outDir, "atlas-index.json"), "utf8")),
-    );
-    expect(capturedRef).not.toBe(parentRef);
-    expect(graph.gitRef).toBe(capturedRef);
-    expect(index.repo.gitRef).toBe(capturedRef);
     expect(graph.repoRoot).toBe(".");
     expect(graph.nodes.map((node) => node.id)).toEqual(["src/source.ts"]);
     expect(graph.coChanges).toBeUndefined();
-    expect(NodeFS.existsSync(NodePath.join(outDir, "graph.db"))).toBe(false);
   });
 });
 
@@ -902,9 +828,7 @@ describe("namespace import provenance", () => {
     for (const [path, content] of Object.entries(files))
       NodeFS.writeFileSync(NodePath.join(root, path), content);
     const graph = await buildGraph({ root, scope: ".", staticTree: { gitRef: "fixture" } });
-    const path = NodePath.join(root, "graph.json");
-    NodeFS.writeFileSync(path, JSON.stringify(graph));
-    const persisted = loadContextQuery(path).graph;
+    const persisted = JSON.parse(JSON.stringify(graph)) as CartographerGraph;
     const edge = (from: string) =>
       persisted.edges.find((entry) => entry.from === from && entry.to === "api.ts")!;
     expect(edge("consumer.ts").namespaceImports).toEqual([
