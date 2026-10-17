@@ -5,7 +5,15 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { diffGraphs } from "../analyze/diff.js";
 import type { CartographerGraph } from "../contracts/types.js";
-import { captureTree, digest, materialize, resolveCommit, git, safePath } from "./capture.js";
+import {
+  captureTree,
+  digest,
+  fingerprintTree,
+  materialize,
+  resolveCommit,
+  git,
+  safePath,
+} from "./capture.js";
 
 export interface Comparison {
   readonly kind: "working-tree" | "branch-range" | "refs";
@@ -24,6 +32,8 @@ export interface SnapshotManifest {
   readonly owner: string;
   readonly root: string;
   readonly identity: string;
+  // stat fingerprint of the working tree the target was captured from; absent for refs
+  readonly fingerprint?: string;
   readonly head: string;
   readonly base: string | null;
   readonly createdAt: string;
@@ -163,8 +173,14 @@ export class SnapshotStore {
 
   private async build(request: SnapshotRequest): Promise<SnapshotView> {
     const comparison = request.comparison;
-    // Resolve moving refs before copying either side. No source is read from HEAD later.
-    const head = await resolveCommit(request.root, comparison?.headRef ?? "HEAD");
+    // resolve moving refs before copying either side; no source is read from HEAD later. only
+    // a turn checkpoint (refs) names its own head commit. branch-range's headRef is the branch
+    // name for display, and rev-parse prefers a same-named tag over a branch, which would trip
+    // the head guard below, so every other kind pins HEAD itself
+    const head = await resolveCommit(
+      request.root,
+      comparison?.kind === "refs" ? (comparison.headRef ?? "HEAD") : "HEAD",
+    );
     const base = comparison
       ? comparison.kind === "branch-range"
         ? (
@@ -176,9 +192,15 @@ export class SnapshotStore {
           ).trim()
         : await resolveCommit(request.root, comparison.baseRef)
       : null;
+    // only refs captures a commit tree. branch-range analyzes the working tree because the
+    // displayed Changes diff is merge-base -> working tree, so uncommitted edits must be in
+    // the impact map too. the fingerprint is taken before the capture so an edit landing in
+    // between makes the snapshot read stale instead of silently current
+    const fingerprint =
+      comparison?.kind === "refs" ? undefined : await fingerprintTree(request.root, this.exclude);
     const target = await captureTree(
       request.root,
-      !comparison || comparison.kind === "working-tree" ? undefined : head,
+      comparison?.kind === "refs" ? head : undefined,
       this.exclude,
     );
     if (target.head !== head)
@@ -212,6 +234,7 @@ export class SnapshotStore {
         owner: request.owner,
         root: target.root,
         identity: target.identity,
+        ...(fingerprint === undefined ? {} : { fingerprint }),
         head,
         base,
         createdAt: new Date().toISOString(),
@@ -293,16 +316,25 @@ export class SnapshotStore {
 
   async freshness(owner: string, root: string, id: string): Promise<boolean> {
     const manifest = await this.manifest(owner, root, id);
-    if (manifest.comparison && manifest.comparison.kind !== "working-tree") {
-      const head = await resolveCommit(root, manifest.comparison.headRef ?? "HEAD");
-      const base = await resolveCommit(root, manifest.comparison.baseRef);
-      const resolvedBase =
-        manifest.comparison.kind === "branch-range"
-          ? (await git(root, ["merge-base", base, head])).trim()
-          : base;
-      return head !== manifest.head || resolvedBase !== manifest.base;
+    const comparison = manifest.comparison;
+    if (comparison?.kind === "refs") {
+      const head = await resolveCommit(root, comparison.headRef ?? "HEAD");
+      return (
+        head !== manifest.head || (await resolveCommit(root, comparison.baseRef)) !== manifest.base
+      );
     }
-    return (await captureTree(root, undefined, this.exclude)).identity !== manifest.identity;
+    if (comparison?.kind === "branch-range") {
+      const head = await resolveCommit(root, "HEAD");
+      if (head !== manifest.head) return true;
+      const base = await resolveCommit(root, comparison.baseRef);
+      if ((await git(root, ["merge-base", base, head])).trim() !== manifest.base) return true;
+    }
+    // a manifest written before fingerprints existed has nothing to compare, so it reads stale
+    // once and the rebuild writes one
+    return (
+      manifest.fingerprint === undefined ||
+      (await fingerprintTree(root, this.exclude)) !== manifest.fingerprint
+    );
   }
 
   async view(
@@ -354,7 +386,10 @@ export class SnapshotStore {
       head: manifest.head,
       base: manifest.base,
       createdAt: manifest.createdAt,
-      stale: checkFreshness ? await this.freshness(owner, root, id) : false,
+      // the snapshot itself is immutable and already validated by manifest() above, so a live
+      // check that fails (the worktree grew past the file cap, a checkpoint ref was garbage
+      // collected) marks it stale instead of turning a read into an RPC error
+      stale: checkFreshness ? await this.freshness(owner, root, id).catch(() => true) : false,
       nodeCount: allNodes.length,
       edgeCount: allEdges.length,
       omittedNodes: allNodes.length - selectedNodes.length,

@@ -131,6 +131,31 @@ describe("immutable task analysis", () => {
     );
   });
 
+  it("analyzes the working tree for branch-range and fingerprints same-size dirty edits", async () => {
+    const { root, store, request } = await fixture();
+    const base = runGit(root, "rev-parse", "HEAD");
+    await NodeFSP.writeFile(NodePath.join(root, "a.ts"), "export const value = 4;\n");
+    runGit(root, "add", ".");
+    runGit(root, "commit", "-qm", "change");
+    await NodeFSP.writeFile(
+      NodePath.join(root, "b.ts"),
+      'import { value } from "./a";\nexport const result = value + 1;\n',
+    );
+    const impact = await store.analyze({
+      ...request,
+      comparison: { kind: "branch-range", baseRef: base, headRef: "HEAD" },
+    });
+    expect(impact.changedFiles).toEqual(["a.ts", "b.ts"]);
+    expect(await store.source(request.owner, root, impact.id, "b.ts", "target")).toContain(
+      "value + 1",
+    );
+    await NodeFSP.writeFile(
+      NodePath.join(root, "b.ts"),
+      'import { value } from "./a";\nexport const result = value + 2;\n',
+    );
+    expect(await store.freshness(request.owner, root, impact.id)).toBe(true);
+  });
+
   it("keeps the server state directory and its own cache out of working-tree captures", async () => {
     const { root, store, request } = await fixture({
       cache: "repo/.state/cartographer",

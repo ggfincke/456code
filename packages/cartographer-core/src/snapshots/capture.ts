@@ -70,34 +70,57 @@ async function excludedPrefixes(root: string, exclude: readonly string[]): Promi
   return prefixes;
 }
 
+const included = (name: string, prefixes: readonly string[]) =>
+  INCLUDED.test(name) &&
+  !EXCLUDED.test(name) &&
+  !prefixes.some((prefix) => name.startsWith(prefix));
+
+interface WorkingTreeListing {
+  readonly root: string;
+  readonly head: string;
+  readonly names: readonly string[];
+}
+
+// the one listing of a working tree. capture and fingerprint both go through it so the files a
+// freshness check stats are exactly the files a capture would read
+async function listWorkingTree(
+  root: string,
+  exclude: readonly string[],
+): Promise<WorkingTreeListing> {
+  root = await NodeFSP.realpath(root);
+  const prefixes = await excludedPrefixes(root, exclude);
+  const head = await resolveCommit(root, "HEAD");
+  const listed = (await git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]))
+    .split("\0")
+    .filter((name) => name && included(name, prefixes));
+  const names = [...new Set(listed)].sort();
+  if (names.length > MAX_FILES) throw new Error(`Analysis exceeds the ${MAX_FILES}-file limit.`);
+  return { root, head, names };
+}
+
 async function readTree(
   root: string,
   ref: string | undefined,
   exclude: readonly string[],
 ): Promise<CapturedTree> {
-  root = await NodeFSP.realpath(root);
-  const prefixes = await excludedPrefixes(root, exclude);
-  const included = (name: string) =>
-    INCLUDED.test(name) &&
-    !EXCLUDED.test(name) &&
-    !prefixes.some((prefix) => name.startsWith(prefix));
-  const head = await resolveCommit(root, ref ?? "HEAD");
   const archived = new Map<string, { oid: string; size: number }>();
+  let head: string;
+  let unique: readonly string[];
   if (ref) {
+    root = await NodeFSP.realpath(root);
+    const prefixes = await excludedPrefixes(root, exclude);
+    head = await resolveCommit(root, ref);
     for (const entry of (await git(root, ["ls-tree", "-r", "-l", "-z", head])).split("\0")) {
       const match = /^(100[0-7]{3}) blob ([a-f0-9]+) +([0-9]+)\t([\s\S]+)$/.exec(entry);
-      if (match && included(match[4]!)) {
+      if (match && included(match[4]!, prefixes)) {
         archived.set(match[4]!, { oid: match[2]!, size: Number(match[3]) });
       }
     }
+    unique = [...archived.keys()].sort();
+    if (unique.length > MAX_FILES) throw new Error(`Analysis exceeds the ${MAX_FILES}-file limit.`);
+  } else {
+    ({ root, head, names: unique } = await listWorkingTree(root, exclude));
   }
-  const names = ref
-    ? [...archived.keys()]
-    : (await git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]))
-        .split("\0")
-        .filter((name) => name && included(name));
-  const unique = [...new Set(names)].sort();
-  if (unique.length > MAX_FILES) throw new Error(`Analysis exceeds the ${MAX_FILES}-file limit.`);
   let archivedBytes: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let archiveOffset = 0;
   if (ref && unique.length) {
@@ -166,6 +189,32 @@ export async function captureTree(
     throw new Error("The worktree changed during capture. Wait for writes to finish and refresh.");
   }
   return first;
+}
+
+// stat-only fingerprint of the working tree: no file content is read, so a freshness check
+// costs one git listing plus one lstat per file instead of re-reading up to 64 MiB twice.
+// the store takes it before captureTree, so an edit racing the capture reads as stale rather
+// than silently current. HEAD is part of it because the capture identity moves with HEAD even
+// when no file does. ctime rides along because cp -p and rsync -t style writes replace
+// content while keeping mtime.
+export async function fingerprintTree(
+  root: string,
+  exclude: readonly string[] = [],
+): Promise<string> {
+  const listing = await listWorkingTree(root, exclude);
+  const entries: (string | number)[][] = [];
+  for (const name of listing.names) {
+    let stat;
+    try {
+      stat = await NodeFSP.lstat(NodePath.join(listing.root, name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (!stat.isFile()) continue;
+    entries.push([name, stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino]);
+  }
+  return digest(JSON.stringify([listing.root, listing.head, entries]));
 }
 
 export async function materialize(tree: CapturedTree, directory: string): Promise<void> {
