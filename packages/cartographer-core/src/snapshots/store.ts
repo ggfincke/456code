@@ -5,6 +5,9 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { diffGraphs } from "../analyze/diff.js";
 import type { CartographerGraph } from "../contracts/types.js";
+import type { MapFile } from "../map/build.js";
+import { ROOT_SCOPE } from "../map/group.js";
+import type { MapScopeLayout } from "../map/layout.js";
 import {
   captureTree,
   digest,
@@ -73,6 +76,25 @@ export interface SnapshotView {
   readonly summary: string;
   readonly coverage: string;
 }
+// one scope of the precomputed map, bound to the generation it was laid out for
+export interface CartographerMapScope extends MapScopeLayout {
+  readonly id: string;
+  readonly root: string;
+  readonly identity: string;
+  readonly createdAt: string;
+}
+// the analysis worker, run out of process so parsing and layout never block the server
+export interface AnalysisWorker {
+  // writes graph.json for a captured tree and, when a map path is given, map.json beside it
+  readonly analyzeTree: (
+    root: string,
+    output: string,
+    identity: string,
+    map?: string,
+  ) => Promise<void>;
+  // lays out one deferred scope of map.json into output, written atomically
+  readonly layoutScope: (map: string, scopeId: string, output: string) => Promise<void>;
+}
 const MAX_NODES = 250;
 const MAX_EDGES = 600;
 const MAX_RESULTS = 100;
@@ -88,16 +110,14 @@ export class SnapshotStore {
   // ids whose directories are still being written; retention never touches them
   private readonly building = new Set<string>();
   readonly cache: string;
-  readonly analyzeTree: (root: string, output: string, identity: string) => Promise<void>;
+  // deferred scope layouts in flight, keyed by generation and scope
+  private readonly layouts = new Map<string, Promise<MapScopeLayout>>();
+  readonly worker: AnalysisWorker;
   // absolute directories kept out of every capture; the cache itself is always one of them
   readonly exclude: readonly string[];
-  constructor(
-    cache: string,
-    analyzeTree: (root: string, output: string, identity: string) => Promise<void>,
-    exclude: readonly string[] = [],
-  ) {
+  constructor(cache: string, worker: AnalysisWorker, exclude: readonly string[] = []) {
     this.cache = cache;
-    this.analyzeTree = analyzeTree;
+    this.worker = worker;
     this.exclude = [cache, ...exclude];
   }
 
@@ -216,12 +236,18 @@ export class SnapshotStore {
       await NodeFSP.mkdir(targetRoot);
       await materialize(target, targetRoot);
       await request.validateCapture?.();
-      await this.analyzeTree(targetRoot, NodePath.join(directory, "graph.json"), target.identity);
+      // only the target side is drawn; the base graph exists for diffing
+      await this.worker.analyzeTree(
+        targetRoot,
+        NodePath.join(directory, "graph.json"),
+        target.identity,
+        NodePath.join(directory, "map.json"),
+      );
       if (before) {
         const baseRoot = NodePath.join(directory, "base");
         await NodeFSP.mkdir(baseRoot);
         await materialize(before, baseRoot);
-        await this.analyzeTree(baseRoot, NodePath.join(directory, "base-graph.json"), base!);
+        await this.worker.analyzeTree(baseRoot, NodePath.join(directory, "base-graph.json"), base!);
       }
       const changedFiles = before
         ? [...new Set([...Object.keys(before.files), ...Object.keys(target.files)])]
@@ -426,6 +452,45 @@ export class SnapshotStore {
       coverage:
         "Static JavaScript and TypeScript imports. Runtime calls and other languages are not inferred.",
     };
+  }
+
+  async mapScope(
+    owner: string,
+    root: string,
+    id: string,
+    scopeId = ROOT_SCOPE,
+  ): Promise<CartographerMapScope> {
+    const manifest = await this.manifest(owner, root, id);
+    const directory = this.directory(owner, id);
+    const mapPath = NodePath.join(directory, "map.json");
+    const map = JSON.parse(await NodeFSP.readFile(mapPath, "utf8")) as MapFile;
+    const bound = (layout: MapScopeLayout): CartographerMapScope => ({
+      id,
+      root: manifest.root,
+      identity: manifest.identity,
+      createdAt: manifest.createdAt,
+      ...layout,
+    });
+    if (Object.hasOwn(map.scopes, scopeId)) return bound(map.scopes[scopeId]!);
+    if (!Object.hasOwn(map.deferred, scopeId)) throw new Error("This scope is not on the map.");
+    // a deferred scope is laid out once per generation and kept beside map.json, so a later
+    // request (or a restarted server) reads it back instead of paying for the layout again
+    const output = NodePath.join(directory, "layouts", `${digest(scopeId)}.json`);
+    const key = `${id}\0${scopeId}`;
+    let pending = this.layouts.get(key);
+    if (!pending) {
+      pending = NodeFSP.readFile(output, "utf8")
+        .catch(async (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          await this.worker.layoutScope(mapPath, scopeId, output);
+          return NodeFSP.readFile(output, "utf8");
+        })
+        .then((text) => JSON.parse(text) as MapScopeLayout)
+        .finally(() => this.layouts.delete(key));
+      this.layouts.set(key, pending);
+    }
+    return bound(await pending);
   }
 
   async source(

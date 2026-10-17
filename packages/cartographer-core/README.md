@@ -13,5 +13,5 @@ Focused checks:
 ```sh
 vp run --filter @t3tools/cartographer-core build
 cd packages/cartographer-core
-vp test run src/analyze/analyzerTruth.test.ts src/analyze/configRules.test.ts src/snapshots/store.test.ts
+vp test run src/analyze/analyzerTruth.test.ts src/analyze/configRules.test.ts src/map/group.test.ts src/snapshots/store.test.ts
 ```

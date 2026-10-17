@@ -7,6 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { buildGraph } from "../analyze/graph.js";
+import { buildMap, layoutDeferredScope, type MapFile } from "../map/build.js";
 import { captureTree, digest } from "./capture.js";
 import { SnapshotStore } from "./store.js";
 
@@ -37,14 +38,21 @@ async function fixture(options: { cache?: string; exclude?: readonly string[] } 
   let fail = false;
   const store = new SnapshotStore(
     NodePath.join(directory, options.cache ?? "cache"),
-    async (source, output, identity) => {
-      if (fail) throw new Error("fixture analysis failure");
-      const graph = await buildGraph({
-        root: source,
-        scope: ".",
-        staticTree: { gitRef: identity },
-      });
-      await NodeFSP.writeFile(output, JSON.stringify(graph));
+    {
+      analyzeTree: async (source, output, identity, map) => {
+        if (fail) throw new Error("fixture analysis failure");
+        const graph = await buildGraph({
+          root: source,
+          scope: ".",
+          staticTree: { gitRef: identity },
+        });
+        await NodeFSP.writeFile(output, JSON.stringify(graph));
+        if (map) await NodeFSP.writeFile(map, JSON.stringify(await buildMap(graph)));
+      },
+      layoutScope: async (map, scopeId, output) => {
+        const file = JSON.parse(await NodeFSP.readFile(map, "utf8")) as MapFile;
+        await NodeFSP.writeFile(output, JSON.stringify(await layoutDeferredScope(file, scopeId)));
+      },
     },
     options.exclude?.map((entry) => NodePath.join(directory, entry)),
   );
@@ -197,6 +205,48 @@ describe("immutable task analysis", () => {
     expect((await store.latest({ ...request, comparison }))?.id).toBe(impact.id);
     expect((await store.latest(request))?.id).toBe(thirdMap.id);
     await expect(store.view(request.owner, root, firstMap.id)).rejects.toThrow();
+  });
+
+  it("writes map.json and serves the root eagerly and deeper scopes on first request", async () => {
+    const { root, store, request } = await fixture();
+    await NodeFSP.mkdir(NodePath.join(root, "lib", "a"), { recursive: true });
+    await NodeFSP.mkdir(NodePath.join(root, "lib", "b"));
+    await NodeFSP.writeFile(NodePath.join(root, "lib", "a", "one.ts"), "export const one = 1;\n");
+    await NodeFSP.writeFile(
+      NodePath.join(root, "lib", "a", "two.ts"),
+      'import { one } from "./one";\nexport const two = one + 1;\n',
+    );
+    await NodeFSP.writeFile(NodePath.join(root, "lib", "b", "one.ts"), "export const b = 1;\n");
+    await NodeFSP.writeFile(NodePath.join(root, "lib", "b", "two.ts"), "export const c = 2;\n");
+    const map = await store.analyze(request);
+    const directory = NodePath.join(store.cache, digest(request.owner), map.id);
+    const file = JSON.parse(
+      await NodeFSP.readFile(NodePath.join(directory, "map.json"), "utf8"),
+    ) as MapFile;
+    expect(Object.keys(file.scopes).sort()).toEqual([".", "lib"]);
+    expect(Object.keys(file.deferred).sort()).toEqual(["lib/a", "lib/b"]);
+    const top = await store.mapScope(request.owner, root, map.id);
+    expect(top).toMatchObject({
+      id: map.id,
+      identity: map.identity,
+      scope: { id: ".", breadcrumb: [] },
+    });
+    expect(top.nodes.map((node) => node.id)).toEqual(["lib", "a.ts", "b.ts"]);
+    expect(top.nodes.every((node) => node.width > 0 && node.height > 0)).toBe(true);
+    expect(top.width).toBeGreaterThan(0);
+    expect(top.edges).toHaveLength(1);
+    expect(top.edges[0]).toMatchObject({ from: "b.ts", to: "a.ts", weight: 1, typeOnly: false });
+    expect(top.edges[0]!.points.length).toBeGreaterThanOrEqual(2);
+    expect(top.totals).toEqual({ children: 3, files: 6, edges: 1 });
+    const deep = await store.mapScope(request.owner, root, map.id, "lib/a");
+    expect(deep.scope.breadcrumb.map((crumb) => crumb.id)).toEqual([".", "lib"]);
+    expect(deep.edges[0]).toMatchObject({ from: "lib/a/two.ts", to: "lib/a/one.ts" });
+    expect(deep.edges[0]!.points.length).toBeGreaterThanOrEqual(2);
+    expect(await NodeFSP.readdir(NodePath.join(directory, "layouts"))).toHaveLength(1);
+    expect(await store.mapScope(request.owner, root, map.id, "lib/a")).toEqual(deep);
+    await expect(store.mapScope(request.owner, root, map.id, "lib/zzz")).rejects.toThrow(
+      "not on the map",
+    );
   });
 
   it("publishes a build even when the owner directory holds a corrupt manifest", async () => {
