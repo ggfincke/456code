@@ -80,8 +80,6 @@ import {
   ProviderSetupError,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
-  type ServerSelfUpdateError,
-  type ServerSelfUpdateProgressEvent,
   type ServerConfig as ClientServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
@@ -199,6 +197,7 @@ import { parseBase64DataUrl } from "./imageMime.ts";
 import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
+import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -508,7 +507,8 @@ function filesystemBrowseFailureContext(error: WorkspaceEntries.WorkspaceEntries
 function projectFileFailureContext(
   error:
     | WorkspaceFileSystem.WorkspaceFileSystemError
-    | WorkspacePaths.WorkspacePathOutsideRootError,
+    | WorkspacePaths.WorkspacePathOutsideRootError
+    | KnownWorkspaces.UnknownWorkspaceError,
 ): {
   readonly failure: ProjectFileFailure;
   readonly resolvedPath?: string;
@@ -518,6 +518,7 @@ function projectFileFailureContext(
 } {
   switch (error._tag) {
     case "WorkspacePathOutsideRootError":
+    case "UnknownWorkspaceError":
       return { failure: "workspace_path_outside_root" };
     case "WorkspaceFileSystemOperationError":
       return {
@@ -2343,28 +2344,7 @@ const layerWsRpc = (
         [WS_METHODS.providerInstallRemove]: (input) => providerInstallation.remove(input),
         [WS_METHODS.serverUpdateServer]: (input) => serverSelfUpdate.update(input),
         [WS_METHODS.serverUpdateServerWithProgress]: (input) =>
-          Stream.callback<ServerSelfUpdateProgressEvent, ServerSelfUpdateError>((queue) =>
-            serverSelfUpdate
-              .update(input, (stage) =>
-                Queue.offer(queue, {
-                  type: "progress",
-                  stage,
-                }).pipe(Effect.asVoid),
-              )
-              .pipe(
-                Effect.flatMap((result) =>
-                  Queue.offer(queue, {
-                    type: "complete",
-                    result,
-                  }),
-                ),
-                Effect.catchTags({
-                  ServerSelfUpdateError: (error) => Queue.fail(queue, error),
-                }),
-                Effect.andThen(Queue.end(queue)),
-                Effect.forkScoped,
-              ),
-          ),
+          ServerSelfUpdate.updateProgressStream(serverSelfUpdate, input),
         [WS_METHODS.serverCommitDesktopUpdate]: (input) =>
           serverSelfUpdate.commitDesktopUpdate(input.requestId),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>

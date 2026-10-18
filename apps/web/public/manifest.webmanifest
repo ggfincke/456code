@@ -1,5 +1,7 @@
 {
   "id": "/",
+  "name": "456code",
+  "short_name": "456code",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

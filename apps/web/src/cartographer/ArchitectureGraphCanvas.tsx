@@ -2,10 +2,8 @@
 // provides graph navigation, geometry, and accessible selection
 import { Maximize2Icon, MinusIcon, PlusIcon } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useId,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -502,33 +500,27 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
     },
   );
   const markerPrefix = `architecture-arrow-${useId().replaceAll(":", "")}`;
-  const layout = useMemo(() => createArchitectureGraphCanvasLayout(props.nodes), [props.nodes]);
+  const layout = createArchitectureGraphCanvasLayout(props.nodes);
   const points = layout.points;
-  const bounds = useMemo(() => architectureCanvasBounds(points), [points]);
-  const sceneIdentity = useMemo(
-    () => props.nodes.map((unit) => `${unit.id}:${unit.position.x}:${unit.position.y}`).join("|"),
-    [props.nodes],
-  );
-  const pointsById = useMemo(
-    () => new Map(points.map((point) => [point.node.id, point] as const)),
-    [points],
-  );
-  const edgeCurves = useMemo(() => {
-    const directedEndpoints = new Set(props.edges.map((edge) => `${edge.from}\0${edge.to}`));
-    return props.edges.flatMap((edge) => {
-      if (
-        props.edgeVisibility === "selection" &&
-        (props.selectedEdgeId !== null
-          ? edge.id !== props.selectedEdgeId
-          : props.selectedNodeId === null ||
-            (edge.from !== props.selectedNodeId && edge.to !== props.selectedNodeId))
-      )
-        return [];
-      const curve = edgeCurve(edge, pointsById, directedEndpoints.has(`${edge.to}\0${edge.from}`));
-      return curve === null ? [] : [curve];
-    });
-  }, [pointsById, props.edges, props.edgeVisibility, props.selectedEdgeId, props.selectedNodeId]);
-  const visibleEdgeIds = useMemo(() => new Set(edgeCurves.map((curve) => curve.id)), [edgeCurves]);
+  const bounds = architectureCanvasBounds(points);
+  const sceneIdentity = props.nodes
+    .map((unit) => `${unit.id}:${unit.position.x}:${unit.position.y}`)
+    .join("|");
+  const pointsById = new Map(points.map((point) => [point.node.id, point] as const));
+  const directedEndpoints = new Set(props.edges.map((edge) => `${edge.from}\0${edge.to}`));
+  const edgeCurves = props.edges.flatMap((edge) => {
+    if (
+      props.edgeVisibility === "selection" &&
+      (props.selectedEdgeId !== null
+        ? edge.id !== props.selectedEdgeId
+        : props.selectedNodeId === null ||
+          (edge.from !== props.selectedNodeId && edge.to !== props.selectedNodeId))
+    )
+      return [];
+    const curve = edgeCurve(edge, pointsById, directedEndpoints.has(`${edge.to}\0${edge.from}`));
+    return curve === null ? [] : [curve];
+  });
+  const visibleEdgeIds = new Set(edgeCurves.map((curve) => curve.id));
   const selectedEdgeId = props.selectedEdgeId;
   const highlightedNodeIds = new Set(props.highlightedNodeIds ?? []);
   const hasVisibleSelectedEdge = selectedEdgeId !== null && visibleEdgeIds.has(selectedEdgeId);
@@ -546,11 +538,9 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
       : (edgeCurves[0]?.id ?? null);
   const inspectedEdgeId = selectedEdgeId ?? focusedEdgeId ?? hoveredEdgeId;
   const inspectedEdge = edgeCurves.find((curve) => curve.id === inspectedEdgeId) ?? null;
-  const outsidePageEdgeCount = useMemo(
-    () =>
-      props.edges.filter((edge) => !pointsById.has(edge.from) || !pointsById.has(edge.to)).length,
-    [pointsById, props.edges],
-  );
+  const outsidePageEdgeCount = props.edges.filter(
+    (edge) => !pointsById.has(edge.from) || !pointsById.has(edge.to),
+  ).length;
   const minimapHeight = clamp(
     (ARCHITECTURE_MINIMAP_WIDTH * bounds.height) / Math.max(1, bounds.width),
     ARCHITECTURE_MINIMAP_MIN_HEIGHT,
@@ -634,6 +624,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
   }, [
     bounds,
     cameraBottomInset,
+    fittedSceneRef,
     pointsById,
     points,
     props.initialFocusNodeId,
@@ -650,61 +641,49 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
     if (viewport.width === 0 || viewport.height === 0 || fittedSceneRef.current !== sceneIdentity)
       return;
     onViewChange?.({ sceneIdentity, camera });
-  }, [camera, onViewChange, sceneIdentity, viewport.height, viewport.width]);
+  }, [camera, fittedSceneRef, onViewChange, sceneIdentity, viewport.height, viewport.width]);
 
-  const updateCamera = useCallback(
-    (update: (current: ArchitectureGraphCanvasCamera) => ArchitectureGraphCanvasCamera): void => {
-      if (viewport.width === 0 || viewport.height === 0) return;
-      setCamera((current) => clampCamera(update(current), bounds, viewport, cameraBottomInset));
-    },
-    [bounds, cameraBottomInset, viewport],
-  );
+  const updateCamera = (
+    update: (current: ArchitectureGraphCanvasCamera) => ArchitectureGraphCanvasCamera,
+  ): void => {
+    if (viewport.width === 0 || viewport.height === 0) return;
+    setCamera((current) => clampCamera(update(current), bounds, viewport, cameraBottomInset));
+  };
 
-  const fitCanvas = useCallback((): void => {
+  const fitCanvas = (): void => {
     if (viewport.width === 0 || viewport.height === 0) return;
     setCamera(fitCamera(bounds, viewport, cameraBottomInset));
-  }, [bounds, cameraBottomInset, viewport]);
+  };
 
-  const zoomAt = useCallback(
-    (scale: number, focalX = viewport.width / 2, focalY = viewport.height / 2): void => {
-      updateCamera((current) => {
-        const nextScale = clamp(
-          scale,
-          ARCHITECTURE_CAMERA_MIN_SCALE,
-          ARCHITECTURE_CAMERA_MAX_SCALE,
-        );
-        const worldX = (focalX - current.translateX) / current.scale;
-        const worldY = (focalY - current.translateY) / current.scale;
-        return {
-          scale: nextScale,
-          translateX: focalX - worldX * nextScale,
-          translateY: focalY - worldY * nextScale,
-        };
-      });
-    },
-    [updateCamera, viewport.height, viewport.width],
-  );
+  const zoomAt = (scale: number, focalX?: number, focalY?: number): void => {
+    const zoomX = focalX === undefined ? viewport.width / 2 : focalX;
+    const zoomY = focalY === undefined ? viewport.height / 2 : focalY;
+    updateCamera((current) => {
+      const nextScale = clamp(scale, ARCHITECTURE_CAMERA_MIN_SCALE, ARCHITECTURE_CAMERA_MAX_SCALE);
+      const worldX = (zoomX - current.translateX) / current.scale;
+      const worldY = (zoomY - current.translateY) / current.scale;
+      return {
+        scale: nextScale,
+        translateX: zoomX - worldX * nextScale,
+        translateY: zoomY - worldY * nextScale,
+      };
+    });
+  };
 
-  const focusWorldPoint = useCallback(
-    (x: number, y: number): void => {
-      updateCamera((current) => ({
-        ...current,
-        translateX: viewport.width / 2 - x * current.scale,
-        translateY: viewport.height / 2 - y * current.scale,
-      }));
-    },
-    [updateCamera, viewport.height, viewport.width],
-  );
+  const focusWorldPoint = (x: number, y: number): void => {
+    updateCamera((current) => ({
+      ...current,
+      translateX: viewport.width / 2 - x * current.scale,
+      translateY: viewport.height / 2 - y * current.scale,
+    }));
+  };
 
-  const activateEdge = useCallback(
-    (curve: ArchitectureGraphCanvasEdgeCurve): void => {
-      const trigger = edgeRefs.current.get(curve.id);
-      if (trigger === undefined) return;
-      trigger.focus();
-      onSelectEdge(curve.edge, trigger);
-    },
-    [onSelectEdge],
-  );
+  const activateEdge = (curve: ArchitectureGraphCanvasEdgeCurve): void => {
+    const trigger = edgeRefs.current.get(curve.id);
+    if (trigger === undefined) return;
+    trigger.focus();
+    onSelectEdge(curve.edge, trigger);
+  };
 
   const focusRelativeNode = (
     event: KeyboardEvent<HTMLButtonElement>,
