@@ -282,6 +282,9 @@ jobs:
           fi
 
       - name: Test
+        # upstream release-note fixtures must not inherit this fork's ci repository
+        env:
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: pingdotgg/t3code
         run: vp run --filter @t3tools/web test --maxWorkers 1
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
