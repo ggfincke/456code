@@ -35,6 +35,12 @@ export interface GroupedScope {
   // counts before the child cap collapsed anything
   readonly totals: { readonly children: number; readonly files: number; readonly edges: number };
 }
+// a scope with the child node that owns each of its files. the overlay needs it to attribute
+// file changes to children; it stays in memory and is never written to map.json
+export interface ScopeMembership {
+  readonly scope: GroupedScope;
+  readonly owner: ReadonlyMap<string, string>;
+}
 
 interface Child {
   id: string;
@@ -118,6 +124,10 @@ function aggregate(edges: readonly ExtractedEdge[], owner: ReadonlyMap<string, s
 }
 
 export function groupScopes(graph: ExtractedGraph): GroupedScope[] {
+  return groupScopeMembership(graph).map((entry) => entry.scope);
+}
+
+export function groupScopeMembership(graph: ExtractedGraph): ScopeMembership[] {
   const packageRoots = new Set(
     graph.files.flatMap((file) => (file.packageRoot ? [file.packageRoot] : [])),
   );
@@ -125,7 +135,7 @@ export function groupScopes(graph: ExtractedGraph): GroupedScope[] {
   const pieces = new Set(graph.files.map((file) => pieceOf(file, outermostFirst)));
   const [onlyPiece] = pieces;
   const singlePackage = pieces.size === 1 && onlyPiece !== undefined && packageRoots.has(onlyPiece);
-  const scopes: GroupedScope[] = [];
+  const scopes: ScopeMembership[] = [];
 
   const visit = (
     id: string,
@@ -176,18 +186,21 @@ export function groupScopes(graph: ExtractedGraph): GroupedScope[] {
       visible.push(more);
     }
     scopes.push({
-      id,
-      label,
-      breadcrumb,
-      nodes: visible.map((child) => ({
-        id: child.id,
-        label: child.label,
-        kind: child.kind,
-        fileCount: child.files.length,
-        drillable: child.kind === "package" || child.kind === "folder",
-      })),
-      edges: collapsed.length ? aggregate(scoped, owner) : full,
-      totals,
+      scope: {
+        id,
+        label,
+        breadcrumb,
+        nodes: visible.map((child) => ({
+          id: child.id,
+          label: child.label,
+          kind: child.kind,
+          fileCount: child.files.length,
+          drillable: child.kind === "package" || child.kind === "folder",
+        })),
+        edges: collapsed.length ? aggregate(scoped, owner) : full,
+        totals,
+      },
+      owner,
     });
     const crumbs = [...breadcrumb, { id, label }];
     for (const child of compressed) {

@@ -1,5 +1,5 @@
 // packages/cartographer-core/src/snapshots/store.test.ts
-// snapshot store behavior: immutability, last-good pointers, exclusion, and retention
+// snapshot store behavior: immutability, last-good pointers, exclusion, retention, map overlays
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
@@ -36,11 +36,13 @@ async function fixture(options: { cache?: string; exclude?: readonly string[] } 
   runGit(root, "add", ".");
   runGit(root, "commit", "-qm", "fixture");
   let fail = false;
+  let analyses = 0;
   const store = new SnapshotStore(
     NodePath.join(directory, options.cache ?? "cache"),
     {
       analyzeTree: async (source, output, identity, map) => {
         if (fail) throw new Error("fixture analysis failure");
+        analyses += 1;
         const graph = await buildGraph({
           root: source,
           scope: ".",
@@ -64,6 +66,7 @@ async function fixture(options: { cache?: string; exclude?: readonly string[] } 
     fail: () => {
       fail = true;
     },
+    analyses: () => analyses,
   };
 }
 
@@ -247,6 +250,61 @@ describe("immutable task analysis", () => {
     await expect(store.mapScope(request.owner, root, map.id, "lib/zzz")).rejects.toThrow(
       "not on the map",
     );
+  });
+
+  it("overlays a comparison on the map and reuses the base graph cached by commit", async () => {
+    const { root, store, request, analyses } = await fixture();
+    const base = runGit(root, "rev-parse", "HEAD");
+    await NodeFSP.writeFile(NodePath.join(root, "a.ts"), "export const value = 2;\n");
+    await NodeFSP.writeFile(
+      NodePath.join(root, "c.ts"),
+      'import { result } from "./b";\nexport const c = result;\n',
+    );
+    const comparison = { kind: "working-tree" as const, baseRef: "HEAD" };
+    const first = await store.analyze({ ...request, comparison });
+    expect(analyses()).toBe(2);
+    const top = await store.mapScope(request.owner, root, first.id);
+    expect(top.overlay).toMatchObject({
+      comparison: { baseIdentity: base, headIdentity: first.identity },
+      changed: [
+        { nodeId: "a.ts", added: 0, modified: 1, removed: 0 },
+        { nodeId: "c.ts", added: 1, modified: 0, removed: 0 },
+      ],
+      links: [{ from: "c.ts", to: "b.ts", change: "added" }],
+    });
+    expect(top.overlay?.links[0]?.points?.length).toBeGreaterThanOrEqual(2);
+    // the overlay is kept beside the deferred layouts and read back on the next request
+    const owner = NodePath.join(store.cache, digest(request.owner));
+    await expect(
+      NodeFSP.access(NodePath.join(owner, first.id, "layouts", "overlay.json")),
+    ).resolves.toBeUndefined();
+    expect(await store.mapScope(request.owner, root, first.id)).toEqual(top);
+    expect(
+      (await store.mapScope(request.owner, root, (await store.analyze(request)).id)).overlay,
+    ).toBeNull();
+
+    // same base commit: the target is analyzed again, the base graph is copied from the cache
+    const cached = NodePath.join(owner, "bases", base, "graph.json");
+    await expect(NodeFSP.access(cached)).resolves.toBeUndefined();
+    const second = await store.analyze({ ...request, comparison });
+    expect(analyses()).toBe(4);
+    expect(second.summary).toContain("1 added files");
+    expect(await store.source(request.owner, root, second.id, "a.ts", "base")).toContain(
+      "value = 1",
+    );
+
+    // the cached graph outlives the generations that name its commit by nothing: retention
+    // keeps the newest two per comparison, so the old base goes with the second generation
+    runGit(root, "add", ".");
+    runGit(root, "commit", "-qm", "move the base");
+    const third = await store.analyze({ ...request, comparison });
+    expect(third.base).not.toBe(base);
+    await expect(NodeFSP.access(cached)).resolves.toBeUndefined();
+    await store.analyze({ ...request, comparison });
+    await expect(NodeFSP.access(cached)).rejects.toThrow();
+    await expect(
+      NodeFSP.access(NodePath.join(owner, "bases", third.base!, "graph.json")),
+    ).resolves.toBeUndefined();
   });
 
   it("publishes a build even when the owner directory holds a corrupt manifest", async () => {

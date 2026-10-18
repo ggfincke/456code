@@ -6,8 +6,15 @@ import * as NodePath from "node:path";
 import { diffGraphs } from "../analyze/diff.js";
 import type { CartographerGraph } from "../contracts/types.js";
 import type { MapFile } from "../map/build.js";
-import { ROOT_SCOPE } from "../map/group.js";
+import { extractGraph } from "../map/extracted.js";
+import { groupScopeMembership, ROOT_SCOPE } from "../map/group.js";
 import type { MapScopeLayout } from "../map/layout.js";
+import {
+  overlayScopes,
+  type OverlayChange,
+  type OverlayLink,
+  type ScopeOverlay,
+} from "../map/overlay.js";
 import {
   captureTree,
   digest,
@@ -76,12 +83,21 @@ export interface SnapshotView {
   readonly summary: string;
   readonly coverage: string;
 }
+// where the comparison lands on one scope: changed children with counts, and links that exist
+// only on the head side (routed by the head layout) or only on the base side (unrouted)
+export interface MapOverlay {
+  readonly comparison: { readonly baseIdentity: string; readonly headIdentity: string };
+  readonly changed: readonly OverlayChange[];
+  readonly links: readonly OverlayLink[];
+}
 // one scope of the precomputed map, bound to the generation it was laid out for
 export interface CartographerMapScope extends MapScopeLayout {
   readonly id: string;
   readonly root: string;
   readonly identity: string;
   readonly createdAt: string;
+  // null for a generation without a base
+  readonly overlay: MapOverlay | null;
 }
 // the analysis worker, run out of process so parsing and layout never block the server
 export interface AnalysisWorker {
@@ -112,6 +128,10 @@ export class SnapshotStore {
   readonly cache: string;
   // deferred scope layouts in flight, keyed by generation and scope
   private readonly layouts = new Map<string, Promise<MapScopeLayout>>();
+  // overlay computations in flight, keyed by generation
+  private readonly overlays = new Map<string, Promise<Record<string, ScopeOverlay>>>();
+  // base commits whose cached graph a running build is about to reference; retention skips them
+  private readonly basesInUse = new Set<string>();
   readonly worker: AnalysisWorker;
   // absolute directories kept out of every capture; the cache itself is always one of them
   readonly exclude: readonly string[];
@@ -124,6 +144,14 @@ export class SnapshotStore {
   private directory(owner: string, id: string): string {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("Invalid analysis resource.");
     return NodePath.join(this.cache, digest(owner), id);
+  }
+
+  // a base commit's graph is the same for every generation that compares against it, so it
+  // is kept once per owner under the resolved sha (a checkpoint ref is reused across runs, a
+  // sha is not) and copied into each generation that needs it
+  private baseGraph(owner: string, sha: string): string {
+    if (!/^[a-f0-9]{40,64}$/.test(sha)) throw new Error("Invalid base commit.");
+    return NodePath.join(this.cache, digest(owner), "bases", sha, "graph.json");
   }
 
   private pointer(request: SnapshotRequest): string {
@@ -230,6 +258,7 @@ export class SnapshotStore {
     const directory = this.directory(request.owner, id);
     await NodeFSP.mkdir(directory, { recursive: true });
     this.building.add(id);
+    if (base) this.basesInUse.add(base);
     let view: SnapshotView;
     try {
       const targetRoot = NodePath.join(directory, "target");
@@ -244,10 +273,22 @@ export class SnapshotStore {
         NodePath.join(directory, "map.json"),
       );
       if (before) {
+        // the base source is still materialized because the old source RPC reads it; only
+        // the analysis is skipped when this base commit's graph is already cached
         const baseRoot = NodePath.join(directory, "base");
         await NodeFSP.mkdir(baseRoot);
         await materialize(before, baseRoot);
-        await this.worker.analyzeTree(baseRoot, NodePath.join(directory, "base-graph.json"), base!);
+        const baseGraph = NodePath.join(directory, "base-graph.json");
+        const cached = this.baseGraph(request.owner, base!);
+        try {
+          await NodeFSP.copyFile(cached, baseGraph);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          await this.worker.analyzeTree(baseRoot, baseGraph, base!);
+          await NodeFSP.mkdir(NodePath.dirname(cached), { recursive: true });
+          await NodeFSP.copyFile(baseGraph, `${cached}.${id}.tmp`);
+          await NodeFSP.rename(`${cached}.${id}.tmp`, cached);
+        }
       }
       const changedFiles = before
         ? [...new Set([...Object.keys(before.files), ...Object.keys(target.files)])]
@@ -291,6 +332,7 @@ export class SnapshotStore {
       throw error;
     } finally {
       this.building.delete(id);
+      if (base) this.basesInUse.delete(base);
     }
     // the build is already published, so retention is best effort: it runs outside the try so
     // it cannot roll the build back, and any failure (unreadable owner dir, a stray non-uuid
@@ -303,11 +345,12 @@ export class SnapshotStore {
 
   // removes older generations sharing this pointer key (root + comparison, as `pointer` hashes
   // it). kept: the newest RETAINED_GENERATIONS, anything a pointer file still names, and
-  // in-flight builds (no manifest yet or still building)
+  // in-flight builds (no manifest yet or still building). a cached base graph goes once no
+  // remaining generation of this owner names its commit
   private async prune(owner: string, key: string): Promise<void> {
     const ownerDirectory = NodePath.join(this.cache, digest(owner));
     const referenced = new Set<string>();
-    const generations: { id: string; createdAt: string }[] = [];
+    const generations: { id: string; createdAt: string; key: string; base: string | null }[] = [];
     for (const entry of await NodeFSP.readdir(ownerDirectory, { withFileTypes: true })) {
       try {
         if (entry.isFile() && entry.name.endsWith(".json")) {
@@ -322,22 +365,42 @@ export class SnapshotStore {
               "utf8",
             ),
           ) as SnapshotManifest;
-          if (
-            manifest.id === entry.name &&
-            JSON.stringify([manifest.root, manifest.comparison]) === key
-          )
-            generations.push({ id: entry.name, createdAt: manifest.createdAt });
+          if (manifest.id === entry.name)
+            generations.push({
+              id: entry.name,
+              createdAt: manifest.createdAt,
+              key: JSON.stringify([manifest.root, manifest.comparison]),
+              base: manifest.base,
+            });
         }
       } catch {
         // an entry that cannot be read or parsed (half-written pointer, corrupt or missing
         // manifest, foreign file) is simply not a retention candidate; skipping keeps it intact
       }
     }
-    generations.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    for (const { id } of generations.slice(RETAINED_GENERATIONS)) {
+    const candidates = generations
+      .filter((generation) => generation.key === key)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const removed = new Set<string>();
+    for (const { id } of candidates.slice(RETAINED_GENERATIONS)) {
       if (referenced.has(id)) continue;
       await NodeFSP.rm(this.directory(owner, id), { recursive: true, force: true });
+      removed.add(id);
     }
+    const bases = new Set(this.basesInUse);
+    for (const generation of generations)
+      if (generation.base && !removed.has(generation.id)) bases.add(generation.base);
+    const basesDirectory = NodePath.join(ownerDirectory, "bases");
+    let cached: string[];
+    try {
+      cached = await NodeFSP.readdir(basesDirectory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const sha of cached)
+      if (!bases.has(sha))
+        await NodeFSP.rm(NodePath.join(basesDirectory, sha), { recursive: true, force: true });
   }
 
   async freshness(owner: string, root: string, id: string): Promise<boolean> {
@@ -464,12 +527,13 @@ export class SnapshotStore {
     const directory = this.directory(owner, id);
     const mapPath = NodePath.join(directory, "map.json");
     const map = JSON.parse(await NodeFSP.readFile(mapPath, "utf8")) as MapFile;
-    const bound = (layout: MapScopeLayout): CartographerMapScope => ({
+    const bound = async (layout: MapScopeLayout): Promise<CartographerMapScope> => ({
       id,
       root: manifest.root,
       identity: manifest.identity,
       createdAt: manifest.createdAt,
       ...layout,
+      overlay: manifest.base ? await this.overlay(directory, manifest, layout) : null,
     });
     if (Object.hasOwn(map.scopes, scopeId)) return bound(map.scopes[scopeId]!);
     if (!Object.hasOwn(map.deferred, scopeId)) throw new Error("This scope is not on the map.");
@@ -491,6 +555,55 @@ export class SnapshotStore {
       this.layouts.set(key, pending);
     }
     return bound(await pending);
+  }
+
+  // the overlay for every scope is one diff of the two grouped trees, so it is computed once
+  // per generation and kept beside the deferred layouts. added links take their route from the
+  // head layout at read time; a removed link has no route and is left without points
+  private async overlay(
+    directory: string,
+    manifest: SnapshotManifest,
+    layout: MapScopeLayout,
+  ): Promise<MapOverlay> {
+    const output = NodePath.join(directory, "layouts", "overlay.json");
+    let pending = this.overlays.get(manifest.id);
+    if (!pending) {
+      pending = NodeFSP.readFile(output, "utf8")
+        .catch(async (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+          const read = async (name: string) =>
+            groupScopeMembership(
+              extractGraph(
+                JSON.parse(
+                  await NodeFSP.readFile(NodePath.join(directory, name), "utf8"),
+                ) as CartographerGraph,
+              ),
+            );
+          const overlays = overlayScopes(
+            await read("graph.json"),
+            await read("base-graph.json"),
+            manifest.changedFiles,
+          );
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          const temporary = `${output}.${process.pid}.tmp`;
+          await NodeFSP.writeFile(temporary, JSON.stringify(overlays), { flag: "wx" });
+          await NodeFSP.rename(temporary, output);
+          return JSON.stringify(overlays);
+        })
+        .then((text) => JSON.parse(text) as Record<string, ScopeOverlay>)
+        .finally(() => this.overlays.delete(manifest.id));
+      this.overlays.set(manifest.id, pending);
+    }
+    const scoped = (await pending)[layout.scope.id] ?? { changed: [], links: [] };
+    const routes = new Map(layout.edges.map((edge) => [`${edge.from}\0${edge.to}`, edge.points]));
+    return {
+      comparison: { baseIdentity: manifest.base!, headIdentity: manifest.identity },
+      changed: scoped.changed,
+      links: scoped.links.map((link) => {
+        const points = link.change === "added" ? routes.get(`${link.from}\0${link.to}`) : undefined;
+        return points ? { ...link, points } : link;
+      }),
+    };
   }
 
   async source(
