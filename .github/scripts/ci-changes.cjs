@@ -1,3 +1,5 @@
+// .github/scripts/ci-changes.cjs
+// routes changed paths to their owning quality jobs
 // Decides which CI jobs a change needs. Prints `key=value` lines for
 // $GITHUB_OUTPUT; a job runs unless its key is "false".
 //
@@ -31,6 +33,9 @@ const RUNS_EVERYTHING = [
 // Paths outside a package, or files inside one that other packages read
 // through relative imports rather than a package.json dependency.
 const EXTRA_OWNERS = [
+  // root regressions run through their owning app's vite config
+  [/^tests\/apps\/server\//, ["t3"]],
+  [/^tests\/apps\/web\//, ["@t3tools/web"]],
   // Vite configs and tsconfigs of these apps import scripts/lib directly.
   [/^scripts\/lib\//, ["@t3tools/desktop", "@t3tools/mobile", "@t3tools/web", "t3"]],
   // scripts/build-desktop-artifact.ts reads the GNOME extension manifest.
