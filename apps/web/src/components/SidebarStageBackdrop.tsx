@@ -1,3 +1,5 @@
+// apps/web/src/components/SidebarStageBackdrop.tsx
+// renders stage artwork and environment identification
 import { useAtomValue } from "@effect/atom-react";
 import { useId } from "react";
 import { FinckeWaveArt } from "../fincke/FinckeWaveArt";
@@ -41,7 +43,7 @@ export function useEnvironmentStageLabel(): string {
   });
 }
 
-export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBackdropVariant | null {
+export function getSidebarStageBackdropVariant(enabled = true): SidebarStageBackdropVariant | null {
   return enabled ? "fincke" : null;
 }
 

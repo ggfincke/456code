@@ -7,7 +7,7 @@ import type {
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { useAtomCommand } from "../state/use-atom-command";
 import { formatEnvironmentQueryError } from "../state/query";
@@ -55,45 +55,43 @@ export default function CartographerPanel({
   const detailRequest = useRef(0);
   const displayedId = useRef<string | undefined>(undefined);
   const { environmentId, threadId } = threadRef;
-  const load = useCallback(
-    async (refresh = false, search = "", prepare = false) => {
-      const token = ++request.current;
-      if (!canRead || (refresh && mode === "map" && !canAnalyze)) {
-        setBusy(false);
-        setError(
-          canRead
-            ? "This connection cannot analyze repositories."
-            : "This connection cannot read repository analyses.",
-        );
-        return;
-      }
-      setBusy(true);
-      setError(null);
-      let result =
-        refresh && mode === "map"
-          ? await analyze({ environmentId, input: { threadId } })
-          : await get({ environmentId, input: { threadId, mode, query: search } });
-      if (token !== request.current) return;
-      if (result._tag === "Success" && !result.value && mode === "map" && prepare && canAnalyze) {
-        result = await analyze({ environmentId, input: { threadId } });
-      }
-      if (token !== request.current) return;
-      if (result._tag === "Success") {
-        if (displayedId.current !== result.value?.id) {
-          displayedId.current = result.value?.id;
-          detailRequest.current++;
-          setSelected(null);
-          setEvidence(null);
-          setSourceView(null);
-        }
-        setView(result.value);
-      } else setError(formatEnvironmentQueryError(result.cause));
+  const load = async (refresh = false, search = "", prepare = false) => {
+    const token = ++request.current;
+    if (!canRead || (refresh && mode === "map" && !canAnalyze)) {
       setBusy(false);
-    },
-    [analyze, get, environmentId, threadId, mode, canRead, canAnalyze],
-  );
+      setError(
+        canRead
+          ? "This connection cannot analyze repositories."
+          : "This connection cannot read repository analyses.",
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    let result =
+      refresh && mode === "map"
+        ? await analyze({ environmentId, input: { threadId } })
+        : await get({ environmentId, input: { threadId, mode, query: search } });
+    if (token !== request.current) return;
+    if (result._tag === "Success" && !result.value && mode === "map" && prepare && canAnalyze) {
+      result = await analyze({ environmentId, input: { threadId } });
+    }
+    if (token !== request.current) return;
+    if (result._tag === "Success") {
+      if (displayedId.current !== result.value?.id) {
+        displayedId.current = result.value?.id;
+        detailRequest.current++;
+        setSelected(null);
+        setEvidence(null);
+        setSourceView(null);
+      }
+      setView(result.value);
+    } else setError(formatEnvironmentQueryError(result.cause));
+    setBusy(false);
+  };
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- the external analysis request marks pending and clears errors before its response arrives.
     void load(false, "", true);
     const checkFreshness = () => {
       void load();
@@ -134,42 +132,34 @@ export default function CartographerPanel({
     if (result._tag === "Success") setSourceView({ file: selected, side, content: result.value });
     else setError(formatEnvironmentQueryError(result.cause));
   };
-  const nodes = useMemo(
-    () =>
-      (view?.nodes ?? []).map((node, i) => ({
-        id: node.id,
-        label: node.label,
-        description: node.id,
-        badgeLabel: node.change === "unchanged" ? node.group : node.change,
-        footerLabels: [],
-        position: { x: (i % 4) * 255, y: Math.floor(i / 4) * 112 },
-        tintKey: node.group,
-        tone:
-          node.change === "changed"
-            ? ("affected" as const)
-            : node.change === "unchanged"
-              ? ("identity" as const)
-              : node.change,
-        stroke: "solid" as const,
-        ariaLabel: `Inspect ${node.id}`,
-      })),
-    [view],
-  );
-  const edges = useMemo(
-    () =>
-      (view?.edges ?? []).map((edge) => ({
-        id: edge.id,
-        from: edge.from,
-        to: edge.to,
-        weight: 1,
-        label: edge.symbols.join(", ") || "imports",
-        tone: edge.change === "unchanged" ? ("context" as const) : edge.change,
-        stroke: edge.typeOnly ? ("dashed" as const) : ("solid" as const),
-        showBadge: false,
-        ariaLabel: `${edge.from} imports ${edge.symbols.join(", ") || "from"} ${edge.to}`,
-      })),
-    [view],
-  );
+  const nodes = (view?.nodes ?? []).map((node, i) => ({
+    id: node.id,
+    label: node.label,
+    description: node.id,
+    badgeLabel: node.change === "unchanged" ? node.group : node.change,
+    footerLabels: [],
+    position: { x: (i % 4) * 255, y: Math.floor(i / 4) * 112 },
+    tintKey: node.group,
+    tone:
+      node.change === "changed"
+        ? ("affected" as const)
+        : node.change === "unchanged"
+          ? ("identity" as const)
+          : node.change,
+    stroke: "solid" as const,
+    ariaLabel: `Inspect ${node.id}`,
+  }));
+  const edges = (view?.edges ?? []).map((edge) => ({
+    id: edge.id,
+    from: edge.from,
+    to: edge.to,
+    weight: 1,
+    label: edge.symbols.join(", ") || "imports",
+    tone: edge.change === "unchanged" ? ("context" as const) : edge.change,
+    stroke: edge.typeOnly ? ("dashed" as const) : ("solid" as const),
+    showBadge: false,
+    ariaLabel: `${edge.from} imports ${edge.symbols.join(", ") || "from"} ${edge.to}`,
+  }));
   const back = () => {
     detailRequest.current++;
     setSourceView(null);
