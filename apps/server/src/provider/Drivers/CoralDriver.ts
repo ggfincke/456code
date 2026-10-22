@@ -88,123 +88,125 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
   },
   configSchema: CoralSettings,
   defaultConfig: (): CoralSettings => decodeCoralSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
-      const crypto = yield* Crypto.Crypto;
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const httpClient = yield* HttpClient.HttpClient;
-      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
-      const selfInvocation = yield* resolveSelfInvocation();
-      const effectiveConfig = { ...config, enabled } satisfies CoralSettings;
-      const processEnv = buildCoralAcpEnvironment(
-        effectiveConfig,
-        yield* mergeProviderInstanceEnvironment(environment),
-        yield* HostProcess.HomeDirectory,
-      );
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: DRIVER_KIND,
-        instanceId,
-      });
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
-      // metadata probes and bound sessions share the last known model inventory
-      const sessionModelsRef = yield* Ref.make<ReadonlyArray<ServerProviderModel>>([]);
-      const snapshotPublisherRef = yield* Ref.make<{
-        readonly getSnapshot: Effect.Effect<ServerProvider>;
-        readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
-      } | null>(null);
-      const orchestrationAdapter = yield* makeCoralAdapter(effectiveConfig, {
-        selfInvocation,
-        environment: processEnv,
-        instanceId,
-        onSessionSetup: (sessionSetupResult) =>
-          Effect.gen(function* () {
-            const sessionModels = coralProviderModelsFromSessionSetup(sessionSetupResult);
-            if (sessionModels.length === 0) return;
-            yield* Ref.set(sessionModelsRef, sessionModels);
-            const publisher = yield* Ref.get(snapshotPublisherRef);
-            if (publisher === null) return;
-            const currentSnapshot = yield* publisher.getSnapshot;
-            yield* publisher.publishSnapshot(currentSnapshot);
-          }),
-      });
-      const textGeneration = yield* makeCoralTextGeneration(effectiveConfig, processEnv);
-      const checkProvider = Ref.get(sessionModelsRef).pipe(
-        Effect.flatMap((models) => checkCoralProviderStatus(effectiveConfig, processEnv, models)),
-        Effect.tap((draft) => Ref.set(sessionModelsRef, draft.models)),
-        Effect.flatMap((draft) =>
-          Ref.get(sessionModelsRef).pipe(
-            Effect.map((sessionModels) =>
-              stampIdentity(overlayCoralSessionModels(draft, sessionModels)),
-            ),
+  create: Effect.fn("CoralDriver.create")(function* ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    enabled,
+    config,
+  }) {
+    const crypto = yield* Crypto.Crypto;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const httpClient = yield* HttpClient.HttpClient;
+    const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+    const selfInvocation = yield* resolveSelfInvocation();
+    const effectiveConfig = { ...config, enabled } satisfies CoralSettings;
+    const processEnv = buildCoralAcpEnvironment(
+      effectiveConfig,
+      yield* mergeProviderInstanceEnvironment(environment),
+      yield* HostProcess.HomeDirectory,
+    );
+    const continuationIdentity = defaultProviderContinuationIdentity({
+      driverKind: DRIVER_KIND,
+      instanceId,
+    });
+    const stampIdentity = withInstanceIdentity({
+      instanceId,
+      displayName,
+      accentColor,
+      continuationGroupKey: continuationIdentity.continuationKey,
+    });
+    // metadata probes and bound sessions share the last known model inventory
+    const sessionModelsRef = yield* Ref.make<ReadonlyArray<ServerProviderModel>>([]);
+    const snapshotPublisherRef = yield* Ref.make<{
+      readonly getSnapshot: Effect.Effect<ServerProvider>;
+      readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
+    } | null>(null);
+    const orchestrationAdapter = yield* makeCoralAdapter(effectiveConfig, {
+      selfInvocation,
+      environment: processEnv,
+      instanceId,
+      onSessionSetup: Effect.fn("CoralDriver.onSessionSetup")(function* (sessionSetupResult) {
+        const sessionModels = coralProviderModelsFromSessionSetup(sessionSetupResult);
+        if (sessionModels.length === 0) return;
+        yield* Ref.set(sessionModelsRef, sessionModels);
+        const publisher = yield* Ref.get(snapshotPublisherRef);
+        if (publisher === null) return;
+        const currentSnapshot = yield* publisher.getSnapshot;
+        yield* publisher.publishSnapshot(currentSnapshot);
+      }),
+    });
+    const textGeneration = yield* makeCoralTextGeneration(effectiveConfig, processEnv);
+    const checkProvider = Ref.get(sessionModelsRef).pipe(
+      Effect.flatMap((models) => checkCoralProviderStatus(effectiveConfig, processEnv, models)),
+      Effect.tap((draft) => Ref.set(sessionModelsRef, draft.models)),
+      Effect.flatMap((draft) =>
+        Ref.get(sessionModelsRef).pipe(
+          Effect.map((sessionModels) =>
+            stampIdentity(overlayCoralSessionModels(draft, sessionModels)),
           ),
         ),
-        Effect.provideService(HttpClient.HttpClient, httpClient),
-        Effect.provideService(Crypto.Crypto, crypto),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      );
-      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
-      const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CoralSettings>>({
-        resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
-        getSettings: snapshotSettings.getSettings,
-        streamSettings: snapshotSettings.streamSettings,
-        haveSettingsChanged: haveProviderSnapshotSettingsChanged,
-        initialSnapshot: (settings) =>
-          buildInitialCoralProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
-        checkProvider,
-        enrichSnapshot: ({ settings, snapshot: currentSnapshot, getSnapshot, publishSnapshot }) => {
-          const publishWithSessionModels = (nextSnapshot: ServerProvider) =>
-            Ref.get(sessionModelsRef).pipe(
-              Effect.flatMap((sessionModels) =>
-                publishSnapshot(overlayCoralSessionModels(nextSnapshot, sessionModels)),
-              ),
-            );
-          return Ref.set(snapshotPublisherRef, {
-            getSnapshot,
-            publishSnapshot: publishWithSessionModels,
-          }).pipe(
-            Effect.andThen(
-              enrichCoralSnapshot({
-                snapshot: currentSnapshot,
-                maintenanceCapabilities: MAINTENANCE_CAPABILITIES,
-                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-                publishSnapshot: publishWithSessionModels,
-                httpClient,
-              }).pipe(
-                Effect.provideService(
-                  ProviderLatestVersions.ProviderLatestVersions,
-                  latestVersions,
-                ),
-              ),
+      ),
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      Effect.provideService(Crypto.Crypto, crypto),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
+    const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
+    const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CoralSettings>>({
+      resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
+      getSettings: snapshotSettings.getSettings,
+      streamSettings: snapshotSettings.streamSettings,
+      haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+      initialSnapshot: (settings) =>
+        buildInitialCoralProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
+      checkProvider,
+      enrichSnapshot: ({ settings, snapshot: currentSnapshot, getSnapshot, publishSnapshot }) => {
+        const publishWithSessionModels = (nextSnapshot: ServerProvider) =>
+          Ref.get(sessionModelsRef).pipe(
+            Effect.flatMap((sessionModels) =>
+              publishSnapshot(overlayCoralSessionModels(nextSnapshot, sessionModels)),
             ),
           );
-        },
-      }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderDriverError({
-              driver: DRIVER_KIND,
-              instanceId,
-              detail: `Failed to build Coral snapshot: ${cause.message ?? String(cause)}`,
-              cause,
-            }),
-        ),
-      );
+        return Ref.set(snapshotPublisherRef, {
+          getSnapshot,
+          publishSnapshot: publishWithSessionModels,
+        }).pipe(
+          Effect.andThen(
+            enrichCoralSnapshot({
+              snapshot: currentSnapshot,
+              maintenanceCapabilities: MAINTENANCE_CAPABILITIES,
+              enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+              publishSnapshot: publishWithSessionModels,
+              httpClient,
+            }).pipe(
+              Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
+            ),
+          ),
+        );
+      },
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER_KIND,
+            instanceId,
+            detail: `Failed to build Coral snapshot: ${cause.message ?? String(cause)}`,
+            cause,
+          }),
+      ),
+    );
 
-      return {
-        instanceId,
-        driverKind: DRIVER_KIND,
-        continuationIdentity,
-        displayName,
-        accentColor,
-        enabled,
-        snapshot,
-        orchestrationAdapter,
-        textGeneration,
-      } satisfies ProviderInstance;
-    }),
+    return {
+      instanceId,
+      driverKind: DRIVER_KIND,
+      continuationIdentity,
+      displayName,
+      accentColor,
+      enabled,
+      snapshot,
+      orchestrationAdapter,
+      textGeneration,
+    } satisfies ProviderInstance;
+  }),
 };

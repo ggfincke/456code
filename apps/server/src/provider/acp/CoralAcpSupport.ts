@@ -92,66 +92,64 @@ export function applyCoralAcpRuntimeMode<E>(input: {
     .pipe(Effect.mapError(input.mapError), Effect.asVoid);
 }
 
-export const makeCoralAcpRuntime = (
+export const makeCoralAcpRuntime = Effect.fn("CoralAcpSupport.makeRuntime")(function* (
   input: CoralAcpRuntimeInput,
-): Effect.Effect<
+): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
   Crypto.Crypto | Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const acpContext = yield* Layer.build(
-      AcpSessionRuntime.layer({
-        ...input,
-        authenticateOnAuthRequired: false,
-        clientCapabilities: {},
-        resumeMethod: "resume",
-        cancelBehavior: "wait-for-prompt",
-        spawn: buildCoralAcpSpawnInput(
-          input.coralSettings,
-          input.cwd,
-          input.environment,
-          input.model,
-        ),
-      }).pipe(
-        Layer.provide(
-          Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
-        ),
+> {
+  const acpContext = yield* Layer.build(
+    AcpSessionRuntime.layer({
+      ...input,
+      authenticateOnAuthRequired: false,
+      clientCapabilities: {},
+      resumeMethod: "resume",
+      cancelBehavior: "wait-for-prompt",
+      spawn: buildCoralAcpSpawnInput(
+        input.coralSettings,
+        input.cwd,
+        input.environment,
+        input.model,
       ),
-    );
-    const runtime = yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
-      Effect.provide(acpContext),
-    );
-    return {
-      ...runtime,
-      handleElicitation: () =>
-        runtime.handleElicitation(() => Effect.succeed({ action: "decline" })),
-      start: () =>
-        runtime.initialize().pipe(
-          Effect.flatMap((initialized) => {
-            if (
-              (initialized.protocolVersion !== 1 && initialized.protocolVersion !== 2) ||
-              !initialized.agentCapabilities?.sessionCapabilities?.resume
-            ) {
-              return Effect.fail(
-                new EffectAcpErrors.AcpTransportError({
-                  detail: "Coral requires ACP with native session resume.",
-                  cause: undefined,
-                }),
-              );
-            }
-            if ((initialized.authMethods?.length ?? 0) > 0) {
-              return Effect.fail(
-                EffectAcpErrors.AcpRequestError.authRequired(
-                  "This Coral agent requires authentication, which the Coral integration does not support.",
-                ),
-              );
-            }
-            return runtime.start();
-          }),
-        ),
-    };
-  });
+    }).pipe(
+      Layer.provide(
+        Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
+      ),
+    ),
+  );
+  const runtime = yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
+    Effect.provide(acpContext),
+  );
+  return {
+    ...runtime,
+    handleElicitation: () => runtime.handleElicitation(() => Effect.succeed({ action: "decline" })),
+    start: () =>
+      runtime.initialize().pipe(
+        Effect.flatMap((initialized) => {
+          if (
+            (initialized.protocolVersion !== 1 && initialized.protocolVersion !== 2) ||
+            !initialized.agentCapabilities?.sessionCapabilities?.resume
+          ) {
+            return Effect.fail(
+              new EffectAcpErrors.AcpTransportError({
+                detail: "Coral requires ACP with native session resume.",
+                cause: undefined,
+              }),
+            );
+          }
+          if ((initialized.authMethods?.length ?? 0) > 0) {
+            return Effect.fail(
+              EffectAcpErrors.AcpRequestError.authRequired(
+                "This Coral agent requires authentication, which the Coral integration does not support.",
+              ),
+            );
+          }
+          return runtime.start();
+        }),
+      ),
+  };
+});
 
 function flattenSelectOptions(
   option: EffectAcpSchema.SessionConfigOption,
