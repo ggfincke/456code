@@ -113,17 +113,14 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
 );
 
-it.effect(
-  "times out an unresponsive probe and releases its process",
-  () =>
-    Effect.gen(function* () {
-      const f = yield* fixture("hang");
-      const result = yield* f.check();
-      expect(result.status).toBe("error");
-      expect(result.message).toContain("timed out");
-      expect(f.requests).toEqual([]);
-      const pid = Number(yield* f.pid);
-      expect(() => process.kill(pid, 0)).toThrow();
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
-  15_000,
+it.effect("times out an unresponsive probe and releases its process", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture("hang");
+    const result = yield* f.check();
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("timed out");
+    expect(f.requests).toEqual([]);
+    const pid = Number(yield* f.pid);
+    expect(() => process.kill(pid, 0)).toThrow();
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
 );
