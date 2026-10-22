@@ -36,6 +36,7 @@ import {
   isProjectFaviconPath,
   PROJECT_FAVICON_FALLBACK_MARKER,
 } from "@t3tools/shared/projectFavicon";
+import { isNetworkPath } from "@t3tools/shared/path";
 import { MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH, toolOutputImages } from "@t3tools/shared/toolOutput";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
@@ -60,6 +61,7 @@ import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { extractIcnsPng } from "./icns.ts";
@@ -349,17 +351,36 @@ const readImageDimensionsFromHeader = (filePath: string) =>
 const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMediaFileAsset")(
   function* (input: {
     readonly requestedPath: string;
+    readonly workspaceRoot: string | undefined;
     readonly resource: AssetResource;
     readonly expiresAt: number;
   }) {
     const path = yield* Path.Path;
-    const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
+    // Resolving a network path makes Windows sign in to its host with the
+    // user's NTLM credentials, so only the thread's own project may be on a share.
+    // Windows reads a `\\?\` path as written, `..` included, so the lookup gets
+    // the resolved path this check approved.
+    const requestedPath = path.resolve(input.requestedPath);
+    if (
+      isNetworkPath(input.requestedPath) &&
+      (input.workspaceRoot === undefined ||
+        !isWithinRoot(path, requestedPath, path.resolve(input.workspaceRoot)))
+    ) {
+      return yield* new AssetWorkspaceAssetNotFoundError({
+        resource: input.resource,
+        checkedPath: input.requestedPath,
+      });
+    }
+    const canonicalFile = yield* resolveCanonicalFile(requestedPath).pipe(
       Effect.mapError(
         (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
       ),
     );
     if (!canonicalFile) {
-      return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
+      return yield* new AssetWorkspaceAssetNotFoundError({
+        resource: input.resource,
+        checkedPath: input.requestedPath,
+      });
     }
     if (hostPreviewMimeTypeFromExtension(path.extname(canonicalFile)) === null) {
       return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
@@ -385,7 +406,10 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
       ),
     );
     if (!opened) {
-      return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
+      return yield* new AssetWorkspaceAssetNotFoundError({
+        resource: input.resource,
+        checkedPath: input.requestedPath,
+      });
     }
     return {
       claims: {
@@ -487,7 +511,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly resource: AssetResource;
   readonly workspaceRoot?: string;
   readonly projectFaviconPath?: string;
-  readonly projectCheckoutPending?: boolean;
+  /** Where a cloned project's checkout stands, while the clone tracker still knows it. */
+  readonly projectCheckout?: "pending" | "cloned";
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -517,6 +542,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       }
       const finalized = yield* finalizeAbsoluteMediaFileAsset({
         requestedPath,
+        workspaceRoot: input.workspaceRoot,
         resource: input.resource,
         expiresAt,
       });
@@ -553,9 +579,13 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     }
     case "draft-workspace-file": {
       const draftWorkspaceRoot = input.workspaceRoot ?? input.resource.cwd;
-      if (path.isAbsolute(input.resource.path)) {
+      const hostPath = input.resource.path.startsWith("~/")
+        ? expandHomePath(input.resource.path, yield* HostProcess.HomeDirectory)
+        : input.resource.path;
+      if (path.isAbsolute(hostPath)) {
         const finalized = yield* finalizeAbsoluteMediaFileAsset({
-          requestedPath: input.resource.path,
+          requestedPath: hostPath,
+          workspaceRoot: draftWorkspaceRoot,
           resource: input.resource,
           expiresAt,
         });
@@ -639,19 +669,22 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       );
       const faviconResolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
       // A lookup in a half-cloned checkout would cache a miss that outlives the clone.
-      const faviconPath = input.projectCheckoutPending
-        ? null
-        : yield* faviconResolver
-            .resolvePath(workspaceRoot, input.projectFaviconPath ?? undefined)
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new AssetProjectFaviconResolutionError({
-                    resource: input.resource,
-                    cause,
-                  }),
-              ),
-            );
+      // Once it lands, a miss cached before (by enrichment) is stale too.
+      if (input.projectCheckout === "cloned") yield* faviconResolver.invalidate(workspaceRoot);
+      const faviconPath =
+        input.projectCheckout === "pending"
+          ? null
+          : yield* faviconResolver
+              .resolvePath(workspaceRoot, input.projectFaviconPath ?? undefined)
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new AssetProjectFaviconResolutionError({
+                      resource: input.resource,
+                      cause,
+                    }),
+                ),
+              );
       const isExternalOverride =
         faviconPath !== null &&
         input.projectFaviconPath !== undefined &&
