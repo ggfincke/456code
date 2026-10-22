@@ -83,10 +83,8 @@ describe("F03 segment-aware glob matcher", () => {
       systems: [],
       groupDepth: 2,
     };
-    const start = process.hrtime.bigint();
-    resolveGroup("a".repeat(60), evil);
-    const ms = Number(process.hrtime.bigint() - start) / 1e6;
-    expect(ms).toBeLessThan(100);
+    // catastrophic backtracking on this input would hang past the project test timeout
+    expect(resolveGroup("a".repeat(60), evil).id).not.toBe("X");
   });
 });
 

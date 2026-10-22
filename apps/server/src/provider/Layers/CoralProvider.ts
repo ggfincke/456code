@@ -76,10 +76,8 @@ export function overlayCoralSessionModels<
   return { ...snapshot, models: sessionModels };
 }
 
-export function buildInitialCoralProviderSnapshot(
-  coralSettings: CoralSettings,
-): Effect.Effect<ServerProviderDraft> {
-  return Effect.gen(function* () {
+export const buildInitialCoralProviderSnapshot = Effect.fn("CoralProvider.buildInitialSnapshot")(
+  function* (coralSettings: CoralSettings): Effect.fn.Return<ServerProviderDraft> {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
     if (!coralSettings.enabled) {
       return buildServerProvider({
@@ -110,8 +108,8 @@ export function buildInitialCoralProviderSnapshot(
         message: "Checking Coral CLI availability...",
       },
     });
-  });
-}
+  },
+);
 
 const OllamaModels = Schema.Struct({
   models: Schema.Array(

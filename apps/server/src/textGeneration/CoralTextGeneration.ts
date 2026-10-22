@@ -42,10 +42,10 @@ export const makeCoralTextGeneration = Effect.fn("makeCoralTextGeneration")(func
     yield* HostProcess.HomeDirectory,
   );
 
-  const runCoralJson = <S extends Schema.Top>(
-    input: TextGenerationOperations.Request<S>,
-  ): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
-    Effect.gen(function* () {
+  const runCoralJson = Effect.fn("CoralTextGeneration.runJson")(
+    function* <S extends Schema.Top>(
+      input: TextGenerationOperations.Request<S>,
+    ): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
       if ((input.attachments?.length ?? 0) > 0) {
         return yield* new TextGenerationError({
           operation: input.operation,
@@ -184,18 +184,21 @@ export const makeCoralTextGeneration = Effect.fn("makeCoralTextGeneration")(func
             }),
         ),
       );
-    }).pipe(
-      Effect.mapError((cause) =>
-        isTextGenerationError(cause)
-          ? cause
-          : new TextGenerationError({
-              operation: input.operation,
-              detail: "Coral text generation failed.",
-              cause,
-            }),
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.mapError((cause) =>
+          isTextGenerationError(cause)
+            ? cause
+            : new TextGenerationError({
+                operation: input.operation,
+                detail: "Coral text generation failed.",
+                cause,
+              }),
+        ),
+        Effect.scoped,
       ),
-      Effect.scoped,
-    );
+  );
 
   return TextGenerationOperations.fromRunner(
     "CoralTextGeneration",

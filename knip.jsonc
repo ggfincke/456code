@@ -13,15 +13,22 @@
       "entry": [".coderabbit.config.ts"],
     },
     "scripts": {
-      // knip loads its preprocessor through a cli option; these other helpers
-      // run directly for native checks, worktree setup, branding, and local packaging
+      // knip loads its preprocessor through a cli option; these other helpers run directly
+      // for native checks, worktree setup, branding, and local packaging. electron-builder
+      // loads the macOS signer by path. the release helpers stay for upstream parity even
+      // though this fork drops the release workflows that call them.
       "entry": [
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
         "apply-web-brand-assets.ts",
         "smoke-cli-archive.ts",
+        "sign-macos.ts",
+        "build-cli-archive.ts",
+        "resolve-nightly-release.ts",
+        "verify-windows-desktop-artifact.ts",
       ],
+      "ignoreDependencies": ["esbuild"],
       // The `t3` npm package's files: copied into the package, never imported.
       "ignore": ["npm-launcher/**"],
     },
@@ -33,12 +40,21 @@
         "src/cartographerWorker.ts!",
         "scripts/cli.ts",
         "scripts/evaluate-thread-titles.ts",
+        "scripts/fetch-expo-schema.ts",
         "scripts/measure-pr-preview.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
         "src/provider/testFixtures/*.mjs",
+        // graphqlgen reads its config.
+        "graphql.config.ts",
       ],
+      // The generated operations export every selection's class.
+      // preserve upstream update source while fork self-updates are disabled
+      "ignoreIssues": {
+        "**/*.graphql.ts": ["exports", "types", "namespaceMembers"],
+        "src/cloud/selfUpdate.ts": ["exports"],
+      },
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // the web build prerequisite and native runtime packages stay external
       // the cartographer worker resolves its parser at runtime
@@ -48,8 +64,6 @@
         "@napi-rs/keyring",
         "dependency-cruiser",
       ],
-      // preserve upstream update source while fork self-updates are disabled
-      "ignoreIssues": { "src/cloud/selfUpdate.ts": ["exports"] },
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.
@@ -73,12 +87,17 @@
       "ignoreDependencies": ["playwright-core", "electron-builder"],
     },
     "apps/web": {
-      // Worktree setup (scripts/setup-worktree.ts) runs this directly.
-      "entry": ["scripts/warm-dep-cache.ts"],
+      // Worktree setup (scripts/setup-worktree.ts) runs this directly, and evidence
+      // fixtures run under node.
+      "entry": ["scripts/warm-dep-cache.ts", "test/fixtures/**/*.mjs"],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.
       "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
+    },
+    "apps/marketing": {
+      // `astro check` runs from the typecheck task in vite.config.ts, which knip does not read.
+      "ignoreDependencies": ["@astrojs/check"],
     },
     "apps/mobile": {
       // Expo loads plugins and the fingerprint config by string; Metro embeds the browser entry in the native WebView.

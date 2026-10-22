@@ -266,7 +266,7 @@ it.effect("retains supported mid-turn sends and explicit holds", () =>
       resolveMessageDispatchIntent(
         yield* codex.projections.getThreadProjection(codex.threadId),
         { type: "start_immediately" },
-        "auto",
+        "steer",
       ),
     ).toEqual({ type: "steer_active", targetRunId: codex.active.id });
     const coral = yield* queuedFixture(coralInstanceId);
