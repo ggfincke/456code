@@ -1,4 +1,12 @@
-# T3 Code
+# 456code
+
+456code is my personal agent orchestration platform, derived from T3 Code. I'm building it around directing agents on furnace from my Mac desktop app, native iPhone app, or browser over a private network or tailnet. Local Mac hosting is an explicit option; iPad support follows useful upstream work.
+
+[Guiding principles](docs/principles.md) define product scope, privacy requirements, provider priorities, and how regular T3 updates are evaluated. They describe the intended product; the current application still contains upstream behavior that needs separate implementation work.
+
+## Upstream T3 Code reference
+
+The material below describes upstream T3 Code. Its hosted services, installation commands, downloads, and support links target T3, not a 456code installation or a claim of fork support. For local development, use the [development runbook](docs/operations/development.md); existing fork build details are in the [fork operations record](docs/operations/thin-fork.md).
 
 T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
 
