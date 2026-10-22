@@ -1,6 +1,6 @@
-# 456code thin fork: ownership and update record
+# 456code fork operations and integration record
 
-456code is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The October 8 integration pins upstream `a4c9494b0e3606775cc5fc929fc138399288bd43` while preserving both histories. It retains quality CI and local packaging. The installed application and existing runtime data remain separate from this source update.
+456code is a personal agent orchestration system derived from T3 Code. The [guiding principles](../principles.md) govern current product scope and upstream updates. This record preserves earlier integration details and evidence; dated verification applies only to the recorded revision. Use Git history for the current upstream integration base. Source updates remain separate from the installed application and existing runtime data.
 
 ## Base and local change groups
 
@@ -8,18 +8,20 @@
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
 - Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
 - September 14 upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101`.
-- Pinned upstream target: `a4c9494b0e3606775cc5fc929fc138399288bd43` (303 further commits after October 4).
+- October 8 upstream base: `a4c9494b0e3606775cc5fc929fc138399288bd43` (303 further commits after October 4).
 - October 4 base: `efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448` (191 further commits after September 30).
 - September 30 base: `bd89c1302026255c62cc09278207bfaf2664da4a` (44 further commits after September 26).
 - September 26 base: `679c34c096193446ceed62e633387d91fe2cfff8` (138 further upstream commits after September 23).
 - September 23 base: `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc` (361 upstream commits, pinned to the September 23 audit).
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-Upstream V2 conversation orchestration, provider lifecycle, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file remain upstream-owned. Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned. CI retains code/build checks, Windows tests and advisory mobile fingerprints on standard GitHub runners; automated releases, deployments, previews and upstream administration workflows have been removed.
+Earlier integrations minimized changes to upstream V2 conversation orchestration, provider lifecycle, persistence/migrations, Git implementations, shared client runtime and `apps/mobile`. Those historical boundaries are no longer restrictions on changes needed to meet the guiding principles. Regular upstream merges remain the strategy, with an explicit principles review for each update. Preserve Garrett's working setup and report deferred upstream changes when adaptation is too costly. Prefer existing boundaries and tooling where they serve the personal workflow.
+
+Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. CI retains code/build checks, Windows tests and advisory mobile fingerprints on standard GitHub runners; automated releases, deployments, previews and upstream administration workflows have been removed.
 
 ## Product and ownership boundaries
 
-**Appearance:** `assets/fincke`, web `src/fincke`, and desktop `src/fincke/FreshProfile.ts`. Fincke Ocean is an imported environment theme with ID `fincke-ocean`; it does not replace T3's built-in Ocean. Only a profile with neither settings nor a conversation database is seeded. Later starts respect its existing selection. The icon and wave use T3's standard asset/backdrop entry points. Setup and other upstream product copy remains T3-owned.
+**Appearance:** `assets/fincke`, web `src/fincke`, and desktop `src/fincke/FreshProfile.ts`. Fincke Ocean is an imported environment theme with ID `fincke-ocean`; it does not replace T3's built-in Ocean. Only a profile with neither settings nor a conversation database is seeded. Later starts respect its existing selection. The icon and wave use T3's standard asset/backdrop entry points. Setup and other product copy must follow the guiding principles; retained T3 copy is not a permanent ownership boundary.
 
 **Desktop:** explicit build identity `com.ggfincke.456code.thin`, production Chromium profile `456code-thin-v2` and development profile `456code-thin-dev`, default backend home `~/.456code-thin`, protocol `code456-thin` (development identity, home and protocol variants append `-dev`). An explicit `T3CODE_HOME` is treated as a parent and receives a `456code-thin` suffix; the original environment value is removed from the backend child so it cannot override that bootstrap identity. Managed Codex sign-in returns and desktop handoffs use those personal protocols; callback readers also accept the corresponding upstream schemes. Native and server self-updates are disabled; publication metadata is private and artifact publishing is null. Local artifact builds remain available through the [packaging runbook](release.md). No signing, release destination or deployment is configured for this fork.
 

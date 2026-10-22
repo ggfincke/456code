@@ -1,4 +1,6 @@
-# T3 Code docs
+# 456code docs
+
+Start with the [456code guiding principles](./principles.md) for product direction and upstream integration requirements, and the [fork operations record](./operations/thin-fork.md) for existing local integration details. The T3 guides below are retained upstream references; hosted services and installation instructions may not apply to this fork.
 
 ## Using T3 Code
 

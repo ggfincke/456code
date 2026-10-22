@@ -1,4 +1,12 @@
-# T3 Code
+# 456code
+
+456code is Garrett's personal agent orchestration system, primarily hosted on furnace and controlled from the Mac desktop app, native iPhone app, or browser. Read [the guiding principles](docs/principles.md) before product, architecture, provider, connectivity, or upstream integration work.
+
+Those principles govern this fork and require Garrett's explicit approval to change. When retained T3 guidance below or historical fork records conflict with them, follow the principles and call out the conflict. Review upstream updates explicitly against them. Do not silently restore removed analytics or T3 product services, hide priority providers, or compromise the working setup to stay current. Minimal divergence is a maintenance preference, not the product goal.
+
+The principles describe requirements, not verified current behavior or blanket authorization to remove features. Preserve existing data and scope implementation to the current request. Applicable development and verification rules below still apply.
+
+## Retained T3 Code guidance
 
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
 
