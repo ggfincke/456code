@@ -1,3 +1,5 @@
+// apps/server/src/scheduledTasks/webhookRoute.ts
+// authenticates webhook deliveries and triggers scheduled work
 import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as ByteSize from "effect/ByteSize";
 import * as Effect from "effect/Effect";
@@ -7,7 +9,6 @@ import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HttpTraceContext from "effect/http/HttpTraceContext";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as Metrics from "../observability/Metrics.ts";
@@ -76,8 +77,7 @@ export const layer = HttpApiBuilder.group(
       const relayDeliveryId = Option.isSome(relay) ? relay.value.deliveryId : undefined;
       const relayReceivedAt = Option.isSome(relay) ? relay.value.receivedAt : undefined;
 
-      // A relay delivery joins the relay's trace, and goes to the T3 Connect
-      // tracer with it. Anyone else's traceparent is never trusted.
+      // only a delivery authenticated by the relay can supply its trace parent
       const relayParent = Option.isSome(relay)
         ? HttpTraceContext.fromHeaders(request.headers)
         : Option.none<Tracer.ExternalSpan>();
@@ -96,8 +96,7 @@ export const layer = HttpApiBuilder.group(
         })
         .pipe(
           Option.isSome(relayParent)
-            ? (effect) =>
-                effect.pipe(Effect.withParentSpan(relayParent.value), withRelayClientTracing)
+            ? (effect) => effect.pipe(Effect.withParentSpan(relayParent.value))
             : (effect) => effect,
           Effect.catchCause((cause) =>
             Effect.logWarning("Webhook delivery failed").pipe(

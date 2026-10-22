@@ -1,17 +1,15 @@
+// packages/client-runtime/src/authorization/remote.ts
+// authorizes remote connections without sending analytics identities
 import {
   AuthAccessTokenType,
   type AuthClientPresentationMetadata,
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
-  type ClientConnectionMethod,
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
-import { hashTelemetryId } from "@t3tools/shared/telemetryId";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
-import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
@@ -36,74 +34,15 @@ const clientMetadataTokenExchangeFields = (
   };
 };
 
-/** Hashes of who is connecting. Only hashes leave the client. */
-export interface ClientOwnerParams {
-  readonly connect?: string;
-  readonly device?: string;
-}
-
-/**
- * Tells the environment, for analytics, which T3 Connect account and device
- * are connecting, so it can count the environment as theirs.
- */
-export const readClientOwnerParams = Effect.gen(function* () {
-  const session = yield* Effect.serviceOption(ClientCapabilities.CloudSession);
-  const account = Option.isSome(session) ? yield* session.value.identity : Option.none();
-  const device = yield* (yield* ClientCapabilities.AnalyticsDevice).id;
-  return {
-    ...(Option.isSome(account) ? { connect: hashTelemetryId(account.value.accountId) } : {}),
-    ...(Option.isSome(device) ? { device: hashTelemetryId(device.value) } : {}),
-  } satisfies ClientOwnerParams;
-});
-
 export const appendClientConnectionParams = (
   url: URL,
   clientMetadata: AuthClientPresentationMetadata | undefined,
-  connectionMethod?: ClientConnectionMethod,
-  owners?: ClientOwnerParams,
 ): void => {
   if (clientMetadata?.surface) {
     url.searchParams.set("clientSurface", clientMetadata.surface);
   }
   if (clientMetadata?.appVersion) {
     url.searchParams.set("clientAppVersion", clientMetadata.appVersion);
-  }
-  if (clientMetadata?.deviceType) {
-    const deviceType =
-      clientMetadata.deviceType === "mobile"
-        ? "phone"
-        : clientMetadata.deviceType === "desktop" || clientMetadata.deviceType === "tablet"
-          ? clientMetadata.deviceType
-          : "unknown";
-    url.searchParams.set("clientDeviceType", deviceType);
-  }
-  if (clientMetadata?.os) {
-    url.searchParams.set("clientOs", clientMetadata.os);
-  }
-  if (clientMetadata?.surface === "web") {
-    if (clientMetadata.webDeployment) {
-      url.searchParams.set("clientWebDeployment", clientMetadata.webDeployment);
-    }
-    if (clientMetadata.browser) {
-      url.searchParams.set("clientBrowser", clientMetadata.browser);
-    }
-  }
-  if (clientMetadata?.surface === "mobile") {
-    if (clientMetadata.osMajorVersion !== undefined) {
-      url.searchParams.set("clientOsMajorVersion", String(clientMetadata.osMajorVersion));
-    }
-    if (clientMetadata.deviceModel) {
-      url.searchParams.set("clientDeviceModel", clientMetadata.deviceModel);
-    }
-  }
-  if (connectionMethod) {
-    url.searchParams.set("connectionMethod", connectionMethod);
-  }
-  if (owners?.connect) {
-    url.searchParams.set("clientOwner", owners.connect);
-  }
-  if (owners?.device) {
-    url.searchParams.set("clientDevice", owners.device);
   }
 };
 
@@ -229,7 +168,6 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
   readonly httpBaseUrl: string;
   readonly bearerToken: string;
   readonly clientMetadata?: AuthClientPresentationMetadata;
-  readonly connectionMethod?: ClientConnectionMethod;
   readonly timeoutMs?: number;
 }) {
   const issued = yield* issueRemoteWebSocketTicket({
@@ -243,12 +181,7 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
     url.pathname = "/ws";
   }
   url.searchParams.set("wsTicket", issued.ticket);
-  appendClientConnectionParams(
-    url,
-    input.clientMetadata,
-    input.connectionMethod,
-    yield* readClientOwnerParams,
-  );
+  appendClientConnectionParams(url, input.clientMetadata);
   return url.toString();
 });
 
@@ -260,7 +193,6 @@ export const resolveRemoteDpopWebSocketConnectionUrl = Effect.fn(
   readonly accessToken: string;
   readonly dpopProof: string;
   readonly clientMetadata?: AuthClientPresentationMetadata;
-  readonly connectionMethod?: ClientConnectionMethod;
   readonly timeoutMs?: number;
 }) {
   const issued = yield* issueRemoteDpopWebSocketTicket({
@@ -274,11 +206,6 @@ export const resolveRemoteDpopWebSocketConnectionUrl = Effect.fn(
     url.pathname = "/ws";
   }
   url.searchParams.set("wsTicket", issued.ticket);
-  appendClientConnectionParams(
-    url,
-    input.clientMetadata,
-    input.connectionMethod,
-    yield* readClientOwnerParams,
-  );
+  appendClientConnectionParams(url, input.clientMetadata);
   return url.toString();
 });

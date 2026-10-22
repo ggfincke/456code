@@ -1,3 +1,5 @@
+// packages/client-runtime/src/authorization/layer.test.ts
+// verifies remote authorization keeps destination and account boundaries
 import { AuthStandardClientScopes, EnvironmentId } from "@t3tools/contracts";
 import { type RelayEnvironmentConnectResponse } from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
@@ -284,7 +286,7 @@ describe("RemoteEnvironmentAuthorization", () => {
       }).pipe(Effect.provide(harness.layer));
 
       expect(authorized.socketUrl).toContain("wsTicket=cached-ticket");
-      expect(authorized.socketUrl).toContain("connectionMethod=relay");
+      expect(new URL(authorized.socketUrl).searchParams.has("connectionMethod")).toBe(false);
       expect(yield* Ref.get(harness.bootstrapCalls)).toBe(0);
       expect(harness.fetch.calls).toHaveLength(1);
       expect(String(harness.fetch.calls[0]?.[0])).toBe(

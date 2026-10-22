@@ -1,3 +1,6 @@
+// infra/relay/src/clientConfig.test.ts
+// checks relay config publication and env file preservation
+
 // @effect-diagnostics anyUnknownInErrorContext:off - ScratchStack.deploy is typed with `any` in its error channel by Alchemy.
 import { inMemoryState } from "alchemy/State";
 import * as Test from "alchemy/Test/Vitest";
@@ -6,11 +9,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Redacted from "effect/Redacted";
 import { describe, expect, it } from "vite-plus/test";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
-import { PublishClientConfig, reconcileEnvFile, tokenDigest } from "./clientConfig.ts";
+import { PublishClientConfig, reconcileEnvFile } from "./clientConfig.ts";
 
 describe("reconcileEnvFile", () => {
   it("replaces stale values and keeps unrelated lines", () => {
@@ -53,16 +55,7 @@ const { test } = Test.make({
   state: inMemoryState(),
 });
 
-const clientConfig = (token: string) => ({
-  url: "https://relay.example.com",
-  mobileTracingUrl: "https://axiom.example.com/v1/traces",
-  mobileTracingDataset: "relay-traces",
-  mobileTracingToken: Redacted.make(`mobile-${token}`),
-  clientTracingUrl: "https://axiom.example.com/v1/traces",
-  clientTracingDataset: "relay-traces",
-  clientTracingToken: Redacted.make(`client-${token}`),
-  tokenDigest: tokenDigest([Redacted.make(`mobile-${token}`), Redacted.make(`client-${token}`)]),
-});
+const clientConfig = (url = "https://relay.example.com") => ({ url });
 
 describe("PublishClientConfig", () => {
   test.provider("writes the env file on deploy and skips an unchanged redeploy", (stack) =>
@@ -78,21 +71,20 @@ describe("PublishClientConfig", () => {
         ),
       );
 
-      yield* stack.deploy(PublishClientConfig(clientConfig("v1"))).pipe(configured);
+      yield* stack.deploy(PublishClientConfig(clientConfig())).pipe(configured);
       const first = yield* fs.readFileString(target);
       expect(first).toContain("KEEP=yes\n");
       expect(first).toContain("T3CODE_RELAY_URL=https://relay.example.com\n");
-      expect(first).toContain("T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=client-v1\n");
-      expect(first).toContain("T3CODE_MOBILE_OTLP_TRACES_TOKEN=mobile-v1\n");
 
       yield* fs.writeFileString(target, `${first}MANUAL=1\n`);
-      yield* stack.deploy(PublishClientConfig(clientConfig("v1"))).pipe(configured);
+      yield* stack.deploy(PublishClientConfig(clientConfig())).pipe(configured);
       expect(yield* fs.readFileString(target)).toContain("MANUAL=1\n");
 
-      yield* stack.deploy(PublishClientConfig(clientConfig("v2"))).pipe(configured);
+      yield* stack
+        .deploy(PublishClientConfig(clientConfig("https://next-relay.example.com")))
+        .pipe(configured);
       const third = yield* fs.readFileString(target);
-      expect(third).toContain("T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=client-v2\n");
-      expect(third).not.toContain("client-v1");
+      expect(third).toContain("T3CODE_RELAY_URL=https://next-relay.example.com\n");
       expect(third).toContain("KEEP=yes\n");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -104,7 +96,7 @@ describe("PublishClientConfig", () => {
       const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-relay-client-config-" });
       const target = path.join(dir, "client.env");
       const exit = yield* stack
-        .deploy(PublishClientConfig({ ...clientConfig("v1"), url: undefined }))
+        .deploy(PublishClientConfig({ ...clientConfig(), url: undefined }))
         .pipe(
           Effect.provide(
             ConfigProvider.layer(
@@ -128,8 +120,8 @@ describe("PublishClientConfig", () => {
       const exit = yield* stack
         .deploy(
           PublishClientConfig({
-            ...clientConfig("v1"),
-            clientTracingDataset: "relay-traces\nINJECTED=1",
+            ...clientConfig(),
+            url: "https://relay.example.com\nINJECTED=1",
           }),
         )
         .pipe(

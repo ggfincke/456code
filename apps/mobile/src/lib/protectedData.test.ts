@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/protectedData.test.ts
+// checks protected storage startup and recovery
+
 import * as Effect from "effect/Effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -50,9 +53,6 @@ vi.mock("../features/cloud/managedRelayLayer", async () => {
 });
 vi.mock("../features/cloud/publicConfig", () => ({
   resolveCloudPublicConfig: () => ({ relay: { url: null } }),
-}));
-vi.mock("../features/observability/tracing", async () => ({
-  layer: (await import("effect/Layer")).empty,
 }));
 vi.mock("@t3tools/client-runtime/rpc", async () => {
   const Layer = await import("effect/Layer");

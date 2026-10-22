@@ -1,3 +1,5 @@
+// apps/web/src/connection/clientMetadata.ts
+// presents browser and desktop clients in environment sessions
 import type {
   AuthClientMetadataDeviceType,
   AuthClientPresentationMetadata,
@@ -44,17 +46,6 @@ function browserClientOs(identity: BrowserIdentity): ClientOs {
   return "other";
 }
 
-function browserFamily(userAgent: string): string {
-  if (userAgent.trim() === "") return "unknown";
-  if (/edg(?:e|a|ios)?\//i.test(userAgent)) return "Edge";
-  if (/opr\/|opios\//i.test(userAgent)) return "Opera";
-  if (/samsungbrowser\//i.test(userAgent)) return "Samsung Internet";
-  if (/firefox\/|fxios\//i.test(userAgent)) return "Firefox";
-  if (/chrome\/|crios\//i.test(userAgent)) return "Chrome";
-  if (/safari\//i.test(userAgent)) return "Safari";
-  return "other";
-}
-
 function browserDeviceType(identity: BrowserIdentity): AuthClientMetadataDeviceType {
   const userAgent = identity.userAgent;
   if (userAgent.trim() === "") return "unknown";
@@ -71,7 +62,6 @@ function browserDeviceType(identity: BrowserIdentity): AuthClientMetadataDeviceT
 
 export function clientPresentationMetadata(input: {
   readonly appVersion: string;
-  readonly hosted: boolean;
   readonly identity: BrowserIdentity;
   readonly desktopBridge: Pick<DesktopBridge, "getClientPlatform"> | undefined;
 }): AuthClientPresentationMetadata {
@@ -90,8 +80,6 @@ export function clientPresentationMetadata(input: {
     deviceType: browserDeviceType(input.identity),
     os: browserClientOs(input.identity),
     surface: "web",
-    webDeployment: input.hosted ? "hosted" : "server",
-    browser: browserFamily(input.identity.userAgent),
     ...(input.appVersion === "0.0.0" ? {} : { appVersion: input.appVersion }),
   };
 }

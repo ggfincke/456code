@@ -1,3 +1,5 @@
+// apps/web/src/components/settings/settingsSearch.ts
+// indexes settings destinations and their searchable terms
 import { HOSTED_APP_CHANNEL } from "~/branding";
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
@@ -554,7 +556,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "privacy-policy",
     title: "Privacy policy",
     to: "/settings/general",
-    searchTerms: ["telemetry analytics usage data tracking legal opt out"],
+    searchTerms: ["privacy policy legal"],
   },
   {
     id: "telemetry-export",

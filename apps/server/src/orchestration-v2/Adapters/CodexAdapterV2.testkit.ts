@@ -1,3 +1,5 @@
+// apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.testkit.ts
+// builds isolated codex replay test services
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -173,7 +175,6 @@ export function makeReplayServerConfig(
       providerLogsDir,
       providerEventLogPath: path.join(providerLogsDir, "events.log"),
       terminalLogsDir,
-      anonymousIdPath: path.join(stateDir, "anonymous-id"),
       environmentIdPath: path.join(stateDir, "environment-id"),
       serverRuntimeStatePath: path.join(stateDir, "server-runtime.json"),
       secretsDir: path.join(stateDir, "secrets"),

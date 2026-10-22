@@ -1,3 +1,5 @@
+// packages/contracts/src/baseSchemas.ts
+// defines shared identifiers and domain value schemas
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -298,12 +300,6 @@ export const ClientOs = Schema.Literals([
   "unknown",
 ]);
 export type ClientOs = typeof ClientOs.Type;
-
-export const ClientDeviceType = Schema.Literals(["desktop", "phone", "tablet", "unknown"]);
-export type ClientDeviceType = typeof ClientDeviceType.Type;
-
-export const ClientWebDeployment = Schema.Literals(["hosted", "server"]);
-export type ClientWebDeployment = typeof ClientWebDeployment.Type;
 
 export const ClientConnectionMethod = Schema.Literals(["direct", "ssh", "relay", "unknown"]);
 export type ClientConnectionMethod = typeof ClientConnectionMethod.Type;

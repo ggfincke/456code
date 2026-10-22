@@ -1,4 +1,5 @@
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+// packages/client-runtime/src/connection/supervisor.ts
+// supervises environment connections and retry lifecycles
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -444,9 +445,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     generation: number,
     pendingRetry: Option.Option<PendingRetryTrace>,
   ) => {
-    // The span must end with the ConnectionAttemptError itself: the exporter
-    // can only describe an Error-like failure, and a TracedAttemptFailure
-    // wrapper reached it as "[object Object]". The wrapper is added outside.
+    // keep the original error inside the span; the retry wrapper belongs outside
     let attemptSpan = Option.none<Tracer.Span>();
     const traced = Effect.gen(function* () {
       attemptSpan = Option.some(yield* Effect.currentSpan.pipe(Effect.orDie));
@@ -474,7 +473,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     }).pipe(
       Effect.map((lease) => ({ attemptSpan, lease })),
       Effect.mapError((error): TracedAttemptFailure => ({ error, attemptSpan })),
-      withRelayClientTracing,
     );
   };
 
