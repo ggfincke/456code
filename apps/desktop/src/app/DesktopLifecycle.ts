@@ -1,6 +1,10 @@
+// @effect-diagnostics nodeBuiltinImport:off - the AppImage relaunch helper must outlive this process, which a scoped Effect child process cannot.
+import * as NodeChildProcess from "node:child_process";
+
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -59,6 +63,28 @@ export class DesktopLifecycle extends Context.Service<
 
 const { logInfo: logLifecycleInfo, logError: logLifecycleError } =
   makeComponentLogger("desktop-lifecycle");
+
+// Electron's native relauncher cannot start an AppImage: its child is refused the
+// setuid fusermount3 mount. Spawn from the main process instead, and wait for this
+// process to exit (stdin EOF) so the replacement can take the single-instance lock.
+// Inherited descriptors are closed so the old AppImage mount can be released.
+const APPIMAGE_RELAUNCH_SCRIPT = [
+  "cat >/dev/null",
+  'for fd in /proc/$$/fd/*; do n="${fd##*/}"; if [ "$n" -gt 2 ]; then eval "exec $n>&-"; fi; done 2>/dev/null',
+  'exec "$0" "$@" </dev/null',
+].join("\n");
+
+const spawnAppImageRelaunch = (appImagePath: string, args: ReadonlyArray<string>) =>
+  Effect.sync(() => {
+    const child = NodeChildProcess.spawn(
+      "bash",
+      ["-c", APPIMAGE_RELAUNCH_SCRIPT, appImagePath, ...args],
+      { detached: true, stdio: ["pipe", "ignore", "ignore"] },
+    );
+    // this process exits right after, so a failed spawn has no one left to recover it
+    child.on("error", () => {});
+    child.unref();
+  });
 
 function addScopedListener<Args extends ReadonlyArray<unknown>>(
   target: unknown,
@@ -174,9 +200,12 @@ export const make = DesktopLifecycle.of({
         yield* electronApp.exit(75);
         return;
       }
-      yield* electronApp.relaunch({
-        execPath: process.execPath,
-        args: process.argv.slice(1),
+      const args = process.argv.slice(1);
+      // process.execPath sits in the AppImage's /tmp/.mount_* dir, which is
+      // unmounted once this process exits, so the relaunch must start the AppImage.
+      yield* Option.match(environment.appImagePath, {
+        onNone: () => electronApp.relaunch({ execPath: process.execPath, args }),
+        onSome: (appImagePath) => spawnAppImageRelaunch(appImagePath, args),
       });
       yield* electronApp.exit(0);
     }).pipe(
