@@ -1,3 +1,5 @@
+// apps/server/src/provider/CodexChatGptHandoff.ts
+// runs chatgpt sign-in for a destination environment
 import type { ChatGptHandoffInput, ChatGptHandoffState } from "@t3tools/contracts";
 import { ProviderSetupError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -34,7 +36,6 @@ export function subscribeChatGptHandoff(
         ...endpoints,
         instanceId: input.instanceId,
         reconnectProfile: input.profile,
-        telemetryFlow: "primary_handoff",
         defaultReturnUrl: input.returnUrl,
       }).pipe(
         Effect.provideService(ServerSecretStore.ServerSecretStore, store),

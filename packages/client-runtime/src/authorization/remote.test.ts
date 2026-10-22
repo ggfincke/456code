@@ -1,15 +1,17 @@
+// packages/client-runtime/src/authorization/remote.test.ts
+// verifies remote authorization without analytics identity sharing
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
-import { hashTelemetryId } from "@t3tools/shared/telemetryId";
 import {
   bootstrapRemoteBearerSession,
   exchangeRemoteDpopAccessToken,
   issueRemoteDpopWebSocketTicket,
   issueRemoteWebSocketTicket,
+  resolveRemoteDpopWebSocketConnectionUrl,
   resolveRemoteWebSocketConnectionUrl,
 } from "./remote.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
@@ -201,48 +203,66 @@ describe("remote environment authorization", () => {
           appVersion: "1.2.3",
           deviceType: "mobile",
           os: "Android",
-          osMajorVersion: 15,
-          deviceModel: "Pixel 9",
         },
-        connectionMethod: "relay",
       }).pipe(provideRemoteHttp(fetch.fetchFn));
 
       expect(url).toBe(
-        "wss://remote.example.com/ws?wsTicket=ws-ticket&clientSurface=mobile&clientAppVersion=1.2.3&clientDeviceType=phone&clientOs=Android&clientOsMajorVersion=15&clientDeviceModel=Pixel+9&connectionMethod=relay",
+        "wss://remote.example.com/ws?wsTicket=ws-ticket&clientSurface=mobile&clientAppVersion=1.2.3",
       );
     }),
   );
 
-  it.effect("names the signed-in Connect account and this device by hash only", () =>
-    Effect.gen(function* () {
-      const fetch = recordedFetch(
-        Response.json({ ticket: "ws-ticket", expiresAt: "2026-05-01T12:05:00.000Z" }),
-      );
+  it.effect.each(["bearer", "dpop"] as const)(
+    "omits analytics identity from %s websocket URLs",
+    (authentication) =>
+      Effect.gen(function* () {
+        const fetch = recordedFetch(
+          Response.json({ ticket: "ws-ticket", expiresAt: "2026-05-01T12:05:00.000Z" }),
+        );
 
-      const url = new URL(
-        yield* resolveRemoteWebSocketConnectionUrl({
-          wsBaseUrl: "wss://remote.example.com/",
-          httpBaseUrl: "https://remote.example.com/",
-          bearerToken: "bearer-token",
-        }).pipe(
-          provideRemoteHttp(fetch.fetchFn),
-          Effect.provideService(
-            ClientCapabilities.CloudSession,
-            ClientCapabilities.CloudSession.of({
-              identity: Effect.succeed(Option.some({ accountId: "user_connect" })),
-              clerkToken: Effect.succeed("clerk-token"),
-            }),
+        const url = new URL(
+          yield* (
+            authentication === "bearer"
+              ? resolveRemoteWebSocketConnectionUrl({
+                  wsBaseUrl: "wss://remote.example.com/",
+                  httpBaseUrl: "https://remote.example.com/",
+                  bearerToken: "bearer-token",
+                  clientMetadata: {
+                    surface: "mobile",
+                    appVersion: "1.2.3",
+                    deviceType: "mobile",
+                    os: "iOS",
+                  },
+                })
+              : resolveRemoteDpopWebSocketConnectionUrl({
+                  wsBaseUrl: "wss://remote.example.com/",
+                  httpBaseUrl: "https://remote.example.com/",
+                  accessToken: "dpop-token",
+                  dpopProof: "ticket-proof",
+                  clientMetadata: {
+                    surface: "mobile",
+                    appVersion: "1.2.3",
+                    deviceType: "mobile",
+                    os: "iOS",
+                  },
+                })
+          ).pipe(
+            provideRemoteHttp(fetch.fetchFn),
+            Effect.provideService(
+              ClientCapabilities.CloudSession,
+              ClientCapabilities.CloudSession.of({
+                identity: Effect.succeed(Option.some({ accountId: "user_connect" })),
+                clerkToken: Effect.succeed("clerk-token"),
+              }),
+            ),
           ),
-          Effect.provideService(ClientCapabilities.AnalyticsDevice, {
-            id: Effect.succeed(Option.some("device-1")),
-          }),
-        ),
-      );
+        );
 
-      expect(url.searchParams.get("clientOwner")).toBe(hashTelemetryId("user_connect"));
-      expect(url.searchParams.get("clientDevice")).toBe(hashTelemetryId("device-1"));
-      expect(url.toString()).not.toContain("user_connect");
-      expect(url.toString()).not.toContain("device-1");
-    }),
+        expect([...url.searchParams.entries()]).toEqual([
+          ["wsTicket", "ws-ticket"],
+          ["clientSurface", "mobile"],
+          ["clientAppVersion", "1.2.3"],
+        ]);
+      }),
   );
 });

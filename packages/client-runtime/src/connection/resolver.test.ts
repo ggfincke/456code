@@ -1,3 +1,5 @@
+// packages/client-runtime/src/connection/resolver.test.ts
+// verifies connection preparation preserves credentials and client privacy
 import {
   EnvironmentId,
   ORCHESTRATION_PROTOCOL_VERSION,
@@ -200,11 +202,38 @@ describe("ConnectionResolver", () => {
         environmentId: ENVIRONMENT_ID,
         label: "Primary",
         httpBaseUrl: "http://127.0.0.1:3777",
-        socketUrl:
-          "ws://127.0.0.1:3777/ws?clientSurface=web&clientDeviceType=desktop&connectionMethod=direct&orchestrationProtocol=2",
+        socketUrl: "ws://127.0.0.1:3777/ws?clientSurface=web&orchestrationProtocol=2",
         httpAuthorization: null,
         target,
       });
+    }),
+  );
+
+  it.effect("omits analytics identity from a signed-in primary connection", () =>
+    Effect.gen(function* () {
+      const layerBroker = yield* makeDependencies();
+      const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(layerBroker));
+      const target = new PrimaryConnectionTarget({
+        environmentId: ENVIRONMENT_ID,
+        label: "Primary",
+        httpBaseUrl: "http://127.0.0.1:3777",
+        wsBaseUrl: "ws://127.0.0.1:3777",
+      });
+      const prepared = yield* broker.prepare(catalogEntry(target)).pipe(
+        Effect.provideService(
+          ClientCapabilities.CloudSession,
+          ClientCapabilities.CloudSession.of({
+            identity: Effect.succeed(Option.some({ accountId: "user_connect" })),
+            clerkToken: Effect.succeed("clerk-token"),
+          }),
+        ),
+      );
+
+      expect([...new URL(prepared.socketUrl).searchParams.entries()]).toEqual([
+        ["clientSurface", "web"],
+        ["orchestrationProtocol", "2"],
+      ]);
+      expect(prepared.httpAuthorization).toBeNull();
     }),
   );
 

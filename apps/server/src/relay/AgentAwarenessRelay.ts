@@ -1,3 +1,5 @@
+// apps/server/src/relay/AgentAwarenessRelay.ts
+// publishes host-owned agent activity to connected devices
 import type {
   EnvironmentId,
   OrchestrationV2DomainEvent,
@@ -14,7 +16,6 @@ import {
 import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
 import { turnItemUpdateCanEndBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import {
   normalizeRelayIssuer,
   RELAY_ACTIVITY_PUBLISH_TYP,
@@ -614,7 +615,7 @@ export const make = Effect.gen(function* () {
       projectId: snapshot.projectId,
       state: snapshot.state,
       reason: snapshot.reason,
-    }).pipe(withRelayClientTracing);
+    });
     publishConfirmDeadlines.delete(threadId);
     yield* Ref.update(publishedStateByThreadRef, (publishedStates) => {
       const nextPublishedStates = new Map(publishedStates);

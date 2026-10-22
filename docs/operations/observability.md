@@ -185,7 +185,7 @@ Default Grafana login:
 #### 2. Export OTLP env vars
 
 For endpoint settings and startup precedence, see the
-[user telemetry guide](../user/telemetry.md#export-diagnostics-to-your-own-receiver).
+[diagnostics guide](../user/telemetry.md#export-diagnostics-to-your-own-receiver).
 In a worktree, use `vp run dev` instead of `npx t3` to keep state isolated.
 
 ```bash
@@ -417,9 +417,9 @@ Webhooks have their own families:
   tools redeeming them. Neither ever carries a value.
 
 `ScheduledTaskService.triggerWebhook` spans carry the same outcome per request, and each run
-started from a delivery is its own `ScheduledTaskService.runWebhookDelivery` trace. For a request
-the relay forwarded, the span also goes to the T3 Connect trace export as a child of the relay's
-span; requests that reach the environment directly never join a sender's trace.
+started from a delivery is its own `ScheduledTaskService.runWebhookDelivery` trace. These spans
+use the environment's local diagnostics and any explicitly configured OTLP export. Requests that
+reach the environment directly never join a sender's trace.
 
 Use metrics when the question is:
 

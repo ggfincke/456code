@@ -84,7 +84,7 @@ vp run --filter t3code-relay deploy
 ```
 
 The stack provisions the Cloudflare Worker and queues, managed endpoint resources, database
-connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](./.env.example) to
+connectivity. Copy [`infra/relay/.env.example`](./.env.example) to
 `infra/relay/.env` and fill in the deployment-specific values before deploying. Alchemy loads that
 file from the relay directory. Runtime secrets include Clerk, APNs, and optional FCM credentials. Set
 `APNS_ENABLED=false` for an Android-only development deployment without Apple credentials. Production adopts
@@ -111,9 +111,9 @@ DNS-safe sanitization as Alchemy physical resource names, so `prod` uses
 domain override.
 
 The stack's `PublishClientConfig` action ([`src/clientConfig.ts`](./src/clientConfig.ts)) writes the
-deployed relay URL and tracing configuration into the repository-root `.env`, so subsequent source
+deployed relay URL into the repository-root `.env`, so subsequent source
 builds point at the relay that was just deployed without copying values manually. It runs only when
-one of those outputs changed, and `T3CODE_RELAY_CLIENT_CONFIG_ENV` redirects it to another file.
+the URL changed, and `T3CODE_RELAY_CLIENT_CONFIG_ENV` redirects it to another file.
 
 ### Local deployment configuration
 
@@ -125,24 +125,18 @@ Alchemy needs these account-scoped environment variables:
 
 - `CLOUDFLARE_ACCOUNT_ID`
 - `PLANETSCALE_ORGANIZATION`
-- `AXIOM_ORG_ID`
 
 Alchemy needs these account-scoped credentials:
 
 - `CLOUDFLARE_API_TOKEN`
 - `PLANETSCALE_API_TOKEN_ID`
 - `PLANETSCALE_API_TOKEN`
-- `AXIOM_TOKEN`
 
 Configure these stage-specific values in the relay environment file:
 
 - `RELAY_API_ZONE_NAME`
 - `RELAY_TUNNEL_ZONE_NAME`
 - `RELAY_DOMAIN` if overriding the derived production relay domain
-- `RELAY_ALERT_NOTIFIER_ID`, the Axiom notifier that relay alerts page. Without it the deployment
-  creates no monitors or health dashboard. See
-  [Relay alerts](../../docs/operations/relay-observability.md#alerts).
-- `RELAY_WARNING_NOTIFIER_ID`, optional, the Axiom notifier for relay warnings
 - `CLERK_PUBLISHABLE_KEY`
 - `CLERK_JWT_AUDIENCE`
 - `CLERK_JWT_TEMPLATE`
@@ -158,12 +152,10 @@ Configure these stage-specific credentials in the relay environment file:
 - `FCM_SERVICE_ACCOUNT` when Android push is enabled
 
 The account-scoped credentials are consumed by Alchemy while provisioning relay stages; they
-are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
-so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. Local client builds use the public configuration
-written by `PublishClientConfig` as described above.
+are not bound into the relay Worker. Local client builds use the public configuration written by
+`PublishClientConfig` as described above.
 
 See:
 
 - [T3 Connect setup](../../docs/operations/connect-setup.md) for Clerk keys, JWT templates, and sign-up restrictions.
-- [Relay Observability](../../docs/operations/relay-observability.md) for deployment tracing and diagnostics.
 - [T3 Connect architecture](../../docs/internals/t3-connect.md) for environment linking and trust boundaries.

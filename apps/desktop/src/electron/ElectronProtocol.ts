@@ -1,3 +1,6 @@
+// apps/desktop/src/electron/ElectronProtocol.ts
+// registers the desktop protocol and renderer content policy
+
 import { finckeDesktop, isFinckeDesktop } from "../fincke/build.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -79,8 +82,8 @@ function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrationInpu
     "https://challenges.cloudflare.com",
   ];
 
-  // The renderer connects directly to user-configured environments in addition to
-  // the build-configured Clerk, relay, and OTLP endpoints. Those environment
+  // the renderer connects directly to user-configured environments in addition to
+  // the build-configured Clerk and relay endpoints. Those environment
   // origins are not known when this response policy is created, so restrict
   // connections by the network schemes the client supports instead of by host.
   // GLTFLoader fetches embedded textures through blob URLs after parsing the model.

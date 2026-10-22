@@ -1,10 +1,11 @@
+// packages/client-runtime/src/authorization/service.ts
+// manages remote authorization and account-bound token renewal
 import {
   type ClientConnectionMethod,
   EnvironmentId,
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
 import { RelayEnvironmentConnectScope } from "@t3tools/contracts/relay";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import {
   exchangeRemoteDpopAccessToken,
   type RemoteEnvironmentAuthError,
@@ -194,7 +195,6 @@ export const make = Effect.gen(function* () {
         httpBaseUrl: input.httpBaseUrl,
         bearerToken: input.bearerToken,
         clientMetadata: presentation.metadata,
-        connectionMethod: input.connectionMethod,
       }).pipe(
         Effect.mapError(mapRemoteEnvironmentError),
         Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -239,7 +239,6 @@ export const make = Effect.gen(function* () {
         accessToken: token.accessToken,
         dpopProof: ticketProof,
         clientMetadata: presentation.metadata,
-        connectionMethod: "relay",
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
       }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
     },
@@ -556,7 +555,6 @@ export const make = Effect.gen(function* () {
       getDpopToken(input).pipe(
         Effect.map(({ token }) => httpAuthorization(token)),
         Effect.withSpan("environment.authorization.http"),
-        withRelayClientTracing,
       ),
   });
 });

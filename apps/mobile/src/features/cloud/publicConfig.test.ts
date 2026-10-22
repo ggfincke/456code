@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/publicConfig.test.ts
+// checks public mobile connection settings
+
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { resolveCloudPublicConfig } from "./publicConfig";
@@ -24,11 +27,6 @@ describe("resolveCloudPublicConfig", () => {
       },
       relay: {
         url: null,
-      },
-      observability: {
-        tracesUrl: null,
-        tracesDataset: null,
-        tracesToken: null,
       },
     });
   });

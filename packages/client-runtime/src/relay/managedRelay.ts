@@ -1,3 +1,5 @@
+// packages/client-runtime/src/relay/managedRelay.ts
+// manages relay requests and proof-bound device authorization
 import {
   RelayAccessTokenType,
   RelayApi,
@@ -31,7 +33,6 @@ import {
 } from "@t3tools/contracts/relay";
 import { encodeOAuthScope, oauthScopeSetEquals } from "@t3tools/shared/oauthScope";
 import { decodeRelayJwt } from "@t3tools/shared/relayJwt";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -718,228 +719,183 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
 
   return ManagedRelayClient.of({
     relayUrl,
-    listEnvironments: Effect.fnUntraced(
-      function* (input) {
-        return yield* client.client
-          .listEnvironments({ headers: bearerHeaders(input.clerkToken) })
-          .pipe(
-            Effect.map((response) => response.environments),
-            Effect.mapError(relayRequestError("list relay-managed environments")),
-            timeoutRelayRequest("Relay environment listing"),
-          );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.listEnvironments"),
-      withRelayClientTracing,
-    ),
-    listDevices: Effect.fnUntraced(
-      function* (input) {
-        return yield* client.client
-          .listDevicesV2({
-            headers: bearerHeaders(input.clerkToken),
-          })
-          .pipe(
-            Effect.map((response) => response.devices),
-            Effect.mapError(relayRequestError("list relay client devices")),
-            timeoutRelayRequest("Relay client device listing"),
-          );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.listDevices"),
-      withRelayClientTracing,
-    ),
-    createEnvironmentLinkChallenge: Effect.fnUntraced(
-      function* (input) {
-        return yield* client.client
-          .createEnvironmentLinkChallenge({
-            headers: bearerHeaders(input.clerkToken),
-            payload: input.payload,
-          })
-          .pipe(
-            Effect.mapError(relayRequestError("create relay environment link challenge")),
-            timeoutRelayRequest("Relay environment link challenge"),
-          );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.createEnvironmentLinkChallenge"),
-      withRelayClientTracing,
-    ),
-    linkEnvironment: Effect.fnUntraced(
-      function* (input) {
-        return yield* client.client
-          .linkEnvironment({
-            headers: bearerHeaders(input.clerkToken),
-            payload: input.payload,
-          })
-          .pipe(
-            Effect.mapError(relayRequestError("link relay environment")),
-            timeoutRelayRequest("Relay environment linking"),
-          );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.linkEnvironment"),
-      withRelayClientTracing,
-    ),
-    unlinkEnvironment: Effect.fnUntraced(
-      function* (input) {
-        return yield* client.client
-          .unlinkEnvironment({
-            headers: bearerHeaders(input.clerkToken),
-            params: { environmentId: input.environmentId },
-          })
-          .pipe(
-            Effect.mapError(relayRequestError("unlink relay environment")),
-            timeoutRelayRequest("Relay environment unlinking"),
-          );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.unlinkEnvironment"),
-      withRelayClientTracing,
-    ),
-    getEnvironmentStatus: Effect.fnUntraced(
-      function* (input) {
-        yield* Effect.annotateCurrentSpan({
-          "environment.id": input.environmentId,
-        });
-        return yield* runDpopRequest(
-          {
-            clerkToken: input.clerkToken,
-            scopes: input.scopes,
-            target: dpopProofTargets.getEnvironmentStatus(input.environmentId),
-          },
-          (authorization) =>
-            client.dpopClient
-              .getEnvironmentStatus({
-                headers: dpopHeaders(authorization),
-                params: { environmentId: input.environmentId },
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("get relay environment status")),
-                timeoutRelayRequest("Relay environment status request"),
-              ),
+    listEnvironments: Effect.fnUntraced(function* (input) {
+      return yield* client.client
+        .listEnvironments({ headers: bearerHeaders(input.clerkToken) })
+        .pipe(
+          Effect.map((response) => response.environments),
+          Effect.mapError(relayRequestError("list relay-managed environments")),
+          timeoutRelayRequest("Relay environment listing"),
         );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.getEnvironmentStatus"),
-      withRelayClientTracing,
-    ),
-    connectEnvironment: Effect.fnUntraced(
-      function* (input) {
-        yield* Effect.annotateCurrentSpan({
-          "environment.id": input.environmentId,
-        });
-        return yield* runDpopRequest(
-          {
-            clerkToken: input.clerkToken,
-            scopes: input.scopes,
-            target: dpopProofTargets.connectEnvironment(input.environmentId),
-          },
-          (authorization) => {
-            const payload: RelayEnvironmentConnectRequest = {
-              ...(input.deviceId ? { deviceId: input.deviceId } : {}),
-              clientKeyThumbprint: authorization.thumbprint,
-            };
-            return client.dpopClient
-              .connectEnvironment({
-                headers: dpopHeaders(authorization),
-                params: { environmentId: input.environmentId },
-                payload,
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("connect relay environment")),
-                timeoutRelayRequest("Relay environment connection"),
-              );
-          },
+    }, Effect.withSpan("clientRuntime.managedRelay.listEnvironments")),
+    listDevices: Effect.fnUntraced(function* (input) {
+      return yield* client.client
+        .listDevicesV2({
+          headers: bearerHeaders(input.clerkToken),
+        })
+        .pipe(
+          Effect.map((response) => response.devices),
+          Effect.mapError(relayRequestError("list relay client devices")),
+          timeoutRelayRequest("Relay client device listing"),
         );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.connectEnvironment"),
-      withRelayClientTracing,
-    ),
-    registerDevice: Effect.fnUntraced(
-      function* (input) {
-        return yield* mobileRegistrationRequest(
-          {
-            clerkToken: input.clerkToken,
-            target: dpopProofTargets.registerDevice(),
-          },
-          (authorization) =>
-            client.mobile
-              .registerDevice({
-                headers: dpopHeaders(authorization),
-                payload: input.payload,
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("register relay mobile device")),
-                timeoutRelayRequest("Relay mobile device registration"),
-              ),
+    }, Effect.withSpan("clientRuntime.managedRelay.listDevices")),
+    createEnvironmentLinkChallenge: Effect.fnUntraced(function* (input) {
+      return yield* client.client
+        .createEnvironmentLinkChallenge({
+          headers: bearerHeaders(input.clerkToken),
+          payload: input.payload,
+        })
+        .pipe(
+          Effect.mapError(relayRequestError("create relay environment link challenge")),
+          timeoutRelayRequest("Relay environment link challenge"),
         );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.registerDevice"),
-      withRelayClientTracing,
-    ),
-    unregisterDevice: Effect.fnUntraced(
-      function* (input) {
-        return yield* mobileRegistrationRequest(
-          {
-            clerkToken: input.clerkToken,
-            target: dpopProofTargets.unregisterDevice(input.deviceId),
-          },
-          (authorization) =>
-            client.mobile
-              .unregisterDevice({
-                headers: dpopHeaders(authorization),
-                params: { deviceId: input.deviceId },
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("unregister relay mobile device")),
-                timeoutRelayRequest("Relay mobile device unregistration"),
-              ),
+    }, Effect.withSpan("clientRuntime.managedRelay.createEnvironmentLinkChallenge")),
+    linkEnvironment: Effect.fnUntraced(function* (input) {
+      return yield* client.client
+        .linkEnvironment({
+          headers: bearerHeaders(input.clerkToken),
+          payload: input.payload,
+        })
+        .pipe(
+          Effect.mapError(relayRequestError("link relay environment")),
+          timeoutRelayRequest("Relay environment linking"),
         );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.unregisterDevice"),
-      withRelayClientTracing,
-    ),
-    getAgentActivitySnapshot: Effect.fnUntraced(
-      function* (input) {
-        return yield* mobileRegistrationRequest(
-          {
-            clerkToken: input.clerkToken,
-            target: dpopProofTargets.getAgentActivitySnapshot(),
-          },
-          (authorization) =>
-            client.mobile
-              .getAgentActivitySnapshot({
-                headers: dpopHeaders(authorization),
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("read relay agent activity snapshot")),
-                timeoutRelayRequest("Relay agent activity snapshot"),
-              ),
+    }, Effect.withSpan("clientRuntime.managedRelay.linkEnvironment")),
+    unlinkEnvironment: Effect.fnUntraced(function* (input) {
+      return yield* client.client
+        .unlinkEnvironment({
+          headers: bearerHeaders(input.clerkToken),
+          params: { environmentId: input.environmentId },
+        })
+        .pipe(
+          Effect.mapError(relayRequestError("unlink relay environment")),
+          timeoutRelayRequest("Relay environment unlinking"),
         );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.getAgentActivitySnapshot"),
-      withRelayClientTracing,
-    ),
-    registerLiveActivity: Effect.fnUntraced(
-      function* (input) {
-        return yield* mobileRegistrationRequest(
-          {
-            clerkToken: input.clerkToken,
-            target: dpopProofTargets.registerLiveActivity(),
-          },
-          (authorization) =>
-            client.mobile
-              .registerLiveActivity({
-                headers: dpopHeaders(authorization),
-                payload: input.payload,
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("register relay live activity")),
-                timeoutRelayRequest("Relay Live Activity registration"),
-              ),
-        );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.registerLiveActivity"),
-      withRelayClientTracing,
-    ),
+    }, Effect.withSpan("clientRuntime.managedRelay.unlinkEnvironment")),
+    getEnvironmentStatus: Effect.fnUntraced(function* (input) {
+      yield* Effect.annotateCurrentSpan({
+        "environment.id": input.environmentId,
+      });
+      return yield* runDpopRequest(
+        {
+          clerkToken: input.clerkToken,
+          scopes: input.scopes,
+          target: dpopProofTargets.getEnvironmentStatus(input.environmentId),
+        },
+        (authorization) =>
+          client.dpopClient
+            .getEnvironmentStatus({
+              headers: dpopHeaders(authorization),
+              params: { environmentId: input.environmentId },
+            })
+            .pipe(
+              Effect.mapError(relayRequestError("get relay environment status")),
+              timeoutRelayRequest("Relay environment status request"),
+            ),
+      );
+    }, Effect.withSpan("clientRuntime.managedRelay.getEnvironmentStatus")),
+    connectEnvironment: Effect.fnUntraced(function* (input) {
+      yield* Effect.annotateCurrentSpan({
+        "environment.id": input.environmentId,
+      });
+      return yield* runDpopRequest(
+        {
+          clerkToken: input.clerkToken,
+          scopes: input.scopes,
+          target: dpopProofTargets.connectEnvironment(input.environmentId),
+        },
+        (authorization) => {
+          const payload: RelayEnvironmentConnectRequest = {
+            ...(input.deviceId ? { deviceId: input.deviceId } : {}),
+            clientKeyThumbprint: authorization.thumbprint,
+          };
+          return client.dpopClient
+            .connectEnvironment({
+              headers: dpopHeaders(authorization),
+              params: { environmentId: input.environmentId },
+              payload,
+            })
+            .pipe(
+              Effect.mapError(relayRequestError("connect relay environment")),
+              timeoutRelayRequest("Relay environment connection"),
+            );
+        },
+      );
+    }, Effect.withSpan("clientRuntime.managedRelay.connectEnvironment")),
+    registerDevice: Effect.fnUntraced(function* (input) {
+      return yield* mobileRegistrationRequest(
+        {
+          clerkToken: input.clerkToken,
+          target: dpopProofTargets.registerDevice(),
+        },
+        (authorization) =>
+          client.mobile
+            .registerDevice({
+              headers: dpopHeaders(authorization),
+              payload: input.payload,
+            })
+            .pipe(
+              Effect.mapError(relayRequestError("register relay mobile device")),
+              timeoutRelayRequest("Relay mobile device registration"),
+            ),
+      );
+    }, Effect.withSpan("clientRuntime.managedRelay.registerDevice")),
+    unregisterDevice: Effect.fnUntraced(function* (input) {
+      return yield* mobileRegistrationRequest(
+        {
+          clerkToken: input.clerkToken,
+          target: dpopProofTargets.unregisterDevice(input.deviceId),
+        },
+        (authorization) =>
+          client.mobile
+            .unregisterDevice({
+              headers: dpopHeaders(authorization),
+              params: { deviceId: input.deviceId },
+            })
+            .pipe(
+              Effect.mapError(relayRequestError("unregister relay mobile device")),
+              timeoutRelayRequest("Relay mobile device unregistration"),
+            ),
+      );
+    }, Effect.withSpan("clientRuntime.managedRelay.unregisterDevice")),
+    getAgentActivitySnapshot: Effect.fnUntraced(function* (input) {
+      return yield* mobileRegistrationRequest(
+        {
+          clerkToken: input.clerkToken,
+          target: dpopProofTargets.getAgentActivitySnapshot(),
+        },
+        (authorization) =>
+          client.mobile
+            .getAgentActivitySnapshot({
+              headers: dpopHeaders(authorization),
+            })
+            .pipe(
+              Effect.mapError(relayRequestError("read relay agent activity snapshot")),
+              timeoutRelayRequest("Relay agent activity snapshot"),
+            ),
+      );
+    }, Effect.withSpan("clientRuntime.managedRelay.getAgentActivitySnapshot")),
+    registerLiveActivity: Effect.fnUntraced(function* (input) {
+      return yield* mobileRegistrationRequest(
+        {
+          clerkToken: input.clerkToken,
+          target: dpopProofTargets.registerLiveActivity(),
+        },
+        (authorization) =>
+          client.mobile
+            .registerLiveActivity({
+              headers: dpopHeaders(authorization),
+              payload: input.payload,
+            })
+            .pipe(
+              Effect.mapError(relayRequestError("register relay live activity")),
+              timeoutRelayRequest("Relay Live Activity registration"),
+            ),
+      );
+    }, Effect.withSpan("clientRuntime.managedRelay.registerLiveActivity")),
     resetTokenCache: SynchronizedRef.set(cachedTokens, []).pipe(
       Effect.andThen(options.accessTokenStore ? options.accessTokenStore.clear : Effect.void),
       Effect.withSpan("clientRuntime.managedRelay.resetTokenCache"),
-      withRelayClientTracing,
     ),
   });
 });

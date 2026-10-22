@@ -1,5 +1,6 @@
+// infra/relay/src/worker.ts
+// assembles the relay worker and its runtime services
 import * as Alchemy from "alchemy";
-import * as Axiom from "alchemy/Axiom";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Drizzle from "alchemy/Drizzle/Postgres";
 import * as Config from "effect/Config";
@@ -27,7 +28,6 @@ import {
 } from "./http/Api.ts";
 import * as RelayHttpApi from "./http/Api.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
-import { RelayObservability } from "./observability.ts";
 import * as Observability from "./observability.ts";
 import * as DeliveryAttempts from "./agentActivity/DeliveryAttempts.ts";
 import * as AgentActivityRows from "./agentActivity/AgentActivityRows.ts";
@@ -136,7 +136,6 @@ export const layer = Api.make(
     const relayApiZone = yield* RelayApiZone;
     const managedEndpointZone = yield* ManagedEndpointZone;
     const randomApnsDeliveryJobSigningSecret = yield* ApnsDeliveryJobSigningSecret;
-    yield* RelayObservability;
 
     const apnsEnabled = yield* Config.Boolean("APNS_ENABLED").pipe(Config.withDefault(true));
     const apnsCredentials = apnsEnabled
@@ -477,17 +476,6 @@ export const layer = Api.make(
         // request rather than duplicating it.
         Layer.provideMerge(
           Alchemy.Telemetry.layer(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
-        ),
-        Layer.provideMerge(
-          Layer.unwrap(
-            Effect.map(RelayObservability, (observability) =>
-              Axiom.Telemetry({
-                serviceName: "t3code-relay",
-                token: observability.workerIngestToken,
-                traces: observability.traces,
-              }),
-            ),
-          ),
         ),
       ),
     ),

@@ -1,3 +1,5 @@
+// apps/mobile/src/connection/platform.ts
+// supplies native client connectivity and authentication capabilities
 import {
   ClientCapabilities,
   PlatformConnectionSource,
@@ -196,10 +198,6 @@ const layerCapabilities = Layer.effectContext(
           bearerToken: Effect.succeed(Option.none()),
         }),
       ),
-      // The relay device id already persists in secure storage; analytics only sends its hash.
-      Context.add(ClientCapabilities.AnalyticsDevice, {
-        id: storage.loadOrCreateAgentAwarenessDeviceId.pipe(Effect.option),
-      }),
       Context.add(
         ClientCapabilities.RelayDeviceIdentity,
         ClientCapabilities.RelayDeviceIdentity.of({
