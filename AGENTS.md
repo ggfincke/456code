@@ -1,8 +1,8 @@
 # 456code
 
-456code is Garrett's personal agent orchestration system, primarily hosted on furnace and controlled from the Mac desktop app, native iPhone app, or browser. Read [the guiding principles](docs/principles.md) before product, architecture, provider, connectivity, or upstream integration work.
+456code is my personal agent orchestration platform, primarily hosted on furnace and controlled from my Mac desktop app, native iPhone app, or browser. Read [the guiding principles](docs/principles.md) before product, architecture, provider, connectivity, or upstream integration work.
 
-Those principles govern this fork and require Garrett's explicit approval to change. When retained T3 guidance below or historical fork records conflict with them, follow the principles and call out the conflict. Review upstream updates explicitly against them. Do not silently restore removed analytics or T3 product services, hide priority providers, or compromise the working setup to stay current. Minimal divergence is a maintenance preference, not the product goal.
+Those principles govern this fork and require my explicit approval to change. When retained T3 guidance below or historical fork records conflict with them, follow the principles and call out the conflict. Review upstream updates explicitly against them. Do not silently restore removed analytics or T3 product services, hide priority providers, or compromise my working setup to stay current. Minimal divergence is a maintenance preference, not the product goal.
 
 The principles describe requirements, not verified current behavior or blanket authorization to remove features. Preserve existing data and scope implementation to the current request. Applicable development and verification rules below still apply.
 

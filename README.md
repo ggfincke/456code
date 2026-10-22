@@ -1,6 +1,6 @@
 # 456code
 
-456code is Garrett's personal agent orchestration system derived from T3 Code. It is designed around directing agents on furnace from the Mac desktop app, native iPhone app, or browser over a private network or tailnet. Local Mac hosting is an explicit option; iPad support follows useful upstream work.
+456code is my personal agent orchestration platform, derived from T3 Code. I'm building it around directing agents on furnace from my Mac desktop app, native iPhone app, or browser over a private network or tailnet. Local Mac hosting is an explicit option; iPad support follows useful upstream work.
 
 [Guiding principles](docs/principles.md) define product scope, privacy requirements, provider priorities, and how regular T3 updates are evaluated. They describe the intended product; the current application still contains upstream behavior that needs separate implementation work.
 

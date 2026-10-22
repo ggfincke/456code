@@ -1,6 +1,6 @@
 # 456code fork operations and integration record
 
-456code is a personal agent orchestration system derived from T3 Code. The [guiding principles](../principles.md) govern current product scope and upstream updates. This record preserves earlier integration details and evidence; dated verification applies only to the recorded revision. Use Git history for the current upstream integration base. Source updates remain separate from the installed application and existing runtime data.
+456code is my personal agent orchestration platform, derived from T3 Code. The [guiding principles](../principles.md) govern current product scope and upstream updates. This record preserves earlier integration details and evidence; dated verification applies only to the recorded revision. Use Git history for the current upstream integration base. Source updates remain separate from the installed application and existing runtime data.
 
 ## Base and local change groups
 
@@ -15,7 +15,7 @@
 - September 23 base: `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc` (361 upstream commits, pinned to the September 23 audit).
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-Earlier integrations minimized changes to upstream V2 conversation orchestration, provider lifecycle, persistence/migrations, Git implementations, shared client runtime and `apps/mobile`. Those historical boundaries are no longer restrictions on changes needed to meet the guiding principles. Regular upstream merges remain the strategy, with an explicit principles review for each update. Preserve Garrett's working setup and report deferred upstream changes when adaptation is too costly. Prefer existing boundaries and tooling where they serve the personal workflow.
+Earlier integrations minimized changes to upstream V2 conversation orchestration, provider lifecycle, persistence/migrations, Git implementations, shared client runtime and `apps/mobile`. Those historical boundaries are no longer restrictions on changes needed to meet the guiding principles. Regular upstream merges remain the strategy, with an explicit principles review for each update. Preserve my working setup and report deferred upstream changes when adaptation is too costly. Prefer existing boundaries and tooling where they serve my workflow.
 
 Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. CI retains code/build checks, Windows tests and advisory mobile fingerprints on standard GitHub runners; automated releases, deployments, previews and upstream administration workflows have been removed.
 
