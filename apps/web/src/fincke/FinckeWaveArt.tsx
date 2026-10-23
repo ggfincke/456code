@@ -2,6 +2,8 @@
 // renders fincke's ribbon geometry with the active theme
 import { useId } from "react";
 
+import "./waveBackdrop.css";
+
 // original fincke.dev ribbon geometry, cropped to the opening S
 const FINCKE_WAVE_FIELD = { x: 0, y: -26, width: 470, height: 150 } as const;
 
@@ -25,10 +27,14 @@ export function FinckeWaveArt({ compact = false }: { compact?: boolean }) {
   const backId = `${idPrefix}-stage-alpha-back`;
   const frontId = `${idPrefix}-stage-alpha-front`;
   const field = compact ? FINCKE_WAVE_BUTTON_FIELD : FINCKE_WAVE_FIELD;
-  // the send button paints light waves on teal under fincke ocean; other themes keep
-  // their accent wave on the sidebar color
-  const base = compact ? "var(--fincke-send-base, var(--sidebar))" : "var(--sidebar)";
-  const wave = compact ? "var(--fincke-send-wave, var(--primary))" : "var(--primary)";
+  // fincke ocean paints fincke.dev's own colors (teal ribbons on the ocean field, light
+  // waves on teal for the send button); other themes keep their accent on the sidebar color
+  const base = compact
+    ? "var(--fincke-send-base, var(--sidebar))"
+    : "var(--fincke-wave-field, var(--sidebar))";
+  const wave = compact
+    ? "var(--fincke-send-wave, var(--primary))"
+    : "var(--fincke-wave-accent, var(--primary))";
 
   return (
     <svg
