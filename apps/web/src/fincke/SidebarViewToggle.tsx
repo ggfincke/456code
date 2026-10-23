@@ -3,12 +3,14 @@
 import "./sidebarTokens.css";
 import { useAtomValue } from "@effect/atom-react";
 import { BellIcon, ListTreeIcon, type LucideIcon } from "lucide-react";
+import { useEffect } from "react";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { updateClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { shortcutLabelForCommand } from "../keybindings";
 import { cn } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { toggleSidebarView } from "./sidebarView";
 
 function SidebarViewButton({
   icon: Icon,
@@ -56,6 +58,15 @@ export function SidebarViewToggle() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   // the shortcut flips views, so it belongs on whichever button it would switch to
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggleView") ?? null;
+
+  // a focused desktop preview page forwards the chord as a menu action
+  useEffect(
+    () =>
+      window.desktopBridge?.onMenuAction((action) => {
+        if (action === "sidebar.toggleView") void toggleSidebarView();
+      }),
+    [],
+  );
 
   return (
     <div className="relative z-10 flex shrink-0 items-center gap-0.5">
