@@ -378,8 +378,8 @@ create a separate worktree from its backup ref; do not reset the dirty checkout.
 
 ## Routine future update
 
-1. Record local HEAD, the incorporated upstream base and the exact new upstream target. Preserve dirty state and existing worktrees before changing either checkout.
-2. Fetch origin and upstream, start an isolated integration branch from current `origin/main`, and merge one pinned upstream target normally. Preserve both histories and resolve the extension hooks against the current upstream interfaces.
+1. Record local HEAD, the incorporated upstream base and the exact new upstream target. The target is the latest stable upstream release tag; record both the tag and its commit. Merge an untagged or nightly commit early only for a specific fix I need or when the latest stable release is more than 10 days old, and say why in the PR. Preserve dirty state and existing worktrees before changing either checkout.
+2. Fetch origin and the upstream target, start an isolated integration branch from current `origin/main`, and merge that one pinned target normally. Preserve both histories and resolve the extension hooks against the current upstream interfaces.
 3. Keep upstream changes in orchestration, provider lifecycle, persistence, mobile, Git, tooling and layout. Adapt the named extension modules or their narrow registration points instead.
 4. Review every path differing from the new upstream target. Keep upstream dependency resolutions and patches, with extension dependencies added through their existing owners.
 5. Run focused existing tests, affected package typechecks and targeted formatting/lint/builds. When interactive acceptance is requested, use an isolated app environment to recheck Coral resume, theme persistence, worktree scope and displayed-diff identity.
