@@ -430,7 +430,7 @@ Replaced components (review the original's upstream history since the recorded c
 
 | Upstream original                                                                                                       | Fork copy                | Copied from              |
 | ----------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------------------------ |
-| `apps/web/src/components/LegacySidebar.tsx`                                                                             | `ProjectSidebar.tsx`     | `8fc72daee`              |
+| `apps/web/src/components/LegacySidebar.tsx`                                                                             | `ProjectSidebar.tsx`     | `044f07257`              |
 | `apps/web/src/components/sidebar/SidebarThreadRow.tsx` (row + `SortableThreadRow`)                                      | `ActivityThreadRow.tsx`  | `3690c8625`              |
 | `apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx` + action layout of `ComposerPendingApprovalActions.tsx` | `FinckeApprovalCard.tsx` | `e74924538`, `d356059c8` |
 | `apps/web/src/components/chat/TraitsPicker.tsx` (`TraitsPicker`)                                                        | `EffortPicker.tsx`       | `c19d9977d`              |
