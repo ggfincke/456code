@@ -96,6 +96,7 @@
         "test/fixtures/**/*.mjs",
         "src/components/LegacySidebar.tsx",
         "src/components/sidebar/SidebarThreadRow.tsx",
+        "src/components/sidebar/SidebarDraftBlock.tsx",
       ],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still

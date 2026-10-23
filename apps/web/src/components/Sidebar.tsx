@@ -204,7 +204,7 @@ import {
 } from "./sidebar/SidebarThreadRow";
 import { SortableThreadRow } from "../fincke/ActivityThreadRow";
 import { SidebarViewToggle } from "../fincke/SidebarViewToggle";
-import { SidebarDraftBlock } from "./sidebar/SidebarDraftBlock";
+import { SidebarDraftBlock } from "../fincke/ActivityDraftBlock";
 import {
   SidebarDragBoundary,
   SidebarSectionHeader,
@@ -2954,7 +2954,6 @@ export default function Sidebar() {
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
                           key="draft-sessions"
-                          projectByKey={projectByKey}
                           projectDisplayNameByKey={projectDisplayNameByKey}
                           scopedProjectKeys={scopedProjectKeys}
                           routeDraftId={routeDraftIdForRows}
