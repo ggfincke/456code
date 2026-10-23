@@ -45,6 +45,7 @@ import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
+import type { SidebarRouteReveal } from "./sidebar/routeReveal";
 import { getSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
 import {
@@ -332,6 +333,10 @@ function ProjectProjectionRetention() {
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
+  const [sidebarRouteReveal] = useState<SidebarRouteReveal>(() => ({
+    observedKey: null,
+    pendingKey: null,
+  }));
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   useThreadVisitedMigration();
@@ -424,9 +429,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               <SettingsSidebarNav pathname={pathname} />
             </>
           ) : legacySidebarEnabled ? (
-            <LegacyThreadSidebar />
+            <LegacyThreadSidebar routeReveal={sidebarRouteReveal} />
           ) : (
-            <ThreadSidebar />
+            <ThreadSidebar routeReveal={sidebarRouteReveal} />
           )}
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
