@@ -18,6 +18,8 @@
       // loads the macOS signer by path. the release helpers stay for upstream parity even
       // though this fork drops the release workflows that call them.
       "entry": [
+        // These fixture scripts are injected into a browser page by path.
+        "fixtures/issue-16534/*.js",
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
