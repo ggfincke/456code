@@ -9,6 +9,11 @@ import {
   presentProviderGoal,
 } from "@t3tools/client-runtime/state/thread-execution";
 import { childThreadInputsTitle } from "@t3tools/client-runtime/state/threads";
+import {
+  FinckeBackgroundWorkIcon,
+  FinckeBackgroundWorkStopIcon,
+  FinckeBackgroundWorkTitle,
+} from "~/fincke/BackgroundWorkBanner";
 import { GitBranchIcon, MessageCircleIcon, ShieldQuestionIcon, TargetIcon } from "lucide-react";
 import { Fragment } from "react";
 import { cn } from "~/lib/utils";
@@ -107,15 +112,18 @@ export function backgroundWorkBannerItem(input: {
     variant: "default",
     priority: "activity",
     icon: (
-      <span
-        className={cn(
-          "size-1.5 rounded-full bg-foreground",
-          presentation.waiting && "motion-safe:animate-status-pulse",
-        )}
-        aria-hidden="true"
-      />
+      <>
+        <span
+          className={cn(
+            "size-1.5 rounded-full bg-foreground",
+            presentation.waiting && "motion-safe:animate-status-pulse",
+          )}
+          aria-hidden="true"
+        />
+        <FinckeBackgroundWorkIcon presentation={presentation} />
+      </>
     ),
-    title: presentation.title,
+    title: <FinckeBackgroundWorkTitle presentation={presentation} />,
     description:
       presentation.items.length === 1 && presentation.items[0]?.childThreadId === undefined
         ? undefined
@@ -152,6 +160,7 @@ export function backgroundWorkBannerItem(input: {
         disabled={input.stopDisabled}
         onClick={() => void input.onStop()}
       >
+        <FinckeBackgroundWorkStopIcon />
         {input.stopping ? "Stopping..." : "Stop"}
       </Button>
     ),
