@@ -2170,6 +2170,9 @@ importers:
       '@t3tools/provider-testing':
         specifier: workspace:*
         version: link:../packages/provider-testing
+      '@t3tools/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       effect:
         specifier: 4.0.5
         version: 4.0.5
