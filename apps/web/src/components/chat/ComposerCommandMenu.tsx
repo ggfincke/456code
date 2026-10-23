@@ -26,10 +26,17 @@ import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
-import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import { Command, CommandGroup, CommandGroupLabel, CommandItem, CommandList } from "../ui/command";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { ComposerBanner } from "./ComposerBanner";
 import { resolvePullRequestState } from "../pullRequest/pullRequestPresentation";
+import {
+  SLASH_MENU_KIND_NAME_CLASS,
+  SLASH_MENU_SECTION_LABEL,
+  slashMenuDescription,
+  slashMenuKind,
+  slashMenuSections,
+} from "../../fincke/slashMenu";
 
 export type ComposerCommandItem =
   | {
@@ -85,18 +92,27 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
+  sectioned?: boolean;
   emptyStateText?: string;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  const sections = props.sectioned
+    ? slashMenuSections(props.items)
+    : [{ kind: null, items: props.items }];
 
   useLayoutEffect(() => {
     if (!props.activeItemId || !listRef.current) return;
     const el = listRef.current.querySelector<HTMLElement>(
       `[data-composer-item-id="${CSS.escape(props.activeItemId)}"]`,
     );
+    // the first row of a section brings its header into view with it
+    const header = el?.previousElementSibling;
+    if (header?.getAttribute("data-slot") === "command-group-label") {
+      header.scrollIntoView({ block: "nearest" });
+    }
     el?.scrollIntoView({ block: "nearest" });
   }, [props.activeItemId]);
 
@@ -112,7 +128,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
     >
       <ComposerBanner.Surface
         ref={listRef}
-        className="flex min-h-0 w-full flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
+        placement="floating"
+        className="flex min-h-0 w-full flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) [--glass-opacity:100%] **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
         {props.items.length > 0 ? (
@@ -121,20 +138,25 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             aria-label={props.triggerKind ? LISTBOX_LABEL_BY_TRIGGER[props.triggerKind] : undefined}
             className="max-h-72 min-h-0 scroll-pb-6"
           >
-            <CommandGroup>
-              {props.items.map((item) => (
-                <ComposerCommandMenuItem
-                  key={item.id}
-                  optionId={composerSuggestionOptionId(props.listId, item.id)}
-                  item={item}
-                  triggerKind={props.triggerKind}
-                  resolvedTheme={props.resolvedTheme}
-                  isActive={props.activeItemId === item.id}
-                  onHighlight={props.onHighlightedItemChange}
-                  onSelect={props.onSelect}
-                />
-              ))}
-            </CommandGroup>
+            {sections.map((section) => (
+              <CommandGroup key={section.kind ?? "items"}>
+                {section.kind ? (
+                  <CommandGroupLabel>{SLASH_MENU_SECTION_LABEL[section.kind]}</CommandGroupLabel>
+                ) : null}
+                {section.items.map((item) => (
+                  <ComposerCommandMenuItem
+                    key={item.id}
+                    optionId={composerSuggestionOptionId(props.listId, item.id)}
+                    item={item}
+                    triggerKind={props.triggerKind}
+                    resolvedTheme={props.resolvedTheme}
+                    isActive={props.activeItemId === item.id}
+                    onHighlight={props.onHighlightedItemChange}
+                    onSelect={props.onSelect}
+                  />
+                ))}
+              </CommandGroup>
+            ))}
           </CommandList>
         ) : (
           <div className="px-5 pt-3.5 pb-7">
@@ -174,6 +196,8 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
     props.triggerKind === "slash-command" && props.item.type === "skill" ? props.item.skill : null;
   const pullRequestPresentation =
     props.item.type === "pull-request" ? resolvePullRequestState(props.item.pullRequest) : null;
+  const slashKind = slashMenuKind(props.item);
+  const description = slashMenuDescription(props.item);
 
   return (
     <CommandItem
@@ -210,7 +234,12 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         />
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 max-w-[45%] shrink-0 truncate font-sans text-xs font-medium">
+        <span
+          className={cn(
+            "min-w-0 max-w-[45%] shrink-0 truncate font-sans text-xs font-medium",
+            slashKind && SLASH_MENU_KIND_NAME_CLASS[slashKind],
+          )}
+        >
           {isSlashSkill ? (
             <>
               <span className="text-secondary-label">/skill:</span>
@@ -221,7 +250,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           )}
         </span>
         <span className="min-w-0 flex-1 truncate text-left text-secondary-label text-xs">
-          {props.item.description}
+          {description}
         </span>
         {skillSourceKind ? (
           <SkillSourceBadge

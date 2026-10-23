@@ -17,13 +17,13 @@ import {
 import type { ReactNode } from "react";
 
 import type { DraftId } from "../../composerDraftStore";
+import { EffortPicker } from "../../fincke/EffortPicker";
 import { getProviderModelCapabilities } from "../../providerModels";
 import type { ComposerControlSize } from "./ComposerControl";
 import {
   getReasoningTraitStep,
   shouldRenderTraitsControls,
   TraitsMenuContent,
-  TraitsPicker,
   type PromptUltrathink,
 } from "./TraitsPicker";
 
@@ -219,7 +219,7 @@ export function getComposerReasoningStep(input: {
 }
 
 function renderTraitsControl(
-  Component: typeof TraitsMenuContent | typeof TraitsPicker,
+  Component: typeof TraitsMenuContent | typeof EffortPicker,
   input: TraitsRenderInput,
 ): ReactNode {
   const {
@@ -286,5 +286,5 @@ export function renderProviderTraitsMenuContent(input: TraitsRenderInput): React
 }
 
 export function renderProviderTraitsPicker(input: TraitsRenderInput): ReactNode {
-  return renderTraitsControl(TraitsPicker, input);
+  return renderTraitsControl(EffortPicker, input);
 }

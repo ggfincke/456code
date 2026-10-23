@@ -1,0 +1,287 @@
+/* apps/web/src/fincke/effortSlider.css */
+/* effort popover track, thumb & one-shot ultra effects; every theme, fincke tokens win when present */
+
+[data-slot="effort-panel"] {
+  --effort-accent: var(--fincke-teal, var(--primary));
+  --effort-ultra-from: var(--fincke-blue, #82aaff);
+  --effort-ultra-to: var(--fincke-purple, #c792ea);
+  --effort-track: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --effort-snap: cubic-bezier(0.34, 1.45, 0.55, 1);
+}
+
+html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
+  --effort-track: var(--sidebar);
+}
+
+/* the composer chip turns purple on ultra levels */
+[data-effort-ultra] {
+  color: var(--fincke-purple, #c792ea);
+}
+
+[data-slot="effort-level"] {
+  font-size: 15px;
+  color: var(--effort-accent);
+  transition:
+    color 0.18s,
+    opacity 0.18s;
+}
+
+[data-slot="effort-level"][data-ultra] {
+  color: var(--effort-ultra-to);
+}
+
+[data-slot="effort-level"][data-preview] {
+  opacity: 0.75;
+}
+
+/* header fast-mode toggle: a quiet bolt that fills yellow while on */
+[data-slot="effort-fast"] {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+[data-slot="effort-fast"]:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+[data-slot="effort-fast"][aria-pressed="true"] {
+  background: var(--fincke-yellow, var(--warning));
+  color: #0f111a;
+}
+
+[data-slot="effort-fast"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+[data-slot="effort-track"] {
+  position: relative;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, #ffffff 5%, transparent);
+  border-radius: 14px;
+  background: var(--effort-track);
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+
+[data-slot="effort-track"][data-dragging] {
+  cursor: grabbing;
+}
+
+[data-slot="effort-track"][aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+[data-slot="effort-track"]:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--effort-accent) 40%, transparent);
+}
+
+/* the clip is the size container, so the ultra gradient spans the whole track, not the fill */
+[data-slot="effort-clip"] {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  container-type: inline-size;
+}
+
+[data-slot="effort-fill"] {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--effort-accent);
+  transition: width 0.26s var(--effort-snap);
+}
+
+[data-slot="effort-ultra"] {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 100cqw;
+  background: linear-gradient(90deg, var(--effort-ultra-from), var(--effort-ultra-to));
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+}
+
+[data-slot="effort-track"][data-ultra] [data-slot="effort-ultra"] {
+  opacity: 1;
+}
+
+[data-slot="effort-spark"] {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+[data-slot="effort-stop"] {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--foreground) 30%, transparent);
+  pointer-events: none;
+  transition: background-color 0.15s;
+}
+
+[data-slot="effort-stop"][data-ultra] {
+  background: color-mix(in srgb, var(--effort-ultra-to) 50%, transparent);
+}
+
+[data-slot="effort-stop"][data-filled] {
+  background: color-mix(in srgb, #000000 45%, transparent);
+}
+
+/* the default level is a hollow ring */
+[data-slot="effort-stop"][data-default] {
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  background: transparent;
+  box-shadow: 0 0 0 1.5px var(--muted-foreground);
+}
+
+[data-slot="effort-stop"][data-default][data-filled] {
+  background: transparent;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, #000000 55%, transparent);
+}
+
+[data-slot="effort-thumb"] {
+  --effort-ring: var(--effort-accent);
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 4px color-mix(in srgb, #000000 53%, transparent);
+  pointer-events: none;
+  transition:
+    left 0.26s var(--effort-snap),
+    transform 0.12s ease-out,
+    box-shadow 0.15s;
+}
+
+[data-slot="effort-track"][data-ultra] [data-slot="effort-thumb"] {
+  --effort-ring: var(--effort-ultra-to);
+}
+
+[data-slot="effort-track"]:hover [data-slot="effort-thumb"] {
+  box-shadow:
+    0 1px 4px color-mix(in srgb, #000000 53%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--effort-ring) 14%, transparent);
+}
+
+[data-slot="effort-track"][data-dragging] [data-slot="effort-thumb"] {
+  transform: scale(1.14);
+  box-shadow:
+    0 2px 8px color-mix(in srgb, #000000 63%, transparent),
+    0 0 0 6px color-mix(in srgb, var(--effort-ring) 20%, transparent);
+}
+
+/* while dragging the thumb & fill follow the pointer directly */
+[data-slot="effort-track"][data-dragging] [data-slot="effort-thumb"],
+[data-slot="effort-track"][data-dragging] [data-slot="effort-fill"] {
+  transition:
+    transform 0.12s ease-out,
+    box-shadow 0.15s;
+}
+
+/* one-shot ultra entry: a sheen sweeps the fill and dots burst from the thumb.
+   both wait for the snap to settle and end invisible, so nothing keeps painting */
+[data-slot="effort-sheen"] {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, #ffffff 63%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  pointer-events: none;
+  animation: fincke-effort-sheen 0.7s ease-out 0.18s both;
+}
+
+@keyframes fincke-effort-sheen {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+[data-slot="effort-burst"] {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  pointer-events: none;
+}
+
+[data-slot="effort-burst"] > span {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #ffffff;
+  animation: fincke-effort-burst 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) 0.18s both;
+}
+
+[data-slot="effort-burst"] > span[data-purple] {
+  background: var(--effort-ultra-to);
+}
+
+@keyframes fincke-effort-burst {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0;
+  }
+  1% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.2);
+    opacity: 0;
+  }
+}
+
+[data-slot="effort-description"] {
+  min-height: 15px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+[data-slot="effort-description"][data-ultra] {
+  color: color-mix(in srgb, var(--effort-ultra-to) 69%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="effort-panel"] * {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  [data-slot="effort-sheen"],
+  [data-slot="effort-burst"] {
+    display: none;
+  }
+}

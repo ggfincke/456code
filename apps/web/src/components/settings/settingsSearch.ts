@@ -1,6 +1,6 @@
 // apps/web/src/components/settings/settingsSearch.ts
 // indexes settings destinations and their searchable terms
-import { HOSTED_APP_CHANNEL } from "~/branding";
+import { APP_BASE_NAME, HOSTED_APP_CHANNEL } from "~/branding";
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
 import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@t3tools/contracts";
@@ -245,6 +245,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Render math",
     to: "/settings/appearance",
     searchTerms: ["latex tex katex equations formulas markdown"],
+  },
+  {
+    id: "project-folder-tint",
+    title: "Color project folders",
+    to: "/settings/appearance",
+    searchTerms: ["sidebar folder icon tint hue projects"],
   },
   {
     id: "panel-animations",
@@ -553,12 +559,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["phone tablet iPhone iPad iOS Android App Store Google Play QR"],
   },
   {
-    id: "privacy-policy",
-    title: "Privacy policy",
-    to: "/settings/general",
-    searchTerms: ["privacy policy legal"],
-  },
-  {
     id: "telemetry-export",
     title: "OpenTelemetry export",
     to: "/settings/diagnostics",
@@ -591,9 +591,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "legacy-sidebar",
-    title: "Sidebar (legacy)",
+    title: "Group sidebar by project",
     to: "/settings/general",
-    searchTerms: ["project thread tree old flat list"],
+    searchTerms: ["sidebar projects view thread tree activity flat list"],
   },
   {
     id: "keybindings",
@@ -768,7 +768,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "pull-request-links-open-in-app",
-    title: "Open pull requests in T3 Code",
+    title: `Open pull requests in ${APP_BASE_NAME}`,
     to: "/settings/integrations",
     searchTerms: ["pr links github browser external click default pull request view panel"],
   },

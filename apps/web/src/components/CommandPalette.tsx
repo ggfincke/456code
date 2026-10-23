@@ -58,6 +58,7 @@ import {
   FolderPlusIcon,
   MessageSquareDashedIcon,
   LinkIcon,
+  ListTreeIcon,
   MessageSquareIcon,
   PaletteIcon,
   RotateCcwIcon,
@@ -232,6 +233,7 @@ import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+import { toggleSidebarView } from "../fincke/sidebarView";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -330,6 +332,13 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         event.stopPropagation();
         setOpen(false);
         void navigate({ to: "/usage" });
+        return;
+      }
+      if (command === "sidebar.toggleView") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        void toggleSidebarView();
         return;
       }
       const mode = overlayModeForCommand(command);
@@ -1537,6 +1546,18 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "usage.open",
     run: async () => {
       await navigate({ to: "/usage" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:sidebar-view",
+    searchTerms: ["sidebar", "view", "projects", "activity", "tree", "group", "toggle"],
+    title: "Toggle sidebar view",
+    icon: <ListTreeIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "sidebar.toggleView",
+    run: async () => {
+      await toggleSidebarView();
     },
   });
 

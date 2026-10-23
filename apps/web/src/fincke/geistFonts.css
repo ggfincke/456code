@@ -1,0 +1,6 @@
+/* apps/web/src/fincke/geistFonts.css */
+/* linux default font stacks; settings -> appearance overrides still win via inline style */
+html[data-fincke-fonts="geist"] {
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Liberation Mono", monospace;
+}

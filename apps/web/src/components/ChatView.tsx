@@ -20,6 +20,7 @@ import { useComposerSend } from "./chat/useComposerSend";
 import { useComposerResume } from "./chat/useComposerResume";
 import { useImplementPlanInNewThread } from "./chat/useProposedPlanSend";
 import { canSendToProvider } from "../fincke/coralSendPolicy";
+import { deferEscapeStop } from "../fincke/escapeStop";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -2749,6 +2750,15 @@ export default function ChatView(props: ChatViewProps) {
         queuedRunsControlRef.current?.editLatest(event.repeat) === true,
       "thread.stop": ({ event }) => {
         if (!canInterruptRunningThread) return false;
+        if (event.key === "Escape") {
+          const context = getShortcutContext(event.target);
+          deferEscapeStop(
+            event,
+            { editableOutsideComposer: context.editableFocus && !context.composerFocus },
+            () => void onInterruptStable(),
+          );
+          return false;
+        }
         if (!event.repeat) void onInterruptStable();
       },
     },

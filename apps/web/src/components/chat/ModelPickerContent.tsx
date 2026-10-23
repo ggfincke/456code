@@ -62,6 +62,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
+import { ModelPickerLimitsLine } from "../../fincke/ModelPickerLimitsLine";
 
 type ModelPickerItem = {
   slug: string;
@@ -927,6 +928,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             />
+            {!isSearching && selectedEntry ? (
+              <ModelPickerLimitsLine
+                environmentId={props.environmentId}
+                entry={selectedEntry}
+                instanceEntries={instanceEntries}
+              />
+            ) : null}
 
             <ModelPickerList
               listRef={modelListRef}

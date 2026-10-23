@@ -14,6 +14,7 @@ import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "./DesktopWslEnvironment.ts";
+import { DESKTOP_APP_NAME } from "../fincke/build.ts";
 
 // Exported so callers that parse pool ids (e.g. the pickFolder IPC handler in
 // ipc/methods/window.ts) reference the same prefix this module produces.
@@ -136,7 +137,7 @@ export const layer = Layer.effect(
                 Ref.set(
                   preflightErrorRef,
                   Option.some(
-                    "Another T3 Code server is using this distro's T3 home, or an older background service is set up for it. Stop that server or pair with it, or try `t3 update` in the distro. If the older launcher cannot update, run `t3 service uninstall` and optionally reinstall with `t3 service install` from a current CLI in the distro. Use `npx t3@latest` if `t3` is missing or outdated, and pass `--base-dir` with the service's T3 home to each command.",
+                    `Another ${DESKTOP_APP_NAME} server is using this distro's T3 home, or an older background service is set up for it. Stop that server or pair with it, or try \`t3 update\` in the distro. If the older launcher cannot update, run \`t3 service uninstall\` and optionally reinstall with \`t3 service install\` from a current CLI in the distro. Use \`npx t3@latest\` if \`t3\` is missing or outdated, and pass \`--base-dir\` with the service's T3 home to each command.`,
                   ),
                 ),
               ),

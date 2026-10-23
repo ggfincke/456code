@@ -1,6 +1,6 @@
 // apps/desktop/src/app/DesktopEnvironment.ts
 // resolves desktop paths and fork branding
-import { finckeDesktop, isFinckeDesktop } from "../fincke/build.ts";
+import { DESKTOP_APP_NAME, finckeDesktop, isFinckeDesktop } from "../fincke/build.ts";
 import type {
   DesktopAppBranding,
   DesktopAppStageLabel,
@@ -88,8 +88,6 @@ export class DesktopEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
 
-const APP_BASE_NAME = isFinckeDesktop ? finckeDesktop.name : "T3 Code";
-
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
@@ -107,9 +105,9 @@ export function resolveDesktopAppBranding(input: {
 }): DesktopAppBranding {
   const stageLabel = resolveDesktopAppStageLabel(input);
   return {
-    baseName: APP_BASE_NAME,
+    baseName: DESKTOP_APP_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    displayName: `${DESKTOP_APP_NAME} (${stageLabel})`,
   };
 }
 

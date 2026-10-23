@@ -1,0 +1,68 @@
+/* apps/web/src/fincke/backgroundWorkBanner.css */
+/* fincke ocean's composer banners: sidebar-dark strips, and kind icons on background work */
+
+[data-fincke-work-icon],
+[data-fincke-work-stop-icon] {
+  display: none;
+}
+
+/* every attached notice shares the strip surface, so restyling one banner never strands the others */
+html[data-theme-id="fincke-ocean"]
+  :is([data-composer-banner-surface], [data-slot="composer-banner-peek"]) {
+  --chat-composer-attached-surface: var(--sidebar);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="composer-banner-icon"]:has(> [data-fincke-work-icon])
+  > :not([data-fincke-work-icon]) {
+  display: none;
+}
+
+html[data-theme-id="fincke-ocean"] [data-slot="composer-banner-icon"] > [data-fincke-work-icon] {
+  display: block;
+  width: 14px;
+  height: 14px;
+  color: var(--fincke-teal);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="composer-banner-icon"]
+  > [data-fincke-work-icon="waiting"] {
+  color: var(--fincke-yellow);
+}
+
+html[data-theme-id="fincke-ocean"] [data-fincke-work-tag] {
+  margin-right: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fincke-muted);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-composer-banner-row]:has([data-fincke-work-icon])
+  [data-slot="inline-button"] {
+  color: var(--fincke-teal);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-composer-banner-row]:has([data-fincke-work-icon])
+  [data-slot="composer-banner-actions"]
+  [data-slot="button"] {
+  color: var(--fincke-muted);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-composer-banner-row]:has([data-fincke-work-icon])
+  [data-slot="composer-banner-actions"]
+  [data-slot="button"]:hover {
+  background: color-mix(in srgb, var(--fincke-red) 13%, transparent);
+  color: var(--fincke-red);
+}
+
+html[data-theme-id="fincke-ocean"] [data-fincke-work-stop-icon] {
+  display: block;
+  width: 9px;
+  height: 9px;
+  fill: currentColor;
+}

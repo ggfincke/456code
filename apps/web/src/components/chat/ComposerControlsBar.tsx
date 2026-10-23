@@ -25,6 +25,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
+import { ComposerLimitIndicator } from "../../fincke/ComposerLimitIndicator";
 
 /**
  * The composer footer controls: model picker, traits, mode controls and the overflow menu for
@@ -277,6 +278,11 @@ export function ComposerControlsBar(props: {
         />
       ) : null}
       {composerModelPicker}
+      <ComposerLimitIndicator
+        environmentId={environmentId}
+        instanceId={selectedInstanceId}
+        instanceEntries={providerInstanceEntries}
+      />
 
       <>
         {restingBlockDefs.map((def, index) => {

@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import type * as Fiber from "effect/Fiber";
 
 import * as Electron from "electron";
+import { DESKTOP_APP_NAME } from "../fincke/build.ts";
 
 const MIN_DURATION_MS = 280;
 const MAX_DURATION_MS = 680;
@@ -114,7 +115,7 @@ function createWindow(
     resizable: false,
     show: false,
     skipTaskbar: true,
-    title: "T3 Code Snapshot Animation",
+    title: `${DESKTOP_APP_NAME} Snapshot Animation`,
     transparent: true,
     webPreferences: {
       backgroundThrottling: false,

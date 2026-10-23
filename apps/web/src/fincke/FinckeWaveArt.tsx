@@ -2,6 +2,8 @@
 // renders fincke's ribbon geometry with the active theme
 import { useId } from "react";
 
+import "./waveBackdrop.css";
+
 // original fincke.dev ribbon geometry, cropped to the opening S
 const FINCKE_WAVE_FIELD = { x: 0, y: -26, width: 470, height: 150 } as const;
 
@@ -25,9 +27,18 @@ export function FinckeWaveArt({ compact = false }: { compact?: boolean }) {
   const backId = `${idPrefix}-stage-alpha-back`;
   const frontId = `${idPrefix}-stage-alpha-front`;
   const field = compact ? FINCKE_WAVE_BUTTON_FIELD : FINCKE_WAVE_FIELD;
+  // fincke ocean paints fincke.dev's own colors (teal ribbons on the ocean field, light
+  // waves on teal for the send button); other themes keep their accent on the sidebar color
+  const base = compact
+    ? "var(--fincke-send-base, var(--sidebar))"
+    : "var(--fincke-wave-field, var(--sidebar))";
+  const wave = compact
+    ? "var(--fincke-send-wave, var(--primary))"
+    : "var(--fincke-wave-accent, var(--primary))";
 
   return (
     <svg
+      data-stage-art="fincke"
       className="h-full w-full"
       fill="none"
       preserveAspectRatio="none"
@@ -43,8 +54,8 @@ export function FinckeWaveArt({ compact = false }: { compact?: boolean }) {
           y2="310.697"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0.1" style={{ stopColor: "var(--primary)" }} />
-          <stop offset="0.9" style={{ stopColor: "var(--sidebar)" }} stopOpacity="0.15" />
+          <stop offset="0.1" style={{ stopColor: wave }} />
+          <stop offset="0.9" style={{ stopColor: base }} stopOpacity="0.15" />
         </linearGradient>
         <linearGradient
           id={frontId}
@@ -54,11 +65,11 @@ export function FinckeWaveArt({ compact = false }: { compact?: boolean }) {
           y2="247.71"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="1" style={{ stopColor: "var(--primary)" }} />
+          <stop offset="1" style={{ stopColor: wave }} />
         </linearGradient>
       </defs>
 
-      <rect {...field} style={{ fill: "var(--sidebar)" }} />
+      <rect {...field} style={{ fill: base }} />
       <path d={FINCKE_WAVE_BACK} fill={`url(#${backId})`} />
       <path d={FINCKE_WAVE_FRONT} fill={`url(#${frontId})`} />
     </svg>

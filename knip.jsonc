@@ -91,7 +91,15 @@
     "apps/web": {
       // Worktree setup (scripts/setup-worktree.ts) runs this directly, and evidence
       // fixtures run under node.
-      "entry": ["scripts/warm-dep-cache.ts", "test/fixtures/**/*.mjs"],
+      // upstream originals of components the fork replaced in src/fincke stay as
+      // entries so upstream merges keep applying while nothing imports them.
+      "entry": [
+        "scripts/warm-dep-cache.ts",
+        "test/fixtures/**/*.mjs",
+        "src/components/LegacySidebar.tsx",
+        "src/components/sidebar/SidebarThreadRow.tsx",
+        "src/components/sidebar/SidebarDraftBlock.tsx",
+      ],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.

@@ -12,6 +12,7 @@ import { escapeDesktopEntryExecArgument } from "../app/DesktopLinuxUrlHandler.ts
 import type { LinuxWindowSnapshot } from "./LinuxSnapShot.ts";
 import { readPortalPng } from "./linuxCaptureSession.ts";
 import { startNativeCaptureFeedback } from "./NativeCaptureFeedback.ts";
+import { DESKTOP_APP_NAME } from "../fincke/build.ts";
 export { isKdeCaptureSession } from "./linuxCaptureSession.ts";
 
 export const KDE_CAPTURE_EXECUTABLE = "t3-kde-snap-shot";
@@ -33,7 +34,7 @@ function kdeCaptureDesktopEntry(executable: string): string {
   return [
     "[Desktop Entry]",
     "Type=Application",
-    "Name=T3 Code SnapShots",
+    `Name=${DESKTOP_APP_NAME} SnapShots`,
     "NoDisplay=true",
     `Exec=${escapeDesktopEntryExecArgument(executable)} check`,
     // KService reads this custom property as a KConfig list, not an XDG ';' list.
@@ -41,6 +42,14 @@ function kdeCaptureDesktopEntry(executable: string): string {
     MARKER,
     "",
   ].join("\n");
+}
+
+// helpers installed under an earlier display name stay current; only the functional lines matter
+function withoutDisplayName(entry: string): string {
+  return entry
+    .split("\n")
+    .filter((line) => !line.startsWith("Name="))
+    .join("\n");
 }
 
 function run(executable: string, args: string[], signal?: AbortSignal): Promise<string> {
@@ -115,9 +124,13 @@ export class KdeCaptureSetup {
       if (!bundle)
         return {
           status: "error",
-          message: "The capture helper is missing from this build. Update or reinstall T3 Code.",
+          message: `The capture helper is missing from this build. Update or reinstall ${DESKTOP_APP_NAME}.`,
         };
-      if (!installed.equals(bundle) || entry.toString() !== kdeCaptureDesktopEntry(executable))
+      if (
+        !installed.equals(bundle) ||
+        withoutDisplayName(entry.toString()) !==
+          withoutDisplayName(kdeCaptureDesktopEntry(executable))
+      )
         return {
           status: "update-required",
           message: "Update the bundled capture helper to continue.",
@@ -160,7 +173,7 @@ export class KdeCaptureSetup {
       const bundle = await regularFile(this.paths.bundle);
       if (!bundle)
         throw new Error(
-          "The capture helper is missing from this build. Update or reinstall T3 Code.",
+          `The capture helper is missing from this build. Update or reinstall ${DESKTOP_APP_NAME}.`,
         );
       await NodeFSP.mkdir(directory, { recursive: true });
       await NodeFSP.mkdir(NodePath.dirname(desktop), { recursive: true });

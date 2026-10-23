@@ -21,7 +21,7 @@ const APP_BUNDLE_ID = isDevelopment
   ? `com.ggfincke.456code.thin.dev.${devBundleIdSuffix || "local"}`
   : "com.ggfincke.456code.thin";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["code456-thin-dev"] : ["code456-thin"];
-const LAUNCHER_VERSION = 20;
+const LAUNCHER_VERSION = 21;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
   "assets",
@@ -276,8 +276,8 @@ function resolveMacBundleInfoPlistStrings(executableName) {
     CFBundleExecutable: executableName,
     CFBundleIconFile: "icon.icns",
     NSScreenCaptureUsageDescription:
-      "T3 Code captures the active window when you use the snapshot shortcut.",
-    NSDocumentsFolderUsageDescription: "T3 Code reads project files you open in the desktop app.",
+      "456code captures the active window when you use the snapshot shortcut.",
+    NSDocumentsFolderUsageDescription: "456code reads project files you open in the desktop app.",
   };
 }
 

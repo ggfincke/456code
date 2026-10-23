@@ -1058,6 +1058,7 @@ export function resolveWorkingStartedAt(
   return resolveThreadWorkingStartedAt(thread);
 }
 
+// the fincke-ocean variants recolor statuses to the material palette; other themes keep these
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {
@@ -1066,8 +1067,10 @@ export function resolveThreadStatusPill(input: {
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
     return {
       label: "Pending Approval",
-      colorClass: "text-amber-600 dark:text-amber-300/90",
-      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      colorClass:
+        "text-amber-600 dark:text-amber-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-yellow)",
+      dotClass:
+        "bg-amber-500 dark:bg-amber-300/90 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-yellow)",
       pulse: false,
     };
   }
@@ -1075,8 +1078,10 @@ export function resolveThreadStatusPill(input: {
   if (thread.hasPendingUserInput || thread.pendingSubagentRequest === "user_input") {
     return {
       label: "Awaiting Input",
-      colorClass: "text-indigo-600 dark:text-indigo-300/90",
-      dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
+      colorClass:
+        "text-indigo-600 dark:text-indigo-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-yellow)",
+      dotClass:
+        "bg-indigo-500 dark:bg-indigo-300/90 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-yellow)",
       pulse: false,
     };
   }
@@ -1087,8 +1092,10 @@ export function resolveThreadStatusPill(input: {
   ) {
     return {
       label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      colorClass:
+        "text-sky-600 dark:text-sky-300/80 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
+      dotClass:
+        "bg-sky-500 dark:bg-sky-300/80 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-teal)",
       pulse: true,
     };
   }
@@ -1100,8 +1107,10 @@ export function resolveThreadStatusPill(input: {
   ) {
     return {
       label: "Connecting",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      colorClass:
+        "text-sky-600 dark:text-sky-300/80 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
+      dotClass:
+        "bg-sky-500 dark:bg-sky-300/80 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-teal)",
       pulse: true,
     };
   }
@@ -1112,8 +1121,10 @@ export function resolveThreadStatusPill(input: {
   ) {
     return {
       label: "Waiting",
-      colorClass: "text-sidebar-muted-foreground",
-      dotClass: "bg-sidebar-muted-foreground",
+      colorClass:
+        "text-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
+      dotClass:
+        "bg-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-teal)",
       pulse: false,
     };
   }
@@ -1121,8 +1132,10 @@ export function resolveThreadStatusPill(input: {
   if (hasUnseenFailure(thread)) {
     return {
       label: "Failed",
-      colorClass: "text-red-600 dark:text-red-300/90",
-      dotClass: "bg-red-500 dark:bg-red-300/90",
+      colorClass:
+        "text-red-600 dark:text-red-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-red)",
+      dotClass:
+        "bg-red-500 dark:bg-red-300/90 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-red)",
       pulse: false,
     };
   }
@@ -1135,8 +1148,10 @@ export function resolveThreadStatusPill(input: {
   if (hasPlanReadyPrompt) {
     return {
       label: "Plan Ready",
-      colorClass: "text-violet-600 dark:text-violet-300/90",
-      dotClass: "bg-violet-500 dark:bg-violet-300/90",
+      colorClass:
+        "text-violet-600 dark:text-violet-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-purple)",
+      dotClass:
+        "bg-violet-500 dark:bg-violet-300/90 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-purple)",
       pulse: false,
     };
   }
@@ -1144,8 +1159,10 @@ export function resolveThreadStatusPill(input: {
   if (hasUnseenCompletion(thread)) {
     return {
       label: "Completed",
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
+      colorClass:
+        "text-emerald-600 dark:text-emerald-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-blue)",
+      dotClass:
+        "bg-emerald-500 dark:bg-emerald-300/90 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-blue)",
       pulse: false,
     };
   }

@@ -413,12 +413,12 @@ export function useEnvironmentIdentificationMode(): EnvironmentIdentificationMod
  * Held at the default sidebar until client settings hydrate: the pre-hydration snapshot is just
  * the schema defaults, so resolving against it could mount one sidebar and then swap it out
  * once persisted settings land — remounting the whole tree for everyone instead of only for
- * legacy opt-ins.
+ * profiles that saved the other view.
  */
 export function useLegacySidebarEnabled(): boolean {
   const settingsHydrated = useClientSettingsHydrated();
   const legacySidebarEnabled = useClientSettings((settings) => settings.legacySidebarEnabled);
-  return settingsHydrated && legacySidebarEnabled;
+  return settingsHydrated ? legacySidebarEnabled : DEFAULT_CLIENT_SETTINGS.legacySidebarEnabled;
 }
 
 export async function prepareModelPreferencesPatch(

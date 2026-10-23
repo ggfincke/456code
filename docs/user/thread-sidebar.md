@@ -43,6 +43,15 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Choose a sidebar view
+
+On web and desktop, the sidebar has two views. **Projects** nests each project's
+recent threads under it. **Activity** shows threads from every project in one list,
+grouped by state. Switch with the two buttons next to the app name, press
+`mod+alt+u`, or run **Toggle sidebar view** from the command palette. To give
+projects without their own icon a colored folder, turn on **Settings → Appearance →
+Color project folders**.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

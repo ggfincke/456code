@@ -71,6 +71,7 @@ import {
 } from "./TimelineRowParts";
 import { UserMessageContextReferenceChip } from "./UserMessageContextChips";
 import { resolvePreviewAnnotationImage } from "./TimelineUserMessageRow.logic";
+import { APP_BASE_NAME } from "~/branding";
 
 function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
   const ctx = use(TimelineRowCtx);
@@ -424,7 +425,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           className="me-1 text-2xs text-muted-foreground/70"
           data-user-message-attribution="t3code"
         >
-          Sent by T3 Code
+          Sent by {APP_BASE_NAME}
         </p>
       ) : null}
       {row.message.inputIntent === "steer" ||
@@ -432,6 +433,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
       <div
+        data-slot="user-message-bubble"
         className={cn(
           "relative min-w-0 max-w-[80%] rounded-2xl bg-message text-message-foreground",
           !folded && "p-3",

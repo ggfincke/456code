@@ -143,8 +143,10 @@ a shortcut.
 
 ## Commands with special behavior
 
-`thread.stop` interrupts the running turn in the focused thread. It has no default
-shortcut; assign one in **Settings → Keybindings**.
+`thread.stop` interrupts the running turn in the focused thread. It defaults to
+`escape` while a turn is running outside the terminal. An open menu, dialog, or
+the composer's command menu takes Escape first, and so does a text field other
+than the composer, so Escape there only closes or cancels it.
 
 `thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the
 bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a
@@ -153,6 +155,9 @@ actions of the same kind undo together. The notice remains available for five
 seconds after the latest action. Right after an action, the shortcut works even
 in a text field such as the composer. Once you type or press another key, the
 field gets its own undo back. Terminals always keep their native shortcut.
+
+`sidebar.toggleView` (`mod+alt+u` by default) switches the sidebar between the
+Projects and Activity views; see [Choose a sidebar view](./thread-sidebar.md#choose-a-sidebar-view).
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
