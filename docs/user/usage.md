@@ -1,7 +1,7 @@
 # Usage and limits
 
-Open **Usage** from the sidebar or the command palette, or press `mod+u` on web and
-desktop when the terminal is not focused. Customize `usage.open` in
+Open **Usage** from the command palette, or press `mod+u` on web and desktop when the
+terminal is not focused. Customize `usage.open` in
 **Settings → Keybindings**.
 
 ## Understand your usage
