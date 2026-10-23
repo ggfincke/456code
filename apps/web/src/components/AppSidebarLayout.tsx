@@ -429,7 +429,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               <SettingsSidebarNav pathname={pathname} />
             </>
           ) : legacySidebarEnabled ? (
-            <ProjectSidebar />
+            <ProjectSidebar routeReveal={sidebarRouteReveal} />
           ) : (
             <ThreadSidebar routeReveal={sidebarRouteReveal} />
           )}
