@@ -1,5 +1,6 @@
 /* apps/web/src/fincke/oceanTokens.css */
 /* material ocean high contrast accents, active only while fincke ocean is the theme */
+@import "./threadPane.css";
 
 /* values come from the vs code theme (t3dotgg material theme, ocean high contrast).
    fork components read them as var(--fincke-*, <fallback>) so other themes keep their look */

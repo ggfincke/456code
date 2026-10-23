@@ -1,0 +1,87 @@
+/* apps/web/src/fincke/threadPane.css */
+/* fincke ocean's thread pane: user bubbles, file colors, send button */
+
+/* the user's own messages read as a selection-tinted bubble */
+html[data-theme-id="fincke-ocean"] [data-slot="user-message-bubble"] {
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--fincke-selection) 22%, transparent);
+  color: #d4d8f0;
+}
+
+/* folded agent messages keep their own header padding */
+html[data-theme-id="fincke-ocean"]
+  :not([data-user-message-attribution="agent"])
+  > [data-slot="user-message-bubble"] {
+  padding: 9px 15px;
+}
+
+html[data-theme-id="fincke-ocean"] [data-slot="user-message-bubble"] .chat-markdown {
+  color: inherit;
+}
+
+/* changed files and file chips color the existing pierre icons by language.
+   the icons set their color inline, so these need !important */
+html[data-theme-id="fincke-ocean"]
+  :is([data-changed-files-state], .chat-markdown-file-link)
+  [data-pierre-icon] {
+  color: var(--fincke-muted) !important;
+}
+
+html[data-theme-id="fincke-ocean"]
+  :is([data-changed-files-state], .chat-markdown-file-link)
+  [data-pierre-icon]:is([data-icon-token="typescript"], [data-icon-token="python"]) {
+  color: var(--fincke-blue) !important;
+}
+
+html[data-theme-id="fincke-ocean"]
+  :is([data-changed-files-state], .chat-markdown-file-link)
+  [data-pierre-icon][data-icon-token="react"] {
+  color: var(--fincke-cyan) !important;
+}
+
+html[data-theme-id="fincke-ocean"]
+  :is([data-changed-files-state], .chat-markdown-file-link)
+  [data-pierre-icon]:is([data-icon-token="css"], [data-icon-token="sass"]) {
+  color: var(--fincke-purple) !important;
+}
+
+html[data-theme-id="fincke-ocean"]
+  :is([data-changed-files-state], .chat-markdown-file-link)
+  [data-pierre-icon]:is([data-icon-token="json"], [data-icon-token="yml"]) {
+  color: var(--fincke-yellow) !important;
+}
+
+html[data-theme-id="fincke-ocean"]
+  :is([data-changed-files-state], .chat-markdown-file-link)
+  [data-pierre-icon][data-icon-token="markdown"] {
+  color: var(--fincke-teal) !important;
+}
+
+html[data-theme-id="fincke-ocean"]
+  :is([data-changed-files-state], .chat-markdown-file-link)
+  [data-pierre-icon]:is([data-icon-token="rust"], [data-icon-token="go"]) {
+  color: var(--fincke-orange) !important;
+}
+
+/* +/- counts follow material green & red unless the user picked the blue/orange diff scheme */
+html[data-theme-id="fincke-ocean"]:not([data-diff-color-scheme="blue-orange"])
+  [data-changed-files-state] {
+  --diff-addition: var(--fincke-green);
+  --diff-deletion: var(--fincke-red);
+}
+
+/* send button: light waves on teal with a dark arrow, faded until there is something to send */
+html[data-theme-id="fincke-ocean"] {
+  --fincke-send-base: var(--fincke-teal);
+  --fincke-send-wave: color-mix(in srgb, #ffffff 55%, var(--fincke-teal));
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="composer-send-button"]:has([data-stage-art="fincke"]) {
+  color: var(--background);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="composer-send-button"]:has([data-stage-art="fincke"]):disabled {
+  opacity: 0.35;
+}

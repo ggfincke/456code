@@ -432,6 +432,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
       <div
+        data-slot="user-message-bubble"
         className={cn(
           "relative min-w-0 max-w-[80%] rounded-2xl bg-message text-message-foreground",
           !folded && "p-3",
