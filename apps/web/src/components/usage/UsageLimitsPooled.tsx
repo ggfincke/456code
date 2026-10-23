@@ -27,6 +27,7 @@ import {
   useState,
 } from "react";
 
+import { limitBarColor } from "../../fincke/providerLimits";
 import { ensureLocalApi } from "../../localApi";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -509,7 +510,7 @@ function PoolBar({
               window={member.window}
               reset={restores.get(member.account.key)}
               refillPercent={member.refillPercent}
-              color={color}
+              color={limitBarColor(remainingPercent(member.window), color)}
               now={now}
               index={position + 1}
               showAccountName={pool.columns.length > 1}
