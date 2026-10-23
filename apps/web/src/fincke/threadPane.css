@@ -1,5 +1,5 @@
 /* apps/web/src/fincke/threadPane.css */
-/* fincke ocean's thread pane: user bubbles, file colors, send button */
+/* fincke ocean's thread pane: user bubbles, approval card, file colors, mode segments, send button */
 
 /* the user's own messages read as a selection-tinted bubble */
 html[data-theme-id="fincke-ocean"] [data-slot="user-message-bubble"] {
@@ -17,6 +17,21 @@ html[data-theme-id="fincke-ocean"]
 
 html[data-theme-id="fincke-ocean"] [data-slot="user-message-bubble"] .chat-markdown {
   color: inherit;
+}
+
+/* the approval drawer becomes a neutral card; FinckeApprovalCard owns its padding and tint */
+html[data-theme-id="fincke-ocean"]
+  [data-chat-composer-top-drawer]:has(> [data-slot="fincke-approval-card"]) {
+  --chat-composer-attached-outline: var(--border);
+  --chat-composer-attached-tint: transparent;
+  --composer-banner-padding-block: 0px;
+  padding-inline: 0;
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-chat-composer-top-drawer]:has(> [data-slot="fincke-approval-card"])::before {
+  border-radius: 8px 8px 0 0;
+  background: var(--sidebar);
 }
 
 /* changed files and file chips color the existing pierre icons by language.
@@ -68,6 +83,25 @@ html[data-theme-id="fincke-ocean"]:not([data-diff-color-scheme="blue-orange"])
   [data-changed-files-state] {
   --diff-addition: var(--fincke-green);
   --diff-deletion: var(--fincke-red);
+}
+
+/* build | plan: the active segment takes the teal tint */
+html[data-theme-id="fincke-ocean"] [data-slot="fincke-mode-segments"] [data-slot="toggle"] {
+  color: var(--fincke-dim);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="fincke-mode-segments"]
+  [data-slot="toggle"]:not([data-pressed]):hover {
+  color: var(--foreground);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="fincke-mode-segments"]
+  [data-slot="toggle"][data-pressed] {
+  background: color-mix(in srgb, var(--fincke-teal) 12%, transparent);
+  color: var(--fincke-teal);
+  box-shadow: none;
 }
 
 /* send button: light waves on teal with a dark arrow, faded until there is something to send */

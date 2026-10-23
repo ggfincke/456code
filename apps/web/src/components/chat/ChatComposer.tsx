@@ -208,6 +208,8 @@ import {
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
+import { FinckeApprovalCard } from "../../fincke/FinckeApprovalCard";
+import { useFinckeOcean } from "../../fincke/useFinckeOcean";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -639,6 +641,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
+  const finckeOcean = useFinckeOcean();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   const {
@@ -3544,7 +3547,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 variant={activePendingApproval ? "warning" : "info"}
                 density={activePendingApproval ? "spacious" : "default"}
               >
-                {activePendingApproval ? (
+                {activePendingApproval && finckeOcean ? (
+                  <FinckeApprovalCard
+                    approval={activePendingApproval}
+                    pendingCount={pendingApprovals.length}
+                    disabled={!canOperateThread}
+                    isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
+                    onRespondToApproval={onRespondToApproval}
+                  />
+                ) : activePendingApproval ? (
                   <ComposerBanner.Row
                     layout="approval"
                     data-chat-composer-collapsed-controls="true"
