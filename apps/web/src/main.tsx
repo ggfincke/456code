@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
 import "./index.css";
+import { applyGeistFontDefaults } from "./fincke/geistFonts";
 
 import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
@@ -21,6 +22,8 @@ prepareProviderAuthDelivery();
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
+
+applyGeistFontDefaults();
 
 if (isElectron) {
   syncDocumentElectronPlatformClasses(navigator.platform);
