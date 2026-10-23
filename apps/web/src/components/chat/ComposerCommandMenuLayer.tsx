@@ -20,8 +20,11 @@ function composerCommandMenuPositionsEqual(
 
 export function ComposerCommandMenuLayer(props: {
   anchor: HTMLElement | null;
+  // attached drawers tuck under the composer's top edge; floating ones match its width and sit above it
+  placement?: "attached" | "floating";
   children: ReactNode;
 }) {
+  const floating = props.placement === "floating";
   const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
 
   useLayoutEffect(() => {
@@ -39,13 +42,13 @@ export function ComposerCommandMenuLayer(props: {
       const drawerInsetRem = Number.parseFloat(
         window.getComputedStyle(form ?? anchor).getPropertyValue("--chat-composer-drawer-inset"),
       );
-      const drawerInset = drawerInsetRem * rootFontSizePx;
+      const drawerInset = floating ? 0 : drawerInsetRem * rootFontSizePx;
       const width = rect.width - drawerInset * 2;
       if (width <= 0) {
         setPosition(null);
         return;
       }
-      const composerOverlap = rootFontSizePx + 1;
+      const composerOverlap = floating ? -rootFontSizePx / 2 : rootFontSizePx + 1;
       const next = {
         bottom: window.innerHeight - rect.top - composerOverlap,
         left: rect.left + drawerInset,
@@ -72,7 +75,7 @@ export function ComposerCommandMenuLayer(props: {
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [props.anchor]);
+  }, [floating, props.anchor]);
 
   if (!props.anchor || !position) return null;
 

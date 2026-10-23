@@ -38,6 +38,7 @@ import {
   searchSlashCommandItems,
   slashCommandItemsForPromptPosition,
 } from "./composerSlashCommandSearch";
+import { groupSlashMenuItems, isSlashMenuBrowse } from "../../fincke/slashMenu";
 
 const COMPOSER_PULL_REQUEST_LIST_LIMIT = 99;
 const COMPOSER_PULL_REQUEST_RESULT_LIMIT = 12;
@@ -75,6 +76,9 @@ export function useComposerMenuItems({
   readonly showSkillsInSlashMenu: boolean;
 }) {
   const composerTriggerKind = composerTrigger?.kind ?? null;
+  // the bare / menu browses by kind; a typed filter keeps one ranked list so the best match leads
+  const sectioned =
+    composerTrigger?.kind === "slash-command" && isSlashMenuBrowse(composerTrigger.query);
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const pullRequestTriggerQuery =
     composerTrigger?.kind === "pull-request" ? composerTrigger.query : "";
@@ -236,7 +240,8 @@ export function useComposerMenuItems({
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
         composerTrigger.rangeStart === 0,
       );
-      return searchSlashCommandItems(slashCommandItems, query);
+      const matches = searchSlashCommandItems(slashCommandItems, query);
+      return sectioned ? groupSlashMenuItems(matches) : matches;
     }
     if (composerTrigger.kind === "skill") {
       return searchProviderSkills(selectedProviderSkills, composerTrigger.query).map((skill) => ({
@@ -340,5 +345,5 @@ export function useComposerMenuItems({
       : "No matching command.";
   })();
 
-  return { items, isLoading, emptyState };
+  return { items, isLoading, emptyState, sectioned };
 }

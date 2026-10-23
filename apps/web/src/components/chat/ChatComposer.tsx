@@ -1216,6 +1216,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     items: composerMenuItems,
     isLoading: isComposerMenuLoading,
     emptyState: composerMenuEmptyState,
+    sectioned: composerMenuSectioned,
   } = useComposerMenuItems({
     composerTrigger,
     environmentId,
@@ -3735,13 +3736,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   : ""}
               </div>
               {composerSuggestionsVisible && (
-                <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
+                <ComposerCommandMenuLayer anchor={composerMenuAnchor} placement="floating">
                   <ComposerCommandMenu
                     listId={composerSuggestionListId}
                     items={composerMenuItems}
                     resolvedTheme={resolvedTheme}
                     isLoading={isComposerMenuLoading}
                     triggerKind={composerTriggerKind}
+                    sectioned={composerMenuSectioned}
                     emptyStateText={composerMenuEmptyState}
                     activeItemId={activeComposerMenuItem?.id ?? null}
                     onHighlightedItemChange={onComposerMenuItemHighlightedStable}
