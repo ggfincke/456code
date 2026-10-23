@@ -14,6 +14,7 @@ import { satisfiesSemverRange } from "@t3tools/shared/semver";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { parseWslDistroList, type WslDistro } from "./wslPathParsing.ts";
+import { DESKTOP_APP_NAME } from "../fincke/build.ts";
 
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
 const LIST_TIMEOUT = Duration.seconds(8);
@@ -441,7 +442,7 @@ const NODE_PTY_BINARY_MISSING_EXIT_CODE = 4;
 
 const formatNodePtyProbeFailureReason = (exitCode: number): string | null =>
   exitCode === NODE_PTY_BINARY_MISSING_EXIT_CODE
-    ? "WSL support is missing from this T3 Code build: the packaged Linux node-pty binary was not included. Install a build that includes WSL support."
+    ? `WSL support is missing from this ${DESKTOP_APP_NAME} build: the packaged Linux node-pty binary was not included. Install a build that includes WSL support.`
     : null;
 
 // Captures the login-shell PATH as `resolvedPath:` so the launch can forward the

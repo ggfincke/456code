@@ -8,10 +8,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
-vi.mock("./build.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./build.ts")>()),
-  isFinckeDesktop: true,
-}));
+vi.mock("./build.ts", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./build.ts")>();
+  return { ...original, isFinckeDesktop: true, DESKTOP_APP_NAME: original.finckeDesktop.name };
+});
 
 import { DesktopEnvironment, layer } from "../app/DesktopEnvironment.ts";
 import { resolveUserDataPath } from "../app/DesktopUserData.ts";
