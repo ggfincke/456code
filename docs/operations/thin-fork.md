@@ -21,7 +21,7 @@ Existing upstream tests stay in their original locations. The three September 23
 
 ## Product and ownership boundaries
 
-**Appearance:** `assets/fincke`, web `src/fincke`, and desktop `src/fincke/FreshProfile.ts`. Fincke Ocean is an imported environment theme with ID `fincke-ocean`; it does not replace T3's built-in Ocean. Only a profile with neither settings nor a conversation database is seeded. Later starts respect its existing selection. The icon and wave use T3's standard asset/backdrop entry points. Setup and other product copy must follow the guiding principles; retained T3 copy is not a permanent ownership boundary.
+**Appearance:** `assets/fincke`, web `src/fincke`, and desktop `src/fincke/FreshProfile.ts`. Fincke Ocean is an imported environment theme with ID `fincke-ocean`; it does not replace T3's built-in Ocean. Its role colors come from VS Code's Material Theme Ocean High Contrast (the t3dotgg marketplace build); the app's VS Code importer derives its own colors, so the mapping is maintained by hand. Fork `--fincke-*` accents in `apps/web/src/fincke/oceanTokens.css` apply only while it is selected. Only a profile with neither settings nor a conversation database is seeded. Later starts respect its existing selection. The icon and wave use T3's standard asset/backdrop entry points. Setup and other product copy must follow the guiding principles; retained T3 copy is not a permanent ownership boundary.
 
 **Desktop:** explicit build identity `com.ggfincke.456code.thin`, production Chromium profile `456code-thin-v2` and development profile `456code-thin-dev`, default backend home `~/.456code-thin`, protocol `code456-thin` (development identity, home and protocol variants append `-dev`). An explicit `T3CODE_HOME` is treated as a parent and receives a `456code-thin` suffix; the original environment value is removed from the backend child so it cannot override that bootstrap identity. Managed Codex sign-in returns and desktop handoffs use those personal protocols; callback readers also accept the corresponding upstream schemes. Native and server self-updates are disabled; publication metadata is private and artifact publishing is null. Local artifact builds remain available through the [packaging runbook](release.md). No signing, release destination or deployment is configured for this fork.
 
@@ -388,14 +388,14 @@ Fixes that are not personal preference (overflow, truncation, missing affordance
 
 Every upstream file touched for a personal design change is listed here. Earlier appearance hooks are in the [historical inventory](#historical-modified-file-inventory-september-30).
 
-| Upstream path                                                      | Fork module                         | Kind    | Change                                                                                |
-| ------------------------------------------------------------------ | ----------------------------------- | ------- | ------------------------------------------------------------------------------------- |
-| `apps/web/src/main.tsx`                                            | `apps/web/src/fincke/geistFonts.ts` | Hook    | Applies the Linux Geist defaults at startup.                                          |
-| `apps/web/src/appearanceFonts.ts`                                  | `apps/web/src/fincke/geistFonts.ts` | Hook    | Default sans/code stacks lead with Geist on Linux; default labels drop ` Variable`.   |
-| `apps/web/src/terminal/ghostty/surface.ts`                         | `apps/web/src/fincke/geistFonts.ts` | Hook    | Default terminal stack leads with Geist Mono on Linux.                                |
-| `packages/contracts/src/settings.ts`                               | none                                | Default | Plan mode (`planModeEnabled`) defaults on; upstream gated it behind a legacy setting. |
-| `apps/mobile/src/state/legacy-plan-mode.ts`                        | none                                | Default | Mobile plan mode is on unless the local preference is explicitly off.                 |
-| `apps/mobile/src/features/settings/SettingsThreadsRouteScreen.tsx` | none                                | Default | The mobile Plan Mode switch reflects that default.                                    |
+| Upstream path                                                      | Fork module                                            | Kind    | Change                                                                                |
+| ------------------------------------------------------------------ | ------------------------------------------------------ | ------- | ------------------------------------------------------------------------------------- |
+| `apps/web/src/main.tsx`                                            | `apps/web/src/fincke/geistFonts.ts`, `oceanTokens.css` | Hook    | Applies the Linux Geist defaults and loads the Fincke Ocean accent tokens at startup. |
+| `apps/web/src/appearanceFonts.ts`                                  | `apps/web/src/fincke/geistFonts.ts`                    | Hook    | Default sans/code stacks lead with Geist on Linux; default labels drop ` Variable`.   |
+| `apps/web/src/terminal/ghostty/surface.ts`                         | `apps/web/src/fincke/geistFonts.ts`                    | Hook    | Default terminal stack leads with Geist Mono on Linux.                                |
+| `packages/contracts/src/settings.ts`                               | none                                                   | Default | Plan mode (`planModeEnabled`) defaults on; upstream gated it behind a legacy setting. |
+| `apps/mobile/src/state/legacy-plan-mode.ts`                        | none                                                   | Default | Mobile plan mode is on unless the local preference is explicitly off.                 |
+| `apps/mobile/src/features/settings/SettingsThreadsRouteScreen.tsx` | none                                                   | Default | The mobile Plan Mode switch reflects that default.                                    |
 
 No components are replaced yet.
 

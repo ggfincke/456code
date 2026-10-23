@@ -1,0 +1,36 @@
+/* apps/web/src/fincke/oceanTokens.css */
+/* material ocean high contrast accents, active only while fincke ocean is the theme */
+
+/* values come from the vs code theme (t3dotgg material theme, ocean high contrast).
+   fork components read them as var(--fincke-*, <fallback>) so other themes keep their look */
+html[data-theme-id="fincke-ocean"] {
+  --fincke-teal: #80cbc4;
+  --fincke-yellow: #ffcb6b;
+  --fincke-red: #f07178;
+  --fincke-blue: #82aaff;
+  --fincke-purple: #c792ea;
+  --fincke-green: #c3e88d;
+  --fincke-orange: #f78c6c;
+  --fincke-cyan: #89ddff;
+  --fincke-selection: #717cb4;
+  --fincke-muted: #8f93a2;
+  --fincke-dim: #4b526d;
+}
+
+/* inline code reads like vs code markup instead of a gray chip */
+html[data-theme-id="fincke-ocean"] .chat-markdown :not(pre) > code {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--fincke-cyan) 7%, transparent);
+  color: var(--fincke-cyan);
+}
+
+/* vs code's textLink.foreground is teal; file links and chips keep their own color */
+html[data-theme-id="fincke-ocean"]
+  .chat-markdown
+  a:not(.chat-markdown-file-link, :has([data-slot="context-chip-label"])) {
+  color: var(--fincke-teal);
+}
+
+html[data-theme-id="fincke-ocean"] [data-slot="composer-shell"]:focus-within {
+  --chat-composer-outline: color-mix(in srgb, var(--fincke-teal) 33%, transparent);
+}

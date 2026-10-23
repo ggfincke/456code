@@ -4,6 +4,7 @@ import { createHashHistory, createBrowserHistory } from "@tanstack/react-router"
 
 import "./index.css";
 import { applyGeistFontDefaults } from "./fincke/geistFonts";
+import "./fincke/oceanTokens.css";
 
 import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
