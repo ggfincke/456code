@@ -27,6 +27,7 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { SettingsRow } from "./settingsLayout";
+import { APP_BASE_NAME } from "~/branding";
 
 interface AcpSessionProject {
   readonly id: ProjectId;
@@ -320,7 +321,7 @@ export function AcpSessionManagementSection(props: {
     <div className="grid gap-3">
       <SettingsRow
         title="Native sessions"
-        description="Resume agent-owned conversations as 456code threads."
+        description={`Resume agent-owned conversations as ${APP_BASE_NAME} threads.`}
         status={
           canList && props.projects.length === 0
             ? "Add a project before importing sessions."

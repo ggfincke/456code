@@ -1,6 +1,6 @@
 // apps/web/src/components/settings/settingsSearch.ts
 // indexes settings destinations and their searchable terms
-import { HOSTED_APP_CHANNEL } from "~/branding";
+import { APP_BASE_NAME, HOSTED_APP_CHANNEL } from "~/branding";
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
 import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@t3tools/contracts";
@@ -774,7 +774,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "pull-request-links-open-in-app",
-    title: "Open pull requests in 456code",
+    title: `Open pull requests in ${APP_BASE_NAME}`,
     to: "/settings/integrations",
     searchTerms: ["pr links github browser external click default pull request view panel"],
   },

@@ -99,6 +99,7 @@ import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
+import { APP_BASE_NAME } from "~/branding";
 
 type WizardStep = "connection" | "agents" | "import";
 const NO_ENVIRONMENTS: readonly EnvironmentId[] = [];
@@ -231,10 +232,10 @@ export function WelcomeWizard({
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
         <WizardHeader
-          title="Set up 456code"
+          title={`Set up ${APP_BASE_NAME}`}
           identity={
             <span className="text-2xl font-medium tracking-tight" aria-hidden>
-              456code
+              {APP_BASE_NAME}
             </span>
           }
         >
@@ -429,7 +430,7 @@ function ConnectionStep({
       ) : null}
       <div className="mt-6 flex flex-col-reverse gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <p className="min-w-0 text-xs leading-relaxed text-muted-foreground">
-          456code keeps diagnostics on your host. Diagnostic exports require a receiver you
+          {APP_BASE_NAME} keeps diagnostics on your host. Diagnostic exports require a receiver you
           configure.
         </p>
         <Button
@@ -518,7 +519,7 @@ function ConnectAccountOption({
             </p>
             <CommandBlock command="npx t3 connect" className="mt-3" />
             <p className="mt-3 text-xs text-muted-foreground">
-              Keep 456code running. Select the computers you want to set up above.
+              Keep {APP_BASE_NAME} running. Select the computers you want to set up above.
             </p>
           </div>
         </CollapsiblePanel>
@@ -627,8 +628,8 @@ function PairingForm({
             </p>
             <CommandBlock command="npx t3 pair" className="mt-2" />
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Start 456code first, or run <code className="font-mono">npx t3 serve</code>. Add{" "}
-              <code className="font-mono">--tailscale</code> to use your tailnet.
+              Start {APP_BASE_NAME} first, or run <code className="font-mono">npx t3 serve</code>.
+              Add <code className="font-mono">--tailscale</code> to use your tailnet.
             </p>
           </CollapsiblePanel>
         </Collapsible>

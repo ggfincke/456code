@@ -23,6 +23,7 @@ import { Alert } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ThemeSearchSection } from "./ThemeSearchSection";
+import { APP_BASE_NAME } from "~/branding";
 
 /**
  * The guard runs on the size before the bytes are ever read: a large file
@@ -495,7 +496,7 @@ export function ThemeImportDialog({
                   <div className="min-w-0">
                     <p className="text-sm font-medium">Theme file</p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {fileName ?? "Drop T3 Code or VS Code .json files"}
+                      {fileName ?? `Drop ${APP_BASE_NAME} or VS Code .json files`}
                     </p>
                   </div>
                   {chooseButton()}

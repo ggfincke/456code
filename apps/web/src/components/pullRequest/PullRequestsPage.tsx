@@ -110,6 +110,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { cn } from "~/lib/utils";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
+import { APP_BASE_NAME } from "~/branding";
 
 function getShortcutContext() {
   return {
@@ -1114,7 +1115,7 @@ export function PullRequestsPage() {
       ) : !pullRequestsSupported ? (
         <PullRequestsUnavailableState
           title="Pull requests unavailable"
-          error="Update your 456code servers to browse pull requests."
+          error={`Update your ${APP_BASE_NAME} servers to browse pull requests.`}
         />
       ) : firstLoad ? (
         <PullRequestListGhost rows={7} />

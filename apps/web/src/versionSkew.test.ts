@@ -2,7 +2,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const branding = vi.hoisted(() => ({ APP_VERSION: "0.0.34" }));
+const branding = vi.hoisted(() => ({ APP_BASE_NAME: "456code", APP_VERSION: "0.0.34" }));
 vi.mock("./branding", () => branding);
 
 import { APP_VERSION } from "./branding";

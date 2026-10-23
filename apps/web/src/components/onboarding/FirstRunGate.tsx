@@ -25,6 +25,7 @@ import { primaryServerConfigAtom, primaryServerWelcomeAtom } from "../../state/s
 import { environmentShell } from "../../state/shell";
 import { environmentThreadShells } from "../../state/threads";
 import { Button } from "../ui/button";
+import { APP_BASE_NAME } from "~/branding";
 
 /**
  * Nothing renders while pending — no shell, no EventRouter (whose welcome
@@ -201,7 +202,7 @@ function FirstRunRecovery({
         <p className="mt-2 text-sm text-muted-foreground">
           {settingsReadFailed
             ? "Your saved settings could not be loaded."
-            : "456code could not confirm this workspace."}
+            : `${APP_BASE_NAME} could not confirm this workspace.`}
         </p>
         <Button
           className="mt-5"
