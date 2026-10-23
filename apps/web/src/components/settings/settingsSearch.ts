@@ -247,6 +247,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["latex tex katex equations formulas markdown"],
   },
   {
+    id: "project-folder-tint",
+    title: "Color project folders",
+    to: "/settings/appearance",
+    searchTerms: ["sidebar folder icon tint hue projects"],
+  },
+  {
     id: "panel-animations",
     title: "Panel animations",
     to: "/settings/appearance",

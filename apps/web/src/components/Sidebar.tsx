@@ -199,10 +199,11 @@ import { composerDraftHasUserContent, DraftId, useComposerDraftStore } from "../
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import {
   SidebarSearchResultRow,
-  SortableThreadRow,
   type SidebarProviderEntry,
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
+import { SortableThreadRow } from "../fincke/ActivityThreadRow";
+import { SidebarViewToggle } from "../fincke/SidebarViewToggle";
 import { SidebarDraftBlock } from "./sidebar/SidebarDraftBlock";
 import {
   SidebarDragBoundary,
@@ -2586,7 +2587,7 @@ export default function Sidebar() {
   return (
     <>
       <ThreadContextDragGhost />
-      <SidebarChromeHeader isElectron={isElectron} />
+      <SidebarChromeHeader isElectron={isElectron} actions={<SidebarViewToggle />} />
       <SidebarContent
         className="min-h-full"
         fixedHeader={

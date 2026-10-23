@@ -447,8 +447,10 @@ describe("resolveThreadStatusPill", () => {
       }),
     ).toMatchObject({
       label: "Waiting",
-      colorClass: "text-sidebar-muted-foreground",
-      dotClass: "bg-sidebar-muted-foreground",
+      colorClass:
+        "text-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
+      dotClass:
+        "bg-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-teal)",
       pulse: false,
     });
   });

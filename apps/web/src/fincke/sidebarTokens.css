@@ -1,0 +1,21 @@
+/* apps/web/src/fincke/sidebarTokens.css */
+/* accent & density tokens for the fork's sidebar rows, falling back to the active theme's own */
+
+/* resolved on the sidebar root because it overrides the base palette; the
+   --fincke-* inputs only exist under fincke ocean, so other themes get their
+   own primary, row & icon colors */
+[data-app-sidebar] {
+  --fincke-sidebar-accent: var(--fincke-teal, var(--primary));
+  --fincke-sidebar-accent-wash: color-mix(in srgb, var(--fincke-sidebar-accent) 10%, transparent);
+  --fincke-sidebar-selected-text: var(--fincke-teal, var(--contrast-sidebar-foreground));
+  --fincke-sidebar-selected-row: var(--sidebar-row-active);
+  --fincke-sidebar-icon: var(--fincke-dim, var(--contrast-icon-muted));
+  --fincke-sidebar-folder: var(--fincke-muted, var(--contrast-icon-muted));
+  --fincke-sidebar-row-text: 0.8125rem;
+  --fincke-sidebar-age-text: 0.65625rem;
+}
+
+/* the mockup's faint body-color wash (#babed8 at 5%) */
+html[data-theme-id="fincke-ocean"] [data-app-sidebar] {
+  --fincke-sidebar-selected-row: #babed80d;
+}

@@ -31,6 +31,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
+import { ProjectFolderTintSetting } from "../../fincke/ProjectFolderTintSetting";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -376,6 +377,7 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <ProjectFolderTintSetting />
       </SettingsSection>
 
       <SettingsSection id="motion" title="Motion">
