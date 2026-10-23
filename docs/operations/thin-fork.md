@@ -376,11 +376,34 @@ Local checkout cutover, installed applications, old data, Coral and deletion
 of recovery work remain outside this merge. To inspect or recover the old tree,
 create a separate worktree from its backup ref; do not reset the dirty checkout.
 
+## Personal design changes
+
+Upstream changes its UI files constantly, so a personal design change belongs where upstream merges do not touch it:
+
+1. **Fork-owned modules.** Fonts, tokens, artwork and setting defaults live in `assets/fincke` and the `src/fincke` directories. Clients save their whole settings snapshot, so a changed default only reaches profiles that have never saved settings; existing clients keep their stored value.
+2. **Hooks.** An upstream file only gains the smallest call or import into a fork-owned module.
+3. **Replaced components.** When a change needs a different component structure, copy the component into `src/fincke`, switch its import site, and list it below with the upstream commit it was copied from. On each update, review the original's upstream history since that commit and port what is useful; replaced copies receive no upstream fixes automatically.
+
+Fixes that are not personal preference (overflow, truncation, missing affordances) go upstream as T3 pull requests instead, so they cost nothing to keep. Styling upstream components through CSS selectors avoids merge conflicts but breaks silently when upstream renames classes; target design tokens or `data-slot` attributes, never utility classes.
+
+Every upstream file touched for a personal design change is listed here. Earlier appearance hooks are in the [historical inventory](#historical-modified-file-inventory-september-30).
+
+| Upstream path                                                      | Fork module                         | Kind    | Change                                                                                |
+| ------------------------------------------------------------------ | ----------------------------------- | ------- | ------------------------------------------------------------------------------------- |
+| `apps/web/src/main.tsx`                                            | `apps/web/src/fincke/geistFonts.ts` | Hook    | Applies the Linux Geist defaults at startup.                                          |
+| `apps/web/src/appearanceFonts.ts`                                  | `apps/web/src/fincke/geistFonts.ts` | Hook    | Default sans/code stacks lead with Geist on Linux; default labels drop ` Variable`.   |
+| `apps/web/src/terminal/ghostty/surface.ts`                         | `apps/web/src/fincke/geistFonts.ts` | Hook    | Default terminal stack leads with Geist Mono on Linux.                                |
+| `packages/contracts/src/settings.ts`                               | none                                | Default | Plan mode (`planModeEnabled`) defaults on; upstream gated it behind a legacy setting. |
+| `apps/mobile/src/state/legacy-plan-mode.ts`                        | none                                | Default | Mobile plan mode is on unless the local preference is explicitly off.                 |
+| `apps/mobile/src/features/settings/SettingsThreadsRouteScreen.tsx` | none                                | Default | The mobile Plan Mode switch reflects that default.                                    |
+
+No components are replaced yet.
+
 ## Routine future update
 
 1. Record local HEAD, the incorporated upstream base and the exact new upstream target. Preserve dirty state and existing worktrees before changing either checkout.
 2. Fetch origin and upstream, start an isolated integration branch from current `origin/main`, and merge one pinned upstream target normally. Preserve both histories and resolve the extension hooks against the current upstream interfaces.
-3. Keep upstream changes in orchestration, provider lifecycle, persistence, mobile, Git, tooling and layout. Adapt the named extension modules or their narrow registration points instead.
+3. Keep upstream changes in orchestration, provider lifecycle, persistence, mobile, Git, tooling and layout. Adapt the named extension modules or their narrow registration points instead. Recheck each hook listed under [personal design changes](#personal-design-changes), and review upstream history for every replaced component since its recorded commit.
 4. Review every path differing from the new upstream target. Keep upstream dependency resolutions and patches, with extension dependencies added through their existing owners.
 5. Run focused existing tests, affected package typechecks and targeted formatting/lint/builds. When interactive acceptance is requested, use an isolated app environment to recheck Coral resume, theme persistence, worktree scope and displayed-diff identity.
 6. Keep quality CI on standard GitHub runners and retain disabled publication/self-update behavior. Authorized scheduled syncs push coherent integration commits and open one draft PR; each merge requires a fresh human decision.
