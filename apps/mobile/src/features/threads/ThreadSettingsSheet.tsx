@@ -86,6 +86,7 @@ import { ChatGptSharingStatus } from "./ChatGptSharingStatus";
 import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentQuery } from "../../state/query";
 import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
+import { ProviderLimitsLine } from "../../fincke/ProviderLimitsLine";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useNewTaskFlow } from "./new-task-flow-provider";
@@ -789,15 +790,19 @@ function ThreadSettingsProviderListHeader(props: {
   const onToggle = () => session.toggleProvider(props.provider.key);
 
   return (
-    <ProviderHeader
-      collapsible={props.provider.collapsible}
-      collapsed={props.provider.collapsed}
-      driver={props.provider.driver}
-      iconUrl={props.provider.iconUrl}
-      label={props.provider.label}
-      modelCount={props.provider.modelCount}
-      onToggle={onToggle}
-    />
+    <>
+      <ProviderHeader
+        collapsible={props.provider.collapsible}
+        collapsed={props.provider.collapsed}
+        driver={props.provider.driver}
+        iconUrl={props.provider.iconUrl}
+        label={props.provider.label}
+        modelCount={props.provider.modelCount}
+        onToggle={onToggle}
+      />
+      {/* fincke: limits read inline under each provider, like desktop's picker line */}
+      <ProviderLimitsLine environmentId={session.environmentId} instanceId={props.provider.key} />
+    </>
   );
 }
 

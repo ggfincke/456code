@@ -1028,7 +1028,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
               ? {
                   label: tightestUsageWindow.label,
                   remaining: remainingPercent(tightestUsageWindow),
-                  onPress: openUsageLimits,
+                  // fincke: thread settings lists every provider's limits inline
+                  onPress: () => {
+                    if (!controlsDisabled) openSettings();
+                  },
                 }
               : undefined
           }

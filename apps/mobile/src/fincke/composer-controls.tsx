@@ -143,7 +143,7 @@ export function ComposerControls(props: {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`${props.usage.label}: ${props.usage.remaining}% left`}
-            accessibilityHint="Shows usage limits"
+            accessibilityHint="Opens thread settings, which lists usage limits"
             onPress={props.usage.onPress}
             className="h-11 flex-row items-center gap-1.5 rounded-xl px-3 active:bg-subtle"
           >

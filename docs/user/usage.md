@@ -111,8 +111,9 @@ current model's limits without leaving the conversation. The result opens above 
 closes when you dismiss it or send your next message. It uses the same snapshot as **Usage → Limits**, so it does not run the agent or refresh
 anything. The command is offered only for providers that appear under **Usage → Limits**.
 
-On mobile, a remaining-percentage indicator appears above the input when the current model's
-tightest reported allowance reaches 25% or less. Tap it to open the same limits panel. An absent
+On mobile, **Thread settings** lists each provider's remaining limits and reset times under
+its name. A remaining-percentage indicator also appears above the input when the current model's
+tightest reported allowance reaches 25% or less; tap it to open Thread settings. An absent
 indicator can mean the provider has no readable limits; it does not confirm unlimited usage.
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
