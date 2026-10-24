@@ -417,10 +417,12 @@ export function threadListV2ListItemsAreEqual(
 function resolveThreadListV2ItemTimeLabel(
   item: ThreadListV2Item,
   showSnoozeWakeLabel: boolean,
+  timeOnStatusRows: boolean,
 ): string {
   const { thread, variant, snoozed } = item;
   if (showSnoozeWakeLabel) return "";
   if (
+    !timeOnStatusRows &&
     variant === "card" &&
     (resolveThreadListV2Status(thread) !== "ready" ||
       item.wokeAt !== null ||
@@ -451,6 +453,8 @@ export function buildThreadListV2ListItems(input: {
   readonly queuedThreadKeys?: ReadonlySet<string>;
   readonly moveAvailability?: ReadonlyMap<string, ThreadMoveAvailability>;
   readonly shelfPreferencesLoading?: boolean;
+  // fincke: compact sidebar rows show the time beside a status glyph instead of a label
+  readonly timeOnStatusRows?: boolean;
 }): ThreadListV2ListItem[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const threadItems = input.items.map((item): ThreadListV2ListItem => {
@@ -477,7 +481,11 @@ export function buildThreadListV2ListItems(input: {
       key: `v2-thread:${item.thread.environmentId}:${item.thread.id}`,
       item,
       snoozeWakeLabelText,
-      timeLabel: resolveThreadListV2ItemTimeLabel(item, snoozeWakeLabelText !== undefined),
+      timeLabel: resolveThreadListV2ItemTimeLabel(
+        item,
+        snoozeWakeLabelText !== undefined,
+        input.timeOnStatusRows === true,
+      ),
       snoozePresetMinute,
       showTrailingDivider: false,
       hasQueuedMessages:

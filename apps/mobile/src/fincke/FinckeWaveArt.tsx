@@ -11,7 +11,15 @@ import {
   waveViewBox,
 } from "@t3tools/shared/fincke-wave";
 
-export function FinckeWaveArt({ compact = false }: { readonly compact?: boolean }) {
+// `slice` keeps the ribbon's proportions in a box narrower than the field (a phone column
+// under a tall header) by cropping its far end instead of thickening the ribbons
+export function FinckeWaveArt({
+  compact = false,
+  slice = false,
+}: {
+  readonly compact?: boolean;
+  readonly slice?: boolean;
+}) {
   const id = useId().replaceAll(":", "");
   const back = `${id}-back`;
   const field = compact ? FINCKE_WAVE_BUTTON_FIELD : FINCKE_WAVE_FIELD;
@@ -25,7 +33,7 @@ export function FinckeWaveArt({ compact = false }: { readonly compact?: boolean 
       pointerEvents="none"
       height="100%"
       width="100%"
-      preserveAspectRatio="none"
+      preserveAspectRatio={slice ? "xMinYMid slice" : "none"}
       viewBox={waveViewBox(field)}
     >
       <Defs>

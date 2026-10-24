@@ -33,14 +33,12 @@ export function getThreadListV2RowAppearance(
   theme: MobileThemeVariables,
   sidebarPane: boolean,
   selected: boolean,
-  ocean = false,
 ) {
   const selectedBackgroundColor = theme["--color-thread-selected"];
   const backgroundColor = theme[sidebarPane ? "--color-drawer" : "--color-screen"];
   const style: ViewStyle = {
     backgroundColor: selected ? selectedBackgroundColor : backgroundColor,
     borderRadius: THREAD_LIST_V2_SIDEBAR_ROW_STYLE.borderRadius,
-    ...(ocean ? { borderLeftWidth: 2, borderLeftColor: selected ? "#80cbc4" : "transparent" } : {}),
   };
   const swipeContainerStyle = THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE;
 
@@ -62,7 +60,8 @@ export function getThreadListV2RowAppearance(
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
     style,
-    cardStyle: sidebarPane ? { ...style, ...THREAD_LIST_V2_SIDEBAR_ROW_STYLE } : style,
+    // fincke: compact sidebar rows own their padding
+    cardStyle: style,
     swipeContainerStyle,
     swipeBackgroundColor: backgroundColor,
     providerIconSurfaceColor: selected ? selectedBackgroundColor : backgroundColor,

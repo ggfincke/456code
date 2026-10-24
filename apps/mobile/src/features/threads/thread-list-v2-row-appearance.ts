@@ -16,6 +16,13 @@ export const THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE = {
   overflow: "hidden",
 } satisfies ViewStyle;
 
+// fincke: compact sidebar rows sit tighter than upstream's cards, and own their padding
+const COMPACT_SIDEBAR_ROW_RADIUS = 8;
+const COMPACT_SIDEBAR_ROW_CONTAINER_STYLE = {
+  ...THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE,
+  borderRadius: COMPACT_SIDEBAR_ROW_RADIUS,
+} satisfies ViewStyle;
+
 export const selectedThreadRowColors = {
   foregroundClassName: "text-thread-selected-foreground",
   mutedForegroundClassName: "text-thread-selected-foreground-muted",
@@ -31,20 +38,16 @@ export function getThreadListV2RowAppearance(
   theme: MobileThemeVariables,
   sidebarPane: boolean,
   selected: boolean,
-  ocean = false,
 ) {
   const selectedBackgroundColor = theme["--color-thread-selected"];
   const style: ViewStyle | undefined = sidebarPane
     ? {
         backgroundColor: selected ? selectedBackgroundColor : theme["--color-drawer"],
-        borderRadius: THREAD_LIST_V2_SIDEBAR_ROW_STYLE.borderRadius,
-        ...(ocean
-          ? { borderLeftWidth: 2, borderLeftColor: selected ? "#80cbc4" : "transparent" }
-          : {}),
+        borderRadius: COMPACT_SIDEBAR_ROW_RADIUS,
       }
     : undefined;
   const swipeContainerStyle: ViewStyle | undefined = sidebarPane
-    ? THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE
+    ? COMPACT_SIDEBAR_ROW_CONTAINER_STYLE
     : undefined;
 
   return {
@@ -65,7 +68,7 @@ export function getThreadListV2RowAppearance(
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
     style,
-    cardStyle: sidebarPane ? { ...style, ...THREAD_LIST_V2_SIDEBAR_ROW_STYLE } : undefined,
+    cardStyle: style,
     swipeContainerStyle,
     swipeBackgroundColor: theme[sidebarPane ? "--color-drawer" : "--color-screen"],
     providerIconSurfaceColor: sidebarPane

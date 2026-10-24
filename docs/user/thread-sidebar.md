@@ -52,6 +52,11 @@ grouped by state. Switch with the two buttons next to the app name, press
 projects without their own icon a colored folder, turn on **Settings → Appearance →
 Color project folders**.
 
+On iPad and the iPhone Duo's sidebar column, the same two views switch with the two
+buttons beside the filters, and tapping a project folds its threads away. Projects
+without their own icon take a stable color when **Settings → Appearance → Project folder
+colors** is on.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

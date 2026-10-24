@@ -72,6 +72,7 @@ export interface Preferences {
   readonly codeWordBreak?: boolean;
   readonly mathRenderingEnabled?: boolean;
   readonly sidebarProjectFolderTint?: boolean;
+  readonly sidebarProjectsView?: boolean;
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];
   /** Environments whose "reclaim database space" notice was dismissed. */
@@ -148,6 +149,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     codeWordBreak?: boolean;
     mathRenderingEnabled?: boolean;
     sidebarProjectFolderTint?: boolean;
+    sidebarProjectsView?: boolean;
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
@@ -222,6 +224,8 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     preferences.mathRenderingEnabled = parsed.mathRenderingEnabled;
   if (typeof parsed.sidebarProjectFolderTint === "boolean")
     preferences.sidebarProjectFolderTint = parsed.sidebarProjectFolderTint;
+  if (typeof parsed.sidebarProjectsView === "boolean")
+    preferences.sidebarProjectsView = parsed.sidebarProjectsView;
   if (Array.isArray(parsed.connectOnboardingOptOutAccounts)) {
     preferences.connectOnboardingOptOutAccounts = parsed.connectOnboardingOptOutAccounts.filter(
       (account): account is string => typeof account === "string",
