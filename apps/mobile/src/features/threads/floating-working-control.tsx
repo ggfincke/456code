@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/floating-working-control.tsx
+// presents native glass thread status and floating actions
+
 import type { SubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { GlassContainer, GlassView } from "expo-glass-effect";
@@ -31,6 +34,7 @@ import { DevicePreviewButton } from "../devices/device-preview-button";
 import type { FloatingWorkingStatus } from "./floating-working-status";
 import { ShimmeringWorkContent } from "./thread-work-log";
 import { useVisibleSecondClock } from "./use-visible-second-clock";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 
 const CONTROL_HEIGHT = 38.5;
 const CONTROL_GAP = 8;
@@ -370,6 +374,8 @@ function FloatingStatusLabel(props: {
   readonly status: FloatingWorkingStatus;
   readonly onLayout: (event: LayoutChangeEvent) => void;
 }) {
+  const { themeId } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
   if (props.status.kind === "syncing") {
     return (
       <StatusLabelRow
@@ -450,6 +456,27 @@ function FloatingStatusLabel(props: {
     );
   }
   if (props.status.kind === "background") {
+    const work = props.status.presentation;
+    const first = work?.items[0];
+    const named = work?.items.length === 1 && first?.label !== first?.kind.replaceAll("_", " ");
+    const label =
+      ocean && work !== undefined && (named || work.items.length > 1)
+        ? [
+            work.waiting ? "waiting" : null,
+            work.items.length > 1 ? `${work.items.length} tasks` : first?.label,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : props.status.label;
+    const icon = ocean
+      ? first?.kind === "subagent"
+        ? "person.2"
+        : first?.kind === "monitor"
+          ? "clock"
+          : "terminal"
+      : props.status.waiting
+        ? "person.2"
+        : "terminal";
     return (
       <StatusLabelRow
         key="background"
@@ -460,13 +487,22 @@ function FloatingStatusLabel(props: {
         onLayout={props.onLayout}
       >
         <SymbolView
-          name={props.status.waiting ? "person.2" : "terminal"}
+          name={icon}
           size={13}
-          tintColorClassName="foreground"
+          tintColorClassName={
+            ocean
+              ? props.status.waiting
+                ? "accent-warning-foreground"
+                : "accent-primary"
+              : "foreground"
+          }
           type="monochrome"
         />
-        <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>
-          {props.status.label}
+        <Text
+          className={`shrink font-t3-medium text-xs ${ocean ? "text-foreground-secondary" : "text-foreground"}`}
+          numberOfLines={1}
+        >
+          {label}
         </Text>
       </StatusLabelRow>
     );

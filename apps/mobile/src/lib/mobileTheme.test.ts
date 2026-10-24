@@ -1,3 +1,5 @@
+// apps/mobile/src/lib/mobileTheme.test.ts
+// mobile palette and appearance preference contracts
 import { describe, expect, it } from "vite-plus/test";
 import {
   BUILT_IN_THEME_IDS,
@@ -16,6 +18,9 @@ import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
 import {
   createMobileThemeSelectionPatch,
+  createMobileDarkThemeActivationPatch,
+  getMobileThemeColors,
+  normalizeMobileThemeId,
   createMobileThemeVariables,
   DEFAULT_MOBILE_THEME_ID,
   flattenThemeColor,
@@ -57,6 +62,59 @@ function compositeOver(overlay: string, background: string): string {
 }
 
 describe("mobile themes", () => {
+  it("activates Fincke Ocean in one preference patch while preserving the light choice", () => {
+    for (const themeMode of ["light", "system"] as const) {
+      const preferences = { lightThemeId: "iris", darkThemeId: "grove", themeMode };
+      expect(
+        createMobileDarkThemeActivationPatch(resolveMobileThemeIds(preferences), "fincke-ocean"),
+      ).toEqual({
+        lightThemeId: "iris",
+        darkThemeId: "fincke-ocean",
+        themeId: "fincke-ocean",
+        themeMode: "dark",
+      });
+    }
+    expect(resolveMobileThemeIds({})).toEqual({
+      light: DEFAULT_MOBILE_THEME_ID,
+      dark: DEFAULT_MOBILE_THEME_ID,
+    });
+    expect(normalizeMobileThemeId("fincke-ocean")).toBe("fincke-ocean");
+    expect(
+      resolveMobileThemeIds({ themeId: "fincke-ocean", lightThemeId: "fincke-ocean" }),
+    ).toEqual({ light: DEFAULT_MOBILE_THEME_ID, dark: "fincke-ocean" });
+    expect(
+      createMobileThemeSelectionPatch(
+        { light: "iris", dark: "grove" },
+        "light",
+        "light",
+        "fincke-ocean",
+      ),
+    ).toEqual({ lightThemeId: "iris", darkThemeId: "grove", themeId: "iris" });
+  });
+
+  it("registers Ocean with desktop component accents and readable native controls", () => {
+    const variables = getMobileThemeRuntimeVariables("fincke-ocean", "dark", "ios");
+    expect(readGeneratedMobileThemeVariables("fincke-ocean-dark")).toEqual(
+      getMobileThemeVariables("fincke-ocean", "dark"),
+    );
+    expect(variables["--color-screen"]).toBe("#0f111a");
+    expect(variables["--color-card"]).toBe("#090b10");
+    expect(variables["--color-card-alt"]).toBe("#1a1c25");
+    expect(variables["--color-primary"]).toBe("#80cbc4");
+    expect(variables["--color-user-bubble"]).toBe("#25293c");
+    expect(variables["--color-user-bubble-foreground"]).toBe("#d4d8f0");
+    expect(variables["--color-md-code-text"]).toBe("#babed8");
+    expect(variables["--color-md-link"]).toBe("#80cbc4");
+    for (const [foreground, surface] of [
+      ["--color-primary-foreground", "--color-primary"],
+      ["--color-foreground-muted", "--color-grouped-card"],
+      ["--color-drawer-foreground-muted", "--color-drawer"],
+      ["--color-user-bubble-foreground", "--color-user-bubble"],
+    ] as const) {
+      expect(contrastRatio(variables[foreground], variables[surface])).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(getMobileThemeColors("fincke-ocean", "dark").terminalCursor).toBe("#ffcc00");
+  });
   it("declares every runtime theme variable in the static stylesheet", () => {
     const generatedVariables = createMobileThemeVariables(T3_CHAT_THEME.colors, "light");
     expect(Object.keys(readDefaultMobileThemeVariables("light")).sort()).toEqual(

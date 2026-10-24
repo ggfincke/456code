@@ -1,3 +1,5 @@
+// apps/mobile/src/features/settings/appearance/sections/ThemeAppearanceSection.tsx
+// appearance selection and native theme previews
 import { memo, useId } from "react";
 import { Pressable, View } from "react-native";
 import Svg, { Circle, Defs, RadialGradient, Stop } from "react-native-svg";
@@ -10,6 +12,7 @@ import { AppText as Text } from "../../../../components/ui/AppText";
 import {
   getMobileThemePreviewColors,
   MOBILE_THEME_OPTIONS,
+  FINCKE_OCEAN_THEME_ID,
   type MobileThemeAppearance,
   type MobileThemeId,
   type MobileThemeIds,
@@ -18,6 +21,8 @@ import {
 import { getMobileUniwindThemeName } from "../../../../lib/mobileThemeRuntime";
 import { cn } from "../../../../lib/cn";
 import { useAppearancePreferences } from "../AppearancePreferencesProvider";
+import { SettingsSection } from "../../components/SettingsSection";
+import { SettingsSwitchRow } from "../../components/SettingsSwitchRow";
 
 const APPEARANCE_MODES: ReadonlyArray<{
   readonly id: MobileThemeMode;
@@ -289,10 +294,13 @@ export function ThemeAppearanceSection() {
     isReady,
     setThemeIdForAppearance,
     setThemeIdForBothAppearances,
+    activateDarkTheme,
     setThemeMode,
     themeIds,
     themeMode,
     systemColorsAvailable,
+    sidebarProjectFolderTint,
+    setSidebarProjectFolderTint,
   } = useAppearancePreferences();
 
   return (
@@ -319,20 +327,55 @@ export function ThemeAppearanceSection() {
         <View className="flex-row flex-wrap gap-3">
           {MOBILE_THEME_OPTIONS.filter(
             (theme) => theme.id !== "material-you" || systemColorsAvailable,
-          ).map((theme) => (
-            <ThemeCard
-              disabled={!isReady}
-              key={theme.id}
-              label={theme.label}
-              darkSelected={theme.id === themeIds.dark}
-              lightSelected={theme.id === themeIds.light}
-              onSelect={(appearance) => setThemeIdForAppearance(appearance, theme.id)}
-              onSelectBoth={() => setThemeIdForBothAppearances(theme.id)}
-              themeId={theme.id}
-            />
-          ))}
+          ).map((theme) =>
+            theme.id === FINCKE_OCEAN_THEME_ID ? (
+              <Pressable
+                key={theme.id}
+                accessibilityLabel="Use Fincke Ocean"
+                accessibilityHint="Selects Fincke Ocean and turns on Dark mode"
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: !isReady,
+                  selected: themeIds.dark === theme.id && themeMode === "dark",
+                }}
+                disabled={!isReady}
+                className={cn(
+                  "min-w-36 flex-1 basis-[47%] items-center gap-3 rounded-[24px] border bg-grouped-card px-2 py-4 active:bg-subtle",
+                  themeIds.dark === theme.id && themeMode === "dark"
+                    ? "border-primary"
+                    : "border-border",
+                )}
+                onPress={() => activateDarkTheme(theme.id)}
+              >
+                <PreviewOrb appearance="dark" themeId={theme.id} />
+                <Text className="text-lg font-t3-medium">{theme.label}</Text>
+                <Text className="text-sm text-primary-text">Use Fincke Ocean</Text>
+              </Pressable>
+            ) : (
+              <ThemeCard
+                disabled={!isReady}
+                key={theme.id}
+                label={theme.label}
+                darkSelected={theme.id === themeIds.dark}
+                lightSelected={theme.id === themeIds.light}
+                onSelect={(appearance) => setThemeIdForAppearance(appearance, theme.id)}
+                onSelectBoth={() => setThemeIdForBothAppearances(theme.id)}
+                themeId={theme.id}
+              />
+            ),
+          )}
         </View>
       </View>
+      <SettingsSection title="Project folders">
+        <SettingsSwitchRow
+          disabled={!isReady}
+          icon="folder"
+          label="Project folder colors"
+          subtitle="Use a stable color for projects without their own icon."
+          value={sidebarProjectFolderTint}
+          onValueChange={setSidebarProjectFolderTint}
+        />
+      </SettingsSection>
     </View>
   );
 }

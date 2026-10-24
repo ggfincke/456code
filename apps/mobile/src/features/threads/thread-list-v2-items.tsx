@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/thread-list-v2-items.tsx
+// native project navigation and presentation
 import * as Dialog from "../../components/ui/Dialog";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
@@ -42,6 +44,7 @@ import { ProviderIcon, ProviderInstanceIcon } from "../../components/ProviderIco
 import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useEnvironmentScope } from "../../state/session";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
@@ -335,7 +338,13 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   const dormant = useSwipeRowDormant(props.activationKey);
   const theme = useUniwindTheme();
   const sidebarPane = props.pane === "sidebar";
-  const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, props.selected ?? false);
+  const { themeId } = useAppearancePreferences();
+  const rowAppearance = getThreadListV2RowAppearance(
+    theme,
+    sidebarPane,
+    props.selected ?? false,
+    themeId === "fincke-ocean",
+  );
   const isDraft = pendingTask.kind === "draft";
   const deleteLabel = isDraft ? "Discard" : "Delete";
   const handleDelete = useCallback(
@@ -370,6 +379,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
             environmentId={pendingTask.environmentId}
             faviconPath={props.project.faviconPath}
             projectIcon={props.project.projectIcon}
+            projectId={props.project.id}
             size={15}
             projectTitle={props.project.title}
             workspaceRoot={props.project.workspaceRoot}
@@ -624,16 +634,36 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const theme = useUniwindTheme();
   const sidebarPane = props.pane === "sidebar";
   const selected = props.selected === true;
-  const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, selected);
+  const { themeId } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
+  const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, selected, ocean);
 
   const status = resolveThreadListV2Status(thread);
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
-  const workingLabel = STATUS_LABEL_BY_STATUS[status];
+  const baseStatusLabel = STATUS_LABEL_BY_STATUS[status];
+  const workingLabel =
+    ocean && baseStatusLabel && (status === "working" || status === "input")
+      ? {
+          ...baseStatusLabel,
+          className: status === "working" ? "text-primary-text" : "text-warning-foreground",
+          iconTintClassName:
+            status === "working" ? "accent-primary-text" : "accent-warning-foreground",
+        }
+      : baseStatusLabel;
   const showsWoke = status === "ready" && props.wokeAt !== null;
   const statusLabel =
     (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
       ? { ...workingLabel, label: "Goal" }
-      : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
+      : workingLabel) ??
+    (isUnread
+      ? ocean
+        ? {
+            ...DONE_STATUS_LABEL,
+            className: "text-update-foreground",
+            iconTintClassName: "accent-update-foreground",
+          }
+        : DONE_STATUS_LABEL
+      : undefined);
   const recede = shouldRecedeThreadRow({ status, selected });
   const timeLabel = props.timeLabel;
 
@@ -987,6 +1017,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             environmentId={thread.environmentId}
             faviconPath={props.project.faviconPath}
             projectIcon={props.project.projectIcon}
+            projectId={props.project.id}
             size={15}
             projectTitle={props.project.title}
             workspaceRoot={props.project.workspaceRoot}
@@ -1302,6 +1333,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 environmentId={thread.environmentId}
                 faviconPath={props.project.faviconPath}
                 projectIcon={props.project.projectIcon}
+                projectId={props.project.id}
                 size={15}
                 projectTitle={props.project.title}
                 workspaceRoot={props.project.workspaceRoot}

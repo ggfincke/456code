@@ -1,3 +1,5 @@
+// scripts/mobile-native-client.ts
+// verifies and builds isolated native development clients
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -386,9 +388,9 @@ const main = Command.make(
             [
               "xcodebuild",
               "-workspace",
-              path.join(mobile, "ios/T3CodeDev.xcworkspace"),
+              path.join(mobile, "ios/456codeDev.xcworkspace"),
               "-scheme",
-              "T3CodeDev",
+              "456codeDev",
               "-configuration",
               "Debug",
               "-destination",
@@ -405,7 +407,7 @@ const main = Command.make(
               "simctl",
               "install",
               device,
-              path.join(output, "Build/Products/Debug-iphonesimulator/T3CodeDev.app"),
+              path.join(output, "Build/Products/Debug-iphonesimulator/456codeDev.app"),
             ],
             true,
           );

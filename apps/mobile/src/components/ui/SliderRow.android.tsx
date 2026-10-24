@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ui/SliderRow.android.tsx
+// previews android slider movement and commits completed selections
+
 import { Slider } from "@expo/ui/jetpack-compose";
 import { fillMaxWidth } from "@expo/ui/jetpack-compose/modifiers";
 import * as Haptics from "expo-haptics";
@@ -66,8 +69,10 @@ export function SliderRow(props: SliderRowProps) {
                 inactiveTrackColor: colors["--color-secondary"],
               }}
               onValueChange={(value) => {
+                if (props.disabled) return;
                 dragging.current = true;
                 draft.current = value;
+                props.onPreview?.(value);
               }}
               onValueChangeFinished={() => {
                 dragging.current = false;

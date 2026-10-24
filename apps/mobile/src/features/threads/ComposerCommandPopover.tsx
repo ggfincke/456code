@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ComposerCommandPopover.tsx
+// groups native command browsing while preserving ranked search results
+
 import {
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
@@ -17,6 +20,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 import { pullRequestStatus } from "../pull-requests/pullRequestStatus";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 export type ComposerCommandItem =
   | {
       readonly id: string;
@@ -65,6 +69,7 @@ export type ComposerCommandItem =
 interface ComposerCommandPopoverProps {
   readonly items: ReadonlyArray<ComposerCommandItem>;
   readonly triggerKind: ComposerTriggerKind | null;
+  readonly query: string;
   readonly isLoading: boolean;
   readonly error?: string | null;
   readonly onSelect: (item: ComposerCommandItem) => void;
@@ -146,11 +151,36 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
   }
 }
 
+type SlashSection = "Commands" | "Skills" | "Plugins";
+
+function slashSection(item: ComposerCommandItem): SlashSection {
+  const name =
+    item.type === "provider-slash-command"
+      ? item.command.name
+      : item.type === "skill"
+        ? item.skill.name
+        : item.type === "slash-command"
+          ? item.command
+          : "";
+  if (/^[^\s:]+:\S/u.test(name)) return "Plugins";
+  if (item.type === "skill") {
+    return resolveProviderSkillSourceKind(item.skill) === "app" ? "Plugins" : "Skills";
+  }
+  return "Commands";
+}
+
+const OCEAN_SECTION_COLORS: Record<SlashSection, string> = {
+  Commands: "#c792ea",
+  Skills: "#82aaff",
+  Plugins: "#ffcb6b",
+};
+
 const CommandRow = memo(function CommandRow(props: {
   readonly item: ComposerCommandItem;
   readonly onPress: () => void;
   readonly isLast: boolean;
   readonly isSlashSkill: boolean;
+  readonly color?: string;
 }) {
   const iconName = itemIcon(props.item);
 
@@ -158,7 +188,7 @@ const CommandRow = memo(function CommandRow(props: {
     <Pressable
       accessibilityRole="button"
       onPress={props.onPress}
-      className="flex-row items-center gap-2.5 border-border px-3.5 py-2.5 active:opacity-60"
+      className="min-h-11 flex-row items-center gap-2.5 border-border px-3.5 py-2.5 active:opacity-60"
       style={{ borderBottomWidth: props.isLast ? 0 : StyleSheet.hairlineWidth }}
     >
       {props.item.type === "path" ? (
@@ -167,15 +197,22 @@ const CommandRow = memo(function CommandRow(props: {
         <SymbolView
           name={iconName}
           size={14}
+          tintColor={props.color}
           tintColorClassName={
-            props.item.type === "pull-request"
-              ? pullRequestStatus(props.item.pullRequest).tint
-              : "accent-icon-subtle"
+            props.color
+              ? undefined
+              : props.item.type === "pull-request"
+                ? pullRequestStatus(props.item.pullRequest).tint
+                : "accent-icon-subtle"
           }
           type="monochrome"
         />
       ) : null}
-      <Text className="shrink-0 text-base font-t3-medium text-foreground" numberOfLines={1}>
+      <Text
+        className="min-w-0 shrink text-base font-t3-medium text-foreground"
+        style={{ color: props.color, maxWidth: props.item.description ? "65%" : "100%" }}
+        numberOfLines={1}
+      >
         {props.isSlashSkill && props.item.type === "skill" ? (
           <>
             <Text className="text-foreground-muted">skill:</Text>
@@ -198,10 +235,24 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
   props: ComposerCommandPopoverProps,
 ) {
   const label = groupLabel(props.triggerKind);
+  const { themeId } = useAppearancePreferences();
+  const slash = props.triggerKind === "slash-command";
+  const browse = slash && props.query.trim().replace(/^\/+/, "") === "";
+  const sections: ReadonlyArray<{
+    readonly label: string | null;
+    readonly items: ReadonlyArray<ComposerCommandItem>;
+  }> = browse
+    ? (["Commands", "Skills", "Plugins"] as const)
+        .map((section) => ({
+          label: section,
+          items: props.items.filter((item) => slashSection(item) === section),
+        }))
+        .filter((section) => section.items.length > 0)
+    : [{ label: null, items: props.items }];
 
   return (
     <PopoverSurface>
-      {label ? (
+      {label && !browse ? (
         <View className="px-3.5 pt-2.5 pb-1">
           <Text className="text-3xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
             {label}
@@ -214,14 +265,31 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
           keyboardShouldPersistTaps="always"
           showsVerticalScrollIndicator={false}
         >
-          {props.items.map((item, index) => (
-            <CommandRow
-              key={item.id}
-              item={item}
-              onPress={() => props.onSelect(item)}
-              isLast={index === props.items.length - 1}
-              isSlashSkill={props.triggerKind === "slash-command" && item.type === "skill"}
-            />
+          {sections.map((section) => (
+            <View key={section.label ?? "results"}>
+              {section.label ? (
+                <Text
+                  accessibilityRole="header"
+                  className="px-3.5 pb-1 pt-2.5 text-3xs font-t3-bold uppercase tracking-[0.8px] text-foreground-muted"
+                >
+                  {section.label}
+                </Text>
+              ) : null}
+              {section.items.map((item, index) => (
+                <CommandRow
+                  key={item.id}
+                  item={item}
+                  onPress={() => props.onSelect(item)}
+                  isLast={index === section.items.length - 1}
+                  isSlashSkill={props.triggerKind === "slash-command" && item.type === "skill"}
+                  color={
+                    slash && themeId === "fincke-ocean"
+                      ? OCEAN_SECTION_COLORS[slashSection(item)]
+                      : undefined
+                  }
+                />
+              ))}
+            </View>
           ))}
         </ScrollView>
       ) : (

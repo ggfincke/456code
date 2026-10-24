@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ThreadSettingsRows.shared.tsx
+// renders shared native model and option selection rows
+
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -19,6 +22,7 @@ export type ModelRowProps = {
 };
 
 export type ChoiceRowProps = {
+  readonly disabled?: boolean;
   readonly label: string;
   readonly description?: string;
   readonly selected: boolean;
@@ -140,12 +144,14 @@ export function ChoiceRowContent(props: ChoiceRowProps & RowSelectionProps) {
     <Pressable
       accessibilityLabel={props.description ? `${props.label}. ${props.description}` : props.label}
       accessibilityRole="radio"
-      accessibilityState={{ checked: props.selected }}
+      accessibilityState={{ checked: props.selected, disabled: Boolean(props.disabled) }}
+      disabled={props.disabled}
       onPress={props.onPress}
       style={props.minimumHeight === undefined ? undefined : { minHeight: props.minimumHeight }}
       className={cn(
         "min-h-14 flex-row items-center gap-3 bg-grouped-card px-4 py-3 active:bg-subtle",
         !props.isLast && "border-b border-border-subtle",
+        props.disabled && "opacity-45",
       )}
     >
       {props.leadingSelection}

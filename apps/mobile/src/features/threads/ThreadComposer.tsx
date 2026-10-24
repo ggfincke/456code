@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ThreadComposer.tsx
+// presents the thread composer and native input actions
+
 import { useSidebarWorkspaceTabs } from "../workspace/useSystemWorkspaceTabBar";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
@@ -21,15 +24,24 @@ import {
   type RuntimeMode,
   type ServerConfig as T3ServerConfig,
   type UsageLimitsReport,
+  type ServerProviderUsageWindow,
 } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
   isUsageLimitsCommand,
+  limitsNotice,
+  remainingPercent,
 } from "@t3tools/shared/usageLimits";
+import { getProviderOptionCurrentLabel } from "@t3tools/shared/model";
+import {
+  getPromptControlledTraits,
+  REASONING_SELECT_DESCRIPTOR_IDS,
+} from "@t3tools/client-runtime/model-traits";
+import { ComposerControls } from "../../fincke/composer-controls";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Keyboard, Platform, View, type ViewStyle } from "react-native";
 import { composerImageGallery } from "../../lib/composerImageGallery";
 import { filePreviewGallery } from "../../lib/filePreviewGallery";
@@ -346,6 +358,7 @@ function SendActionButton(props: {
       size={props.size}
       icon={presentation.icon}
       variant="primary"
+      appearance="send"
       disabled={props.disabled}
       onPress={() => props.onSend()}
     />
@@ -460,6 +473,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   });
   const settingsRoutePresentation = useExistingThreadSettingsRoutePresentation();
   const settingsRoutePresentedRef = useRef(false);
+  const [initialSettingsDescriptorId, setInitialSettingsDescriptorId] = useState<
+    string | undefined
+  >(undefined);
+  const [usageReportNow] = useState(() => Date.now());
   const wasExpandedBeforePreviewRef = useRef(false);
   const inFlightThreadIdsRef = useRef(new Set<string>());
 
@@ -541,6 +558,29 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       props.serverConfig?.providers ?? [],
       props.serverConfig?.usageLimitSources ?? [],
     );
+  const tightestUsageWindow = useMemo(() => {
+    const report = collectProviderUsageLimits(
+      currentModelSelection.instanceId,
+      props.serverConfig?.providers ?? [],
+      props.serverConfig?.usageLimitSources ?? [],
+      usageReportNow,
+    );
+    const readable = report?.accounts.filter((account) => limitsNotice(account.limits) === null);
+    const account =
+      readable?.find((account) => account.instanceId === currentModelSelection.instanceId) ??
+      readable?.[0];
+    return (
+      account?.limits.windows
+        .filter((window) => Number.isFinite(window.usedPercent))
+        .reduce<ServerProviderUsageWindow | null>(
+          (tightest, window) =>
+            tightest === null || remainingPercent(window) < remainingPercent(tightest)
+              ? window
+              : tightest,
+          null,
+        ) ?? null
+    );
+  }, [currentModelSelection.instanceId, props.serverConfig, usageReportNow]);
   const openUsageLimits = () => {
     const report = collectProviderUsageLimits(
       currentModelSelection.instanceId,
@@ -710,7 +750,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     armAgentAwarenessLiveActivityForLocalWork({
       environmentId: props.environmentId,
       threadTitle: props.selectedThread.title,
-      projectTitle: props.environmentLabel ?? "T3 Code",
+      projectTitle: props.environmentLabel ?? "456code",
     });
   };
 
@@ -734,8 +774,26 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     capabilities: currentModelOption?.capabilities,
     selections: currentModelSelection.options,
   });
+  const effortDescriptor = providerOptionDescriptors.find(
+    (descriptor) =>
+      descriptor.type === "select" && REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
+  );
+  const promptTraits = getPromptControlledTraits(providerOptionDescriptors, draftMessage);
+  const effortLabel = effortDescriptor
+    ? promptTraits.ultrathinkPromptControlled &&
+      promptTraits.primarySelectDescriptor?.id === effortDescriptor.id
+      ? "Ultrathink"
+      : (getProviderOptionCurrentLabel(
+          effortDescriptor,
+          currentModelSelection,
+          props.reportedModelSelection,
+        ) ?? effortDescriptor.label)
+    : null;
+  const controlsDisabled = isSubmissionLocked || !props.canOperateThread;
   const settingsOwnerId = composerOwnerKey;
   const settingsRouteSession = {
+    initialDescriptorId: initialSettingsDescriptorId,
+    optionsDisabled: controlsDisabled,
     ownerId: settingsOwnerId,
     environmentId: props.environmentId,
     projectId: props.selectedThread.projectId,
@@ -761,8 +819,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     runtimeMode: currentRuntimeMode,
     onUpdateRuntimeMode: props.onUpdateRuntimeMode,
   } satisfies ExistingThreadSettingsRouteSession;
-  const openSettings = () => {
-    settingsRoutePresentation.present(settingsRouteSession);
+  const openSettings = (initialDescriptorId?: string) => {
+    setInitialSettingsDescriptorId(initialDescriptorId);
+    settingsRoutePresentation.present({ ...settingsRouteSession, initialDescriptorId });
     settingsSheetPresentation.open();
   };
 
@@ -863,7 +922,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         iconOnly={
           (draftMessage.length > 0 || stripAttachments.length > 0) && !compactEditor.isExpanded
         }
-        onPress={openSettings}
+        onPress={() => openSettings()}
       />
     </View>
   );
@@ -901,6 +960,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             <ComposerCommandPopover
               items={composerMenu.items}
               triggerKind={composerMenu.trigger.kind}
+              query={composerMenu.trigger.query}
               isLoading={composerMenu.isLoading}
               error={composerMenu.error}
               onSelect={composerMenu.onSelect}
@@ -933,9 +993,46 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
           <Button
             label="Model unavailable. Open model settings."
             tone="text"
-            onPress={openSettings}
+            onPress={() => openSettings()}
           />
         ) : null}
+
+        <ComposerControls
+          mode={
+            props.onUpdateInteractionMode &&
+            selectedProviderStatus &&
+            selectedProviderStatus.showInteractionModeToggle !== false
+              ? {
+                  value: props.selectedThread.interactionMode,
+                  disabled: controlsDisabled,
+                  onChange: (mode) => {
+                    if (!controlsDisabled && mode !== props.selectedThread.interactionMode)
+                      props.onUpdateInteractionMode?.(mode);
+                  },
+                }
+              : undefined
+          }
+          effort={
+            effortDescriptor && effortLabel
+              ? {
+                  label: effortLabel,
+                  disabled: controlsDisabled,
+                  onPress: () => {
+                    if (!controlsDisabled) openSettings(effortDescriptor.id);
+                  },
+                }
+              : undefined
+          }
+          usage={
+            tightestUsageWindow && remainingPercent(tightestUsageWindow) <= 25
+              ? {
+                  label: tightestUsageWindow.label,
+                  remaining: remainingPercent(tightestUsageWindow),
+                  onPress: openUsageLimits,
+                }
+              : undefined
+          }
+        />
 
         <ComposerSurface
           animateLayout={false}
@@ -1025,6 +1122,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                     accessibilityLabel="Stop agent"
                     icon="stop.fill"
                     variant="danger"
+                    appearance="stop"
                     disabled={!props.canOperateThread}
                     onPress={props.onStopThread}
                   />
@@ -1249,6 +1347,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                       accessibilityLabel="Stop agent"
                       icon="stop.fill"
                       variant="danger"
+                      appearance="stop"
                       disabled={!props.canOperateThread}
                       onPress={props.onStopThread}
                     />

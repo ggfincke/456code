@@ -1,3 +1,6 @@
+// apps/mobile/src/widgets/AgentActivity.tsx
+// renders native agent activity widgets and live activity content
+
 import { Circle, HStack, Image, Spacer, Text, VStack, ZStack } from "@expo/ui/swift-ui";
 import type { ComponentProps } from "react";
 import {
@@ -232,14 +235,9 @@ export function AgentActivity(
     </HStack>
   );
 
-  // Image views only honor `resizable` directly (frame/foregroundStyle are
-  // dropped), so we size it via a container frame the resizable image fills and
-  // tint it through the container's foreground style, which the template image
-  // inherits.
+  // widget images size through their container; preserve the square ocean artwork.
   const renderLogo = (height: number, color: Foreground, modifiers: typeof linkModifiers = []) => (
-    <HStack
-      modifiers={[frame({ width: height * 1.5, height }), foregroundStyle(color), ...modifiers]}
-    >
+    <HStack modifiers={[frame({ width: height, height }), foregroundStyle(color), ...modifiers]}>
       <Image assetName="T3Mark" modifiers={[resizable()]} />
     </HStack>
   );

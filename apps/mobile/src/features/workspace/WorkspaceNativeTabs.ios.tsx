@@ -1,3 +1,6 @@
+// apps/mobile/src/features/workspace/WorkspaceNativeTabs.ios.tsx
+// retains native workspace tabs and applies the active ocean accent
+
 import { useDeviceType, useNativeLayoutMetrics } from "../../native/native-layout-metrics";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Keyboard, Platform, View, type NativeSyntheticEvent } from "react-native";
@@ -12,6 +15,7 @@ import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
 import type { WorkspaceTab } from "./workspace-tabs-state";
 import { NativeWorkspaceTabActivityContext } from "../../native/v5-workspace-context";
 import { useSystemWorkspaceTabBar } from "./useSystemWorkspaceTabBar";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 
 const PULL_REQUEST_ICON = require("../../../assets/icons/pull-request.png");
 const COMPOSE_TAB = "compose";
@@ -51,6 +55,7 @@ export function WorkspaceNativeTabs(props: {
   readonly onNewTask: () => void;
 }) {
   const workspace = useWorkspaceTabs()!;
+  const { themeId, themeVariables } = useAppearancePreferences();
   const metrics = useNativeLayoutMetrics();
   const deviceType = useDeviceType();
   const phoneBar =
@@ -69,7 +74,12 @@ export function WorkspaceNativeTabs(props: {
       <Tabs.Host
         navStateRequest={request}
         tabBarHidden={props.hidden || !systemTabBar}
-        ios={{ tabBarControllerMode: "tabBar", tabBarMinimizeBehavior: "never" }}
+        ios={{
+          tabBarControllerMode: "tabBar",
+          tabBarMinimizeBehavior: "never",
+          tabBarTintColor:
+            themeId === "fincke-ocean" ? themeVariables["--color-primary"] : undefined,
+        }}
         onTabSelectionPrevented={({
           nativeEvent,
         }: NativeSyntheticEvent<TabSelectionPreventedEvent>) => {

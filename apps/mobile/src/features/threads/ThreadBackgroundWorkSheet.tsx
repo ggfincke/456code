@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ThreadBackgroundWorkSheet.tsx
+// presents background work without disturbing native sheet navigation
+
 import { useAtomValue } from "@effect/atom-react";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -19,6 +22,7 @@ import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../n
 import { NativeHeader, NativeScreen } from "../../native/ThemedScreenStack";
 import { environmentThreadShells } from "../../state/threads";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 const KIND_LABELS = {
@@ -107,16 +111,18 @@ function BackgroundWorkRow(props: {
   readonly item: PendingBackgroundWorkItem;
   readonly onOpen: (threadId: ThreadId) => void;
 }) {
+  const { themeId } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
   const { item } = props;
   const childThreadId = item.childThreadId;
   const row = (
-    <View className="flex-row items-center gap-3 border-b border-border py-3.5">
+    <View className="min-h-11 flex-row items-center gap-3 border-b border-border py-3.5">
       <SymbolView
         name={
           item.kind === "subagent" ? "person.2" : item.kind === "monitor" ? "clock" : "terminal"
         }
         size={15}
-        tintColorClassName="accent-foreground-muted"
+        tintColorClassName={ocean ? "accent-primary" : "accent-foreground-muted"}
         type="monochrome"
       />
       <View className="min-w-0 flex-1">

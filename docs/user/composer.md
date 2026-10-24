@@ -113,6 +113,12 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
+On mobile, use **Build/Plan** above the input when your provider supports mode changes.
+The effort control opens reasoning settings directly. For models with selectable reasoning
+levels, the slider previews a level while you drag and applies it when you release; the reset
+action returns to the provider's default. Other model and runtime options remain in thread
+settings. These controls are available across mobile themes.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

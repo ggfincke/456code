@@ -6,7 +6,7 @@ import { Platform } from "react-native";
 
 export function authClientMetadata(appVersion?: string): AuthClientPresentationMetadata {
   return {
-    label: "T3 Code Mobile",
+    label: "456code Mobile",
     deviceType:
       Device.deviceType === Device.DeviceType.TABLET
         ? "tablet"

@@ -1,3 +1,5 @@
+// apps/mobile/src/components/ProjectFavicon.tsx
+// chosen project artwork with a stable optional folder fallback
 import { SymbolView } from "./ui/AppSymbol";
 import { AppText } from "./ui/AppText";
 import { Image } from "expo-image";
@@ -12,6 +14,8 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import { projectFaviconUrlAtom } from "../state/assets";
+import { finckeFolderTint } from "@t3tools/shared/fincke-folder-tint";
+import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import {
   countGlyphs,
   projectIconColorClassNames,
@@ -34,11 +38,19 @@ export const ProjectFavicon = memo(function ProjectFavicon(props: {
   readonly open?: boolean;
   readonly size?: number;
   readonly projectTitle: string;
+  readonly projectId?: string;
   readonly workspaceRoot?: string | null;
   readonly faviconPath?: string | null;
   readonly projectIcon?: ProjectIconOverride | null;
 }) {
   const size = props.size ?? 42;
+  const { sidebarProjectFolderTint, themeId } = useAppearancePreferences();
+  const fallbackColor =
+    sidebarProjectFolderTint && props.projectId
+      ? finckeFolderTint(props.projectId).color
+      : themeId === "fincke-ocean"
+        ? "#8f93a2"
+        : undefined;
   const glyph = resolveProjectIconGlyph(props.projectIcon, props.projectTitle);
   const faviconUrl = useAtomValue(
     props.workspaceRoot == null || glyph !== null
@@ -82,6 +94,7 @@ export const ProjectFavicon = memo(function ProjectFavicon(props: {
       key={cacheKey}
       cacheKey={cacheKey}
       faviconUrl={renderableFaviconUrl}
+      fallbackColor={fallbackColor}
       open={props.open}
       projectTitle={props.projectTitle}
       size={size}
@@ -140,6 +153,7 @@ function ProjectIconGlyphView(props: { readonly glyph: ProjectIconGlyph; readonl
 }
 
 function ProjectFaviconImage(props: {
+  readonly fallbackColor?: string;
   readonly cacheKey: string | null;
   readonly faviconUrl: string | null;
   readonly open?: boolean;
@@ -181,7 +195,8 @@ function ProjectFaviconImage(props: {
         <SymbolView
           name={{ ios: "folder.fill", android: props.open ? "folder_open" : "folder" }}
           size={props.size}
-          tintColorClassName={"accent-icon-subtle"}
+          tintColor={props.fallbackColor}
+          tintColorClassName={props.fallbackColor ? undefined : "accent-icon-subtle"}
           type="monochrome"
         />
       ) : null}

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ThreadDetailScreen.tsx
+// coordinates native thread content and composer presentation
+
 import { useSidebarWorkspaceTabs } from "../workspace/useSystemWorkspaceTabBar";
 import {
   isAtomCommandInterrupted,
@@ -727,6 +730,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
     if (pendingBackgroundWork !== null && contentPresentationKind === "ready") {
       return {
         kind: "background",
+        presentation: pendingBackgroundWork,
         label: pendingBackgroundWork.title,
         accessibilityLabel: `${pendingBackgroundWork.title}: ${pendingBackgroundWork.items
           .map((item) => item.label)

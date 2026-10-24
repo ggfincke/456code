@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/NewTaskRouteScreen.tsx
+// native project navigation and presentation
 import { isDraftThreadRoute } from "./thread-route-state";
 import * as Dialog from "../../components/ui/Dialog";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
@@ -480,6 +482,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                           environmentId={scope.representative.environmentId}
                           faviconPath={scope.representative.faviconPath}
                           projectIcon={scope.representative.projectIcon}
+                          projectId={scope.representative.id}
                           size={24}
                           projectTitle={scope.title}
                           workspaceRoot={scope.representative.workspaceRoot}
@@ -505,6 +508,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                           environmentId={scope.representative.environmentId}
                           faviconPath={scope.representative.faviconPath}
                           projectIcon={scope.representative.projectIcon}
+                          projectId={scope.representative.id}
                           size={20}
                           projectTitle={scope.title}
                           workspaceRoot={scope.representative.workspaceRoot}

@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-
+// apps/mobile/scripts/generate-uniwind-themes.mts
+// registers mobile palettes and writes static theme outputs
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import tailwindColors from "tailwindcss/colors";
-import { BUILT_IN_THEME_IDS, type BuiltInThemeId } from "@t3tools/shared/themePalettes";
+import { BUILT_IN_THEME_IDS } from "@t3tools/shared/themePalettes";
 
 import {
   createMobileThemeVariables,
   getMobileThemeColors,
   getMobileThemeVariables,
   DEFAULT_MOBILE_THEME_ID,
+  FINCKE_OCEAN_THEME_ID,
+  supportsMobileThemeAppearance,
+  type MobileThemeId,
   type MobileThemeAppearance,
 } from "../src/lib/mobileTheme.ts";
 
@@ -154,8 +158,11 @@ const ADAPTIVE_COLORS: Readonly<Record<string, readonly [light: string, dark: st
   "--color-adaptive-zinc-600-300": [color("zinc", 600), color("zinc", 300)],
 };
 
-export const customThemeNames = BUILT_IN_THEME_IDS.flatMap((themeId) =>
-  APPEARANCES.map((appearance) => `${themeId}-${appearance}`),
+const paletteThemeIds = [...BUILT_IN_THEME_IDS, FINCKE_OCEAN_THEME_ID] as const;
+export const customThemeNames = paletteThemeIds.flatMap((themeId) =>
+  APPEARANCES.filter((appearance) => supportsMobileThemeAppearance(themeId, appearance)).map(
+    (appearance) => `${themeId}-${appearance}`,
+  ),
 );
 
 const adaptiveVariablesFor = (appearance: MobileThemeAppearance) =>
@@ -166,7 +173,10 @@ const adaptiveVariablesFor = (appearance: MobileThemeAppearance) =>
     ]),
   );
 
-const variablesFor = (themeId: BuiltInThemeId, appearance: MobileThemeAppearance) => ({
+const variablesFor = (
+  themeId: Exclude<MobileThemeId, "material-you">,
+  appearance: MobileThemeAppearance,
+) => ({
   ...getMobileThemeVariables(themeId, appearance),
   ...adaptiveVariablesFor(appearance),
   ...clerkVariablesFor(appearance),
@@ -225,9 +235,10 @@ export const renderUniwindThemesCSS = () => {
         ...clerkVariablesFor(appearance),
       }),
     ),
-    ...BUILT_IN_THEME_IDS.flatMap((themeId) =>
-      APPEARANCES.map((appearance) =>
-        renderVariant(`${themeId}-${appearance}`, variablesFor(themeId, appearance)),
+    ...paletteThemeIds.flatMap((themeId) =>
+      APPEARANCES.filter((appearance) => supportsMobileThemeAppearance(themeId, appearance)).map(
+        (appearance) =>
+          renderVariant(`${themeId}-${appearance}`, variablesFor(themeId, appearance)),
       ),
     ),
   ];

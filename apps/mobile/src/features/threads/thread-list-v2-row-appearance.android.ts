@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/thread-list-v2-row-appearance.android.ts
+// android thread row geometry and selected appearance
 import type { ViewStyle } from "react-native";
 import type { MobileThemeVariables } from "../../lib/mobileTheme";
 
@@ -31,12 +33,14 @@ export function getThreadListV2RowAppearance(
   theme: MobileThemeVariables,
   sidebarPane: boolean,
   selected: boolean,
+  ocean = false,
 ) {
   const selectedBackgroundColor = theme["--color-thread-selected"];
   const backgroundColor = theme[sidebarPane ? "--color-drawer" : "--color-screen"];
   const style: ViewStyle = {
     backgroundColor: selected ? selectedBackgroundColor : backgroundColor,
     borderRadius: THREAD_LIST_V2_SIDEBAR_ROW_STYLE.borderRadius,
+    ...(ocean ? { borderLeftWidth: 2, borderLeftColor: selected ? "#80cbc4" : "transparent" } : {}),
   };
   const swipeContainerStyle = THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE;
 

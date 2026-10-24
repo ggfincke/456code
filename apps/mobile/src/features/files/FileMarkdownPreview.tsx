@@ -1,3 +1,5 @@
+// apps/mobile/src/features/files/FileMarkdownPreview.tsx
+// markdown file preview with native media and theme typography
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { resolveMobileMarkdownMediaSource } from "../../lib/markdownMediaSource";
@@ -9,6 +11,7 @@ import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { FONT_FAMILIES } from "../../lib/fontFamilies";
 import { resolveNativeMarkdownTypography } from "../../lib/appearancePreferences";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
+import { FINCKE_OCEAN_INLINE_CODE } from "../../lib/mobileTheme";
 import {
   ThreadMarkdownImage,
   ThreadMarkdownImageView,
@@ -33,7 +36,8 @@ interface MarkdownPreviewStyles {
 }
 
 export function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
-  const { appearance } = useAppearancePreferences();
+  const { appearance, themeId } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
   const nativeMarkdownTypography = resolveNativeMarkdownTypography(appearance.baseFontSize);
   const theme = useUniwindTheme();
   const body = theme["--color-md-body"];
@@ -52,9 +56,9 @@ export function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
       strongColor: strong,
       mutedColor: body,
       linkColor: link,
-      inlineCodeColor: codeText,
+      inlineCodeColor: ocean ? FINCKE_OCEAN_INLINE_CODE.color : codeText,
       codeColor: codeText,
-      codeBackgroundColor: codeBackground,
+      codeBackgroundColor: ocean ? FINCKE_OCEAN_INLINE_CODE.background : codeBackground,
       codeBlockBackgroundColor: codeBackground,
       fileTextColor: codeText,
       quoteMarkerColor: blockquoteBorder,

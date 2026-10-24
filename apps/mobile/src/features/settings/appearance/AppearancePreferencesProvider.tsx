@@ -1,3 +1,5 @@
+// apps/mobile/src/features/settings/appearance/AppearancePreferencesProvider.tsx
+// appearance preferences and native theme synchronization
 import {
   createContext,
   startTransition,
@@ -30,6 +32,7 @@ import { getMobileThemeRuntimeVariables } from "../../../lib/mobileThemeVariable
 import type { MobileThemeVariables } from "../../../lib/mobileTheme";
 import {
   createMobileThemePairPatch,
+  createMobileDarkThemeActivationPatch,
   createMobileThemeSelectionPatch,
   normalizeMobileThemeMode,
   resolveMobileThemeIds,
@@ -63,12 +66,15 @@ interface AppearancePreferencesContextValue {
     value: MobileThemeId,
   ) => void;
   readonly setThemeIdForBothAppearances: (value: MobileThemeId) => void;
+  readonly activateDarkTheme: (value: MobileThemeId) => void;
   readonly setThemeMode: (value: MobileThemeMode) => void;
   readonly setBaseFontSize: (value: number) => void;
   readonly setTerminalFontSize: (value: number | null) => void;
   readonly setCodeFontSize: (value: number | null) => void;
   readonly setCodeWordBreak: (value: boolean) => void;
   readonly mathRenderingEnabled: boolean;
+  readonly sidebarProjectFolderTint: boolean;
+  readonly setSidebarProjectFolderTint: (value: boolean) => void;
   readonly setMathRenderingEnabled: (value: boolean) => void;
 }
 
@@ -200,11 +206,21 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
 
   const setThemeIdForBothAppearances = useCallback(
     (value: MobileThemeId) => {
-      const patch = createMobileThemePairPatch(value);
+      const patch = createMobileThemePairPatch(value, selectedThemeIdsRef.current);
       selectedThemeIdsRef.current = resolveMobileThemeIds(patch);
       updateThemePreferences(patch);
     },
     [updateThemePreferences],
+  );
+
+  const activateDarkTheme = useCallback(
+    (value: MobileThemeId) => {
+      const patch = createMobileDarkThemeActivationPatch(selectedThemeIdsRef.current, value);
+      selectedThemeIdsRef.current = resolveMobileThemeIds(patch);
+      updateThemePreferences(patch);
+      syncThemeRuntime({ ...runtimeState, themeAppearance: "dark", themeMode: "dark" });
+    },
+    [runtimeState, syncThemeRuntime, updateThemePreferences],
   );
 
   const setThemeMode = useCallback(
@@ -267,6 +283,11 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   );
 
   const mathRenderingEnabled = storedPreferences?.mathRenderingEnabled === true;
+  const sidebarProjectFolderTint = storedPreferences?.sidebarProjectFolderTint === true;
+  const setSidebarProjectFolderTint = useCallback(
+    (value: boolean) => updatePreferences({ sidebarProjectFolderTint: value }),
+    [updatePreferences],
+  );
   const setMathRenderingEnabled = useCallback(
     (value: boolean) => updatePreferences({ mathRenderingEnabled: value }),
     [updatePreferences],
@@ -287,12 +308,15 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       isReady,
       setThemeIdForAppearance,
       setThemeIdForBothAppearances,
+      activateDarkTheme,
       setThemeMode,
       setBaseFontSize,
       setTerminalFontSize,
       setCodeFontSize,
       setCodeWordBreak,
       mathRenderingEnabled,
+      sidebarProjectFolderTint,
+      setSidebarProjectFolderTint,
       setMathRenderingEnabled,
     }),
     [
@@ -308,12 +332,15 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       isReady,
       setThemeIdForAppearance,
       setThemeIdForBothAppearances,
+      activateDarkTheme,
       setThemeMode,
       setBaseFontSize,
       setTerminalFontSize,
       setCodeFontSize,
       setCodeWordBreak,
       mathRenderingEnabled,
+      sidebarProjectFolderTint,
+      setSidebarProjectFolderTint,
       setMathRenderingEnabled,
     ],
   );

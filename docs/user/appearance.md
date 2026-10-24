@@ -14,6 +14,11 @@ those modes. Customize these shortcuts under **Settings → Keybindings**.
 On mobile, open **Settings → Appearance**. Mobile has its own themes and text,
 code, and terminal preferences. It does not follow environment themes or defaults.
 
+**Use Fincke Ocean** selects the dark Ocean theme and switches mobile to Dark appearance.
+Your light theme stays selected for light appearance. Choose System afterward to use that
+light theme during the day and Fincke Ocean when the system uses dark appearance.
+Other themes remain available, and installing an update does not change your selection.
+
 On Android 12 or newer, choose the **Material You** theme in Appearance to use colors from
 your wallpaper. Selecting another theme replaces those colors. Like other themes, Material You
 can be selected separately for light and dark appearances.

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/ThreadListToolbar.tsx
+// presents native thread list navigation
+
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
@@ -112,7 +115,7 @@ export function ThreadListToolbar(props: {
         onCloseSearch={closeSearch}
         onOpenSearch={openSearch}
         searchAccessibilityLabel="Search threads"
-        titleAccessibilityLabel="T3 Code, Threads"
+        titleAccessibilityLabel="456code, Threads"
         onOpenEnvironments={props.onOpenEnvironments}
         filter={filterButton}
       />

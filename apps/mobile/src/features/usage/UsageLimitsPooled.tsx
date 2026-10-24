@@ -1,3 +1,5 @@
+// apps/mobile/src/features/usage/UsageLimitsPooled.tsx
+// pooled account usage and native account detail navigation
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { EnvironmentId } from "@t3tools/contracts";
@@ -25,7 +27,7 @@ import { ProviderIcon } from "../../components/ProviderIcon";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { environmentPresentations } from "../../state/presentation";
 import { ResetCredits } from "./UsageLimitsSection";
-import { usageProviderKind, useProviderColors } from "./usageProviders";
+import { usageProviderKind, useProviderColors, useUsageLimitBarColor } from "./usageProviders";
 
 const DRIVER_LABEL: Partial<Record<string, string>> = {
   codex: "Codex",
@@ -97,6 +99,7 @@ function AccountSegment({
   readonly color: string;
   readonly refillPercent: number;
 }) {
+  const fillColor = useUsageLimitBarColor(remaining, color) ?? color;
   const patternId = useId().replace(/:/g, "");
   const [size, setSize] = useState({ width: 0, height: 0 });
   return (
@@ -115,7 +118,12 @@ function AccountSegment({
         <Svg width={size.width} height={size.height} accessible={false}>
           <Defs>
             <Pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse">
-              <Path d="M-1 1L1 -1M0 6L6 0M5 7L7 5" stroke={color} strokeWidth={1} opacity={0.22} />
+              <Path
+                d="M-1 1L1 -1M0 6L6 0M5 7L7 5"
+                stroke={fillColor}
+                strokeWidth={1}
+                opacity={0.22}
+              />
             </Pattern>
           </Defs>
           {refillPercent > 0 ? (
@@ -126,7 +134,7 @@ function AccountSegment({
               fill={`url(#${patternId})`}
             />
           ) : null}
-          <Rect width={`${remaining}%`} height="100%" fill={color} opacity={0.35} />
+          <Rect width={`${remaining}%`} height="100%" fill={fillColor} opacity={0.35} />
         </Svg>
       ) : null}
     </View>

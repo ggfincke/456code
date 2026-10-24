@@ -1,10 +1,12 @@
+// apps/mobile/src/features/files/SourceFileSurface.tsx
+// highlighted source views and layout-aware target line navigation
+import { LegendList } from "@legendapp/list/react-native";
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import type { ComponentType } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
-  FlatList,
   Platform,
   RefreshControl,
   ScrollView,
@@ -240,21 +242,10 @@ function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
   const { codeSurface, codeWordBreak } = useAppearanceCodeSurface();
   const { normalizedContents, lines, status, targetIndex, tokens } = useSourceFileModel(props);
   const selectableTokens = props.selectable ? boundedSelectableSourceTokens(tokens) : null;
-  const listRef = useRef<FlatList<string>>(null);
   const { isPullRefreshing, handlePullToRefresh } = useSourceFileRefresh(props.onRefresh);
   const refreshControl = props.onRefresh ? (
     <RefreshControl refreshing={isPullRefreshing} onRefresh={() => void handlePullToRefresh()} />
   ) : undefined;
-
-  useEffect(() => {
-    if (targetIndex === null) {
-      return;
-    }
-    const frame = requestAnimationFrame(() => {
-      listRef.current?.scrollToIndex({ index: targetIndex, animated: false, viewPosition: 0.3 });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [props.path, targetIndex]);
 
   const renderLine = ({ item, index }: { item: string; index: number }) => (
     <HighlightedSourceLine
@@ -270,7 +261,7 @@ function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
   // On iOS `uiTextView` renders a real `UITextView`, which selects across every line,
   // wraps, and lays out long documents through TextKit; on Android the primitive is an RN
   // `Text`, which selects across its nested children. Either way "select all" takes the
-  // file rather than a line, which a `FlatList` row can never do because each row is its
+  // file rather than a line, which a virtualized row can never do because each row is its
   // own selection scope.
   const selectableBlock = props.selectable ? (
     <SourceText
@@ -317,25 +308,21 @@ function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
   ) : null;
 
   const list = (
-    <FlatList
-      ref={listRef}
+    <LegendList
+      key={`${props.path}:${targetIndex}`}
+      className="flex-1"
       contentInsetAdjustmentBehavior={usesAutomaticInsets ? "automatic" : "never"}
       automaticallyAdjustsScrollIndicatorInsets={usesAutomaticInsets}
       refreshControl={refreshControl}
       data={lines}
       keyExtractor={(_line, index) => String(index)}
-      initialNumToRender={80}
-      maxToRenderPerBatch={80}
-      windowSize={12}
-      {...(codeWordBreak
-        ? {}
-        : {
-            getItemLayout: (_data, index) => ({
-              length: codeSurface.rowHeight,
-              offset: codeSurface.rowHeight * index,
-              index,
-            }),
-          })}
+      // keep the requested line anchored as wrapped rows acquire their measured heights.
+      initialScrollIndex={
+        targetIndex === null ? undefined : { index: targetIndex, viewPosition: 0.3 }
+      }
+      estimatedItemSize={codeSurface.rowHeight}
+      extraData={{ codeSurface, codeWordBreak, targetIndex, tokens }}
+      getFixedItemSize={codeWordBreak ? undefined : () => codeSurface.rowHeight}
       contentContainerStyle={{
         minWidth: codeWordBreak ? undefined : "100%",
         paddingBottom: codeSurface.rowHeight,

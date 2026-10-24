@@ -1,3 +1,6 @@
+// apps/mobile/src/widgets/subscriptionUsageSnapshot.ts
+// builds native subscription usage widget snapshots
+
 import {
   collectLimitAccounts,
   collectLimitPools,
@@ -95,7 +98,7 @@ function subscriptionUsageProps(
         return {
           name,
           detail: !fresh
-            ? "Open T3 to refresh"
+            ? "Open 456code to refresh"
             : pool.accounts.length > 1
               ? `${pool.accounts.length} accounts · pooled`
               : "Subscription remaining",
@@ -160,7 +163,7 @@ export function subscriptionUsageTimeline(snapshot: SubscriptionUsageSnapshot, n
       ...snapshot,
       providers: snapshot.providers.map((provider) =>
         provider.windows.length > 0 && provider.expiresAt <= date
-          ? { ...provider, detail: "Open T3 to refresh", windows: [], totalWindows: 0 }
+          ? { ...provider, detail: "Open 456code to refresh", windows: [], totalWindows: 0 }
           : provider,
       ),
     },

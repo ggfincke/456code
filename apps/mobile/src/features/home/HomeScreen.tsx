@@ -1,3 +1,5 @@
+// apps/mobile/src/features/home/HomeScreen.tsx
+// adaptive native thread list and workspace navigation
 import { useActiveNewTask } from "../../state/active-new-task";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
@@ -6,6 +8,7 @@ import { computeThreadMoveAvailability } from "../threads/threadOrder";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { THREAD_SIDEBAR_ROW_LAYOUT } from "../threads/threadListAnimations";
+import { FinckeListHeader } from "../../fincke/FinckeListHeader";
 import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
@@ -792,6 +795,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const v2ListHeader = (
     <>
       {listHeader}
+      <FinckeListHeader />
       {Platform.OS === "ios" && workspace ? (
         <ThreadListFilters
           environments={props.environments}

@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx
+// shared sidebar thread navigation with native chrome
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
@@ -8,6 +10,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import { FinckeListHeader } from "../../fincke/FinckeListHeader";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
@@ -816,6 +819,7 @@ function ThreadNavigationSidebarPane(
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
                 ListEmptyComponent={listEmpty}
+                ListHeaderComponent={FinckeListHeader}
               />
             </GestureDetector>
           </SwipeableScrollGateProvider>
@@ -884,6 +888,7 @@ function ThreadNavigationSidebarPane(
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
                 ListEmptyComponent={listEmpty}
+                ListHeaderComponent={FinckeListHeader}
               />
             </GestureDetector>
           </SwipeableScrollGateProvider>

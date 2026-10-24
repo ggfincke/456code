@@ -1,3 +1,5 @@
+// apps/mobile/src/components/ComposerToolbar.tsx
+// touch controls and action buttons for the native composer
 import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -18,6 +20,9 @@ import { cn } from "../lib/cn";
 import { AppText as Text } from "./ui/AppText";
 import { SymbolView } from "./ui/AppSymbol";
 import { useAndroidControlSizing } from "./ui/useAndroidControlSizing";
+import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
+import { FinckeWaveArt } from "../fincke/FinckeWaveArt";
+import { themeColorWithAlpha } from "../lib/mobileTheme";
 
 const COMPOSER_TOOLBAR_GAP = 8;
 const COMPOSER_TOOLBAR_FADE_WIDTH = 18;
@@ -244,6 +249,7 @@ export function ComposerToolbarScroller(props: {
 }
 
 export function ComposerActionButton(props: {
+  readonly appearance?: "send" | "stop";
   readonly size?: "regular" | "large";
   readonly accessibilityLabel: string;
   readonly disabled?: boolean;
@@ -256,6 +262,10 @@ export function ComposerActionButton(props: {
   readonly onTouchStart?: PressableProps["onTouchStart"];
 }) {
   const { scale, smallIconSize } = useAndroidControlSizing();
+  const { themeId, themeVariables } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
+  const quietStop = ocean && props.appearance === "stop";
+  const waveSend = ocean && props.appearance === "send";
   const circleSize = Math.round((props.size === "large" ? 44 : 30) * scale);
   return (
     <Pressable
@@ -269,27 +279,62 @@ export function ComposerActionButton(props: {
       onLongPress={props.onLongPress}
       onTouchStart={props.onTouchStart}
     >
-      <View
-        style={{ width: circleSize, height: circleSize }}
-        className={cn(
-          "items-center justify-center rounded-full",
-          props.variant === "danger"
-            ? "bg-danger"
-            : props.disabled
-              ? "bg-primary/15"
-              : "bg-primary",
-        )}
-      >
-        <SymbolView
-          name={props.icon}
-          size={props.size === "large" ? Math.round(20 * scale) : smallIconSize}
-          weight="semibold"
-          tintColorClassName={
-            props.variant === "danger" ? "accent-danger-foreground" : "accent-primary-foreground"
-          }
-          type="monochrome"
-        />
-      </View>
+      {({ pressed }) => (
+        <View
+          style={{
+            width: circleSize,
+            height: circleSize,
+            ...(waveSend ? { opacity: props.disabled ? 0.35 : 1 } : {}),
+            ...(quietStop
+              ? {
+                  borderWidth: 2,
+                  borderColor: pressed
+                    ? themeVariables["--color-danger-foreground"]
+                    : themeVariables["--color-primary"],
+                  backgroundColor: pressed
+                    ? themeColorWithAlpha(themeVariables["--color-danger-foreground"], 0.13)
+                    : themeVariables["--color-card"],
+                }
+              : {}),
+          }}
+          className={cn(
+            "items-center justify-center overflow-hidden rounded-full",
+            quietStop
+              ? undefined
+              : props.variant === "danger"
+                ? "bg-danger"
+                : props.disabled
+                  ? "bg-primary/15"
+                  : "bg-primary",
+          )}
+        >
+          {waveSend ? (
+            <View className="absolute inset-0" pointerEvents="none">
+              <FinckeWaveArt compact />
+            </View>
+          ) : null}
+          <SymbolView
+            name={props.icon}
+            size={props.size === "large" ? Math.round(20 * scale) : smallIconSize}
+            weight="semibold"
+            tintColor={
+              quietStop
+                ? pressed
+                  ? themeVariables["--color-danger-foreground"]
+                  : themeVariables["--color-primary"]
+                : undefined
+            }
+            tintColorClassName={
+              quietStop
+                ? undefined
+                : props.variant === "danger"
+                  ? "accent-danger-foreground"
+                  : "accent-primary-foreground"
+            }
+            type="monochrome"
+          />
+        </View>
+      )}
     </Pressable>
   );
 }
