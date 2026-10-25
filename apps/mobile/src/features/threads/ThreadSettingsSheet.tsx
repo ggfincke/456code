@@ -1156,7 +1156,8 @@ function ThreadEffortSlider(props: {
     disabled: props.disabled || props.state.locked,
     onCommit: props.onCommit,
   });
-  // oxlint-disable-next-line react/refs -- preview sessions read refs only from native events.
+  // preview sessions only call this from native slider events, never during render
+  const readLive = useEffectEvent(() => (focused.current ? live.current : null));
   const [selection] = useState(() =>
     createEffortSelectionSession(
       {
@@ -1165,7 +1166,7 @@ function ThreadEffortSlider(props: {
         currentValue: props.state.currentValue,
         defaultIndex: props.state.defaultIndex,
       },
-      () => (focused.current ? live.current : null),
+      readLive,
     ),
   );
   useLayoutEffect(() => {

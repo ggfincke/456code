@@ -32,7 +32,7 @@ private struct ComposerControlledDocumentPayload: Decodable {
 private struct ComposerThemePayload: Decodable {
   let text: String
   let placeholder: String
-  var selection: String? = nil
+  let selection: String?
 }
 
 private enum ComposerEnterBehavior: String {
@@ -436,7 +436,8 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
   private var requestedSelection: ComposerSelectionPayload?
   private var theme = ComposerThemePayload(
     text: "#262626",
-    placeholder: "#8e8e93"
+    placeholder: "#8e8e93",
+    selection: nil
   )
   private var fontFamily = "DMSans-Regular"
   private var fontSize: CGFloat = 14
