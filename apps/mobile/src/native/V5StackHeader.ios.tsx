@@ -145,6 +145,9 @@ export function V5StackHeader(props: {
   readonly column?: "primary" | "detail";
   /** The workspace's compose action, shown as its own group in this column's bar. */
   readonly onCompose?: () => void;
+  // fincke: the Duo's bar adds sidebar & search beside compose as one navigation group
+  readonly onToggleSidebar?: () => void;
+  readonly onSearch?: () => void;
 }) {
   const { options } = props;
   const theme = useMobileNavigationTheme();
@@ -214,16 +217,34 @@ export function V5StackHeader(props: {
     trailing.push(...bottom);
     bottom.length = 0;
   }
-  if (props.onCompose) {
+  if (props.onCompose || props.onToggleSidebar || props.onSearch) {
     if (trailing.length)
       trailing.push({ type: "spacer", id: "compose-group", sizing: "fixed", width: 8 });
-    trailing.push({
-      type: "item",
-      id: "workspace-compose",
-      title: "New task",
-      icon: { type: "sfSymbol", name: "square.and.pencil" },
-      onPress: props.onCompose,
-    });
+    // items stack from the bar's edge inward, so this reads sidebar, new task, search downward
+    if (props.onSearch)
+      trailing.push({
+        type: "item",
+        id: "workspace-search",
+        title: "Search",
+        icon: { type: "sfSymbol", name: "magnifyingglass" },
+        onPress: props.onSearch,
+      });
+    if (props.onCompose)
+      trailing.push({
+        type: "item",
+        id: "workspace-compose",
+        title: "New task",
+        icon: { type: "sfSymbol", name: "square.and.pencil" },
+        onPress: props.onCompose,
+      });
+    if (props.onToggleSidebar)
+      trailing.push({
+        type: "item",
+        id: "workspace-sidebar",
+        title: "Sidebar",
+        icon: { type: "sfSymbol", name: "sidebar.left" },
+        onPress: props.onToggleSidebar,
+      });
   }
   const left = options.headerLeft?.(itemProps);
   const right = options.headerRight?.(itemProps);

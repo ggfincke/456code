@@ -8,6 +8,7 @@ import { useDeviceType } from "../../native/native-layout-metrics";
 import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
+import { dispatchHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import {
   ThreadGitControls,
   useThreadGitCenterHeaderItems,
@@ -33,6 +34,25 @@ export function useThreadHeaderOptions(props: {
   const sidebarHeaderItem = useWorkspaceSidebarHeaderItem();
   const threadCenterHeaderItems = useThreadGitCenterHeaderItems(props.gitControls);
   const compactRightHeaderItems = useThreadGitRightHeaderItems(props.gitControls);
+  // fincke: the Duo's thread tools group ends with thread settings (model, effort & limits).
+  // Bar items stack from the edge inward, so the first item lands at the group's bottom
+  const duoCenterHeaderItems = useMemo<NativeHeaderItems>(
+    () =>
+      usesDuoHeader
+        ? [
+            withNativeGlassHeaderItem({
+              accessibilityLabel: "Thread settings",
+              icon: { name: "slider.horizontal.3", type: "sfSymbol" as const },
+              identifier: "thread-settings",
+              label: "Thread settings",
+              onPress: () => dispatchHardwareKeyboardCommand("threadSettings"),
+              type: "button" as const,
+            }),
+            ...threadCenterHeaderItems,
+          ]
+        : threadCenterHeaderItems,
+    [threadCenterHeaderItems, usesDuoHeader],
+  );
   const splitLeftHeaderItems = useMemo<NativeHeaderItems>(
     () => [
       ...(!usesDuoHeader
@@ -54,7 +74,8 @@ export function useThreadHeaderOptions(props: {
             }),
           ]
         : []),
-      sidebarHeaderItem,
+      // fincke: the Duo toggles its sidebar from the bar's Threads tab
+      ...(usesDuoHeader ? [] : [sidebarHeaderItem]),
       ...(!usesDuoHeader && !props.draft
         ? [
             withNativeGlassHeaderItem({
@@ -96,7 +117,7 @@ export function useThreadHeaderOptions(props: {
         : () => compactHomeHeaderItems,
     // The workspace navigator adds compose to the Duo detail column's bar.
     unstable_headerRightItems: () =>
-      usesDuoHeader || layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems,
+      usesDuoHeader || layout.usesSplitView ? duoCenterHeaderItems : compactRightHeaderItems,
     unstable_headerToolbarItems: () => [],
     unstable_headerSubtitle: props.usesNativeHeaderGlass ? props.subtitle : undefined,
     contentStyle: undefined,
@@ -110,7 +131,7 @@ export function useThreadHeaderOptions(props: {
     // `commit_push` depending on the default ref), so that state is keyed too.
     optionsVersion: [
       splitLeftHeaderItems,
-      threadCenterHeaderItems,
+      duoCenterHeaderItems,
       compactRightHeaderItems,
       usesDuoHeader,
       environmentId,

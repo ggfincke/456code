@@ -30,6 +30,7 @@ import { isDuoDevice } from "../../lib/device-type";
 import { useDeviceType, useNativeLayoutMetrics } from "../../native/native-layout-metrics";
 
 import { useAdaptiveWorkspaceLayout } from "./AdaptiveWorkspaceLayout";
+import { dispatchHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import { WorkspaceEmptyDetail } from "./WorkspaceEmptyDetail";
 import { NativeColumnContent as ColumnContent } from "../../native/NativeColumnContent.ios";
 import {
@@ -75,6 +76,8 @@ function ColumnScreen(props: {
   readonly onDismiss: (routeKey: string, native: boolean) => void;
   readonly onAppearance: (type: "willAppear" | "didAppear" | "willDisappear", key: string) => void;
   readonly onCompose?: () => void;
+  readonly onToggleSidebar?: () => void;
+  readonly onSearch?: () => void;
   readonly navigation: ViewProps["navigation"];
 }) {
   const { descriptor } = props;
@@ -125,6 +128,8 @@ function ColumnScreen(props: {
                 ? undefined
                 : props.onCompose
             }
+            onToggleSidebar={props.onToggleSidebar}
+            onSearch={props.onSearch}
           />
           <ColumnContent
             primary={props.primary}
@@ -184,6 +189,11 @@ function WorkspaceColumns(
   // review actions.
   const detailCompose =
     isDuoDevice(deviceType) && selectedTab !== "pullRequests" ? openNewTask : undefined;
+  // fincke: the Duo's bar always carries the sidebar toggle & search, whatever the column shows
+  const detailSidebarToggle = isDuoDevice(deviceType) ? togglePrimarySidebar : undefined;
+  const detailSearch = isDuoDevice(deviceType)
+    ? () => dispatchHardwareKeyboardCommand("commandPalette")
+    : undefined;
   const inspector = use(NativeWorkspaceInspectorContext);
   const hostRef = useRef<SplitHostCommands>(null);
   const activeDetailKey = props.detail.at(-1)?.key;
@@ -280,9 +290,10 @@ function WorkspaceColumns(
       onInspectorHide={() => {
         if (inspector.visible) toggleAuxiliaryPane();
       }}
+      // fincke: the sidebar keeps one width, so it only shows or hides and never drags
       columnMetrics={{
-        minimumPrimaryColumnWidth: 280,
-        maximumPrimaryColumnWidth: Math.max(380, layout.listPaneWidth ?? 0),
+        minimumPrimaryColumnWidth: layout.listPaneWidth ?? 320,
+        maximumPrimaryColumnWidth: layout.listPaneWidth ?? 320,
         preferredPrimaryColumnWidthOrFraction: layout.listPaneWidth ?? 320,
         minimumSecondaryColumnWidth: 320,
       }}
@@ -310,18 +321,24 @@ function WorkspaceColumns(
               options={{
                 headerShown: true,
                 title: "",
-                unstable_headerLeftItems: () => [
-                  {
-                    type: "button",
-                    label: "",
-                    icon: { type: "sfSymbol", name: "sidebar.left" },
-                    onPress: togglePrimarySidebar,
-                  },
-                ],
+                // fincke: the Duo toggles its sidebar from the bar's Threads tab
+                unstable_headerLeftItems: () =>
+                  isDuoDevice(deviceType)
+                    ? []
+                    : [
+                        {
+                          type: "button",
+                          label: "",
+                          icon: { type: "sfSymbol", name: "sidebar.left" },
+                          onPress: togglePrimarySidebar,
+                        },
+                      ],
               }}
               canGoBack={false}
               column="detail"
               onCompose={detailCompose}
+              onToggleSidebar={detailSidebarToggle}
+              onSearch={detailSearch}
             />
             <ColumnContent>
               <WorkspaceEmptyDetail
@@ -343,6 +360,8 @@ function WorkspaceColumns(
                 onDismiss={handleNativeDismiss}
                 onAppearance={followCollapsedSplit}
                 onCompose={isPullRequestRoute(route) ? undefined : detailCompose}
+                onToggleSidebar={detailSidebarToggle}
+                onSearch={detailSearch}
                 navigation={props.navigation}
               />
             ) : null;

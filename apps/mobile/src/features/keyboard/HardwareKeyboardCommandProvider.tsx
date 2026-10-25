@@ -25,6 +25,7 @@ import {
   getRegisteredHardwareKeyboardCommands,
   parseActiveThreadPath,
   subscribeToHardwareKeyboardCommandRegistrations,
+  useHardwareKeyboardCommand,
   type HardwareKeyboardCommand,
 } from "./hardwareKeyboardCommands";
 
@@ -49,6 +50,10 @@ export function HardwareKeyboardCommandProvider({
   const navigation = useNavigation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
+  // fincke: lets on-screen buttons (the Duo's bar search) open the palette
+  useHardwareKeyboardCommand("commandPalette", () => {
+    setPaletteOpen(true);
+  });
   const activeThreadRef = useMemo(() => parseActiveThreadPath(pathname), [pathname]);
   const activeThread = useThreadShell(activeThreadRef);
   const copyTarget = useMemo(

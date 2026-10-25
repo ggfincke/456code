@@ -15,6 +15,8 @@ export type HardwareKeyboardCommand =
   | "review"
   | "copyThreadReference"
   | "toggleSidebar"
+  // fincke: opens the active thread's settings sheet, e.g. from the Duo's bar
+  | "threadSettings"
   | "cycleHost";
 
 type CommandHandler = (command: HardwareKeyboardCommand) => boolean | void;

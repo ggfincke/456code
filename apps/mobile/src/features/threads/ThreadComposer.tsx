@@ -135,6 +135,7 @@ import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
 } from "./use-thread-settings-sheet-presentation";
+import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 
 export const COMPOSER_COLLAPSED_CHROME = 60;
 
@@ -824,6 +825,11 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     settingsRoutePresentation.present({ ...settingsRouteSession, initialDescriptorId });
     settingsSheetPresentation.open();
   };
+  // fincke: the Duo's bar opens these settings through a command
+  useHardwareKeyboardCommand("threadSettings", () => {
+    if (controlsDisabled) return false;
+    openSettings();
+  });
 
   useEffect(() => {
     if (settingsSheetPresentation.isActive) {
