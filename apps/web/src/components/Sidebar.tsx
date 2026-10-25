@@ -2630,7 +2630,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   return (
     <>
       <ThreadContextDragGhost />
-      <SidebarChromeHeader isElectron={isElectron} actions={<SidebarViewToggle />} />
+      <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
         className="min-h-full"
         fixedHeader={
@@ -2762,6 +2762,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   </ComboboxPopup>
                 </Combobox>
               }
+              viewToggle={<SidebarViewToggle />}
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}

@@ -16,6 +16,7 @@ export interface SidebarThreadHeaderProps {
   searchFieldRef?: RefObject<HTMLDivElement | null>;
   hasProjects: boolean;
   projectScope: ReactNode;
+  viewToggle: ReactNode;
   onNewProject: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
@@ -36,6 +37,7 @@ export function SidebarThreadHeader({
   searchFieldRef,
   hasProjects,
   projectScope,
+  viewToggle,
   onNewProject,
   onNewThread,
   newThreadDisabled,
@@ -104,14 +106,11 @@ export function SidebarThreadHeader({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center">
-        {hasProjects ? (
-          <>
-            {projectScope}
-            <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          </>
-        ) : null}
+        {hasProjects ? projectScope : null}
+        {viewToggle}
+        <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
+          <FolderPlusIcon />
+        </SidebarHeaderIconButton>
         <SidebarHeaderIconButton
           label="New thread"
           tooltip={
