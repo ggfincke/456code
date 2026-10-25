@@ -490,6 +490,7 @@ function AdaptiveWorkspaceLayoutContent(
     }
     setSupplementaryPanePreferredWidth(nextWidth);
   };
+  const handleAddProject = () => navigation.navigate("AddProject");
   const handleOpenSettings = () => {
     navigation.navigate("SettingsSheet", {
       screen: "SettingsContent",
@@ -878,6 +879,8 @@ function AdaptiveWorkspaceLayoutContent(
                           selectedThreadKey={selectedThreadKey}
                           onOpenSettings={handleOpenSettings}
                           onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
+                          onAddProject={handleAddProject}
+                          onStartNewTask={handleStartNewTask}
                           onNewThreadInProject={handleNewThreadInProject}
                           onNewThreadOnBranch={handleNewThreadOnBranch}
                           onOpenPendingTask={handleOpenPendingTask}
