@@ -1,5 +1,5 @@
 // apps/mobile/src/fincke/SidebarThreadRowContent.tsx
-// compact sidebar row bodies: desktop's two-line activity row & one-line project row
+// compact sidebar row bodies: desktop's two-line activity row, one-line settled & project rows
 
 import {
   formatWorkingDurationLabel,
@@ -21,6 +21,7 @@ export type SidebarRowLayout = "activity" | "project";
 // fincke.dev's teal, muted & dim; other themes keep their drawer roles
 const OCEAN_ACCENT = "#80cbc4";
 const OCEAN_MUTED = "#8f93a2";
+const OCEAN_DIM = "#4b526d";
 const OCEAN_EMPHASIS = "#ffffff";
 
 function WorkingDuration(props: { readonly startedAt: string | null }) {
@@ -56,6 +57,11 @@ export function SidebarThreadRowContent(props: {
   readonly status: SidebarStatus | null;
   readonly timeLabel: string;
   readonly pinned: boolean;
+  // desktop's one-line settled row, led by the project icon
+  readonly slim?: boolean;
+  readonly projectIcon?: ReactNode;
+  // ahead of the project name on line two, e.g. the machine of a project-less thread
+  readonly metaLeading?: ReactNode;
   // replaces the status glyph, e.g. the dismissable Woke badge
   readonly statusSlot?: ReactNode;
   readonly leading?: ReactNode;
@@ -98,6 +104,29 @@ export function SidebarThreadRowContent(props: {
     </Text>
   );
 
+  if (props.layout === "activity" && props.slim) {
+    return (
+      <View className="relative">
+        {props.selected ? <SidebarSelectionBar ocean={ocean} theme={theme} /> : null}
+        <View className="h-9 flex-row items-center gap-2.5 px-2.5">
+          {props.projectIcon ? (
+            <View style={{ opacity: props.selected ? 1 : 0.4 }}>{props.projectIcon}</View>
+          ) : null}
+          {title}
+          {pin}
+          {props.leading}
+          {props.trailing}
+          {props.statusSlot ?? (
+            <Text className="min-w-8 text-right text-xs tabular-nums text-drawer-foreground-muted">
+              {props.timeLabel}
+            </Text>
+          )}
+        </View>
+        {props.footer ? <View className="pb-1.5 pl-[42px] pr-2.5">{props.footer}</View> : null}
+      </View>
+    );
+  }
+
   if (props.layout === "project") {
     return (
       <View className="relative">
@@ -137,9 +166,11 @@ export function SidebarThreadRowContent(props: {
         {statusGlyph}
       </View>
       <View className="mt-0.5 h-4 flex-row items-center gap-1.5">
+        {props.metaLeading}
         <Text
           className="min-w-0 flex-1 text-xs tabular-nums text-drawer-foreground-muted"
           numberOfLines={1}
+          style={ocean ? { color: OCEAN_DIM } : undefined}
         >
           {props.projectTitle ? (
             <Text

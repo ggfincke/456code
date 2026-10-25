@@ -1275,7 +1275,17 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     </>
   );
 
-  // fincke: sidebar panes use desktop's compact rows
+  // fincke: sidebar panes use desktop's compact rows. A project-less thread names
+  // its machine up front, so the trailing machine icon is not repeated
+  const compactMachine =
+    props.environmentLabel && props.environmentMachine ? (
+      <EnvironmentMachineSymbol
+        kind={props.environmentMachine}
+        size={11}
+        tintColorClassName={rowAppearance.tertiaryIconTintClassName}
+      />
+    ) : null;
+  const compactScratchMachine = props.project?.isScratch === true && !thread.branch;
   const compactContent = (
     <SidebarThreadRowContent
       layout={props.sidebarLayout ?? "activity"}
@@ -1295,6 +1305,21 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           : timeLabel
       }
       pinned={pinnedRow}
+      slim={variant === "slim"}
+      projectIcon={
+        props.project ? (
+          <ProjectFavicon
+            environmentId={thread.environmentId}
+            faviconPath={props.project.faviconPath}
+            projectIcon={props.project.projectIcon}
+            projectId={props.project.id}
+            size={15}
+            projectTitle={props.project.title}
+            workspaceRoot={props.project.workspaceRoot}
+          />
+        ) : null
+      }
+      metaLeading={compactScratchMachine ? compactMachine : null}
       statusSlot={
         showsWoke ? (
           <Pressable
@@ -1318,16 +1343,22 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       }
       leading={props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
       trailing={
-        <>
-          {prBadge}
-          {props.environmentLabel && props.environmentMachine ? (
-            <EnvironmentMachineSymbol
-              kind={props.environmentMachine}
-              size={11}
-              tintColorClassName={rowAppearance.tertiaryIconTintClassName}
-            />
-          ) : null}
-        </>
+        variant === "slim" ? (
+          prBadge
+        ) : (
+          <>
+            {thread.worktreePath?.trim() ? (
+              <SymbolView
+                name="arrow.triangle.branch"
+                size={11}
+                tintColorClassName={rowAppearance.tertiaryIconTintClassName}
+                type="monochrome"
+              />
+            ) : null}
+            {prBadge}
+            {compactScratchMachine ? null : compactMachine}
+          </>
+        )
       }
       footer={
         props.searchMatch ? (
