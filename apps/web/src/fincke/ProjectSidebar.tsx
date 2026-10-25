@@ -6,9 +6,9 @@ import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullR
 import { Spinner } from "~/components/ui/spinner";
 import {
   ArchiveIcon,
-  ArrowUpDownIcon,
   ChevronRightIcon,
   FolderPlusIcon,
+  ListFilterIcon,
   Globe2Icon,
   SearchIcon,
   SquarePenIcon,
@@ -123,7 +123,8 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { ensureLocalApi, readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useHandleNewThread, useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -211,6 +212,7 @@ import {
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
+  shouldCreateNewThreadInCurrentProject,
   sortProjectsForSidebar,
   useSidebarRowSubscriptionLease,
   useThreadJumpHintVisibility,
@@ -218,6 +220,7 @@ import {
 } from "../components/Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "../components/sidebar/SidebarChrome";
+import { SidebarHeaderIconButton } from "../components/sidebar/SidebarThreadHeader";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "../components/ui/command";
@@ -2675,18 +2678,9 @@ function ProjectSortMenu({
 
   return (
     <Menu>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <MenuTrigger
-              render={<Button size="icon-xs" variant="ghost-muted" aria-label="Sidebar options" />}
-            />
-          }
-        >
-          <ArrowUpDownIcon className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="right">Sidebar options</TooltipPopup>
-      </Tooltip>
+      <MenuTrigger render={<SidebarHeaderIconButton label="Sort & display" />}>
+        <ListFilterIcon />
+      </MenuTrigger>
       <MenuPopup align="end" side="bottom">
         <MenuGroup>
           <div className="px-2 py-1 sm:text-xs font-medium text-muted-foreground">
@@ -2843,6 +2837,42 @@ interface SidebarProjectsContentProps {
   projectsLength: number;
 }
 
+// mirrors the activity view's new thread button: shift-click or a lone project starts in
+// the current project, otherwise the palette asks where
+function SidebarNewThreadButton({
+  projectCount,
+  shortcutLabel,
+}: {
+  projectCount: number;
+  shortcutLabel: string | null;
+}) {
+  const newThreadContext = useHandleNewThread();
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  return (
+    <SidebarHeaderIconButton
+      label="New thread"
+      tooltip={shortcutLabel ? `New thread (${shortcutLabel})` : "New thread"}
+      disabled={projectCount === 0}
+      onClick={(event) => {
+        if (isMobile) setOpenMobile(false);
+        if (shouldCreateNewThreadInCurrentProject(event.shiftKey, projectCount)) {
+          void startNewThreadFromContext({
+            activeDraftThread: newThreadContext.activeDraftThread,
+            activeThread: newThreadContext.activeThread ?? undefined,
+            defaultProjectRef: newThreadContext.defaultProjectRef,
+            handleNewThread: newThreadContext.handleNewThread,
+          });
+          return;
+        }
+        openCommandPalette({ open: "new-thread-in" });
+      }}
+    >
+      <SquarePenIcon />
+    </SidebarHeaderIconButton>
+  );
+}
+
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
   props: SidebarProjectsContentProps,
 ) {
@@ -2900,17 +2930,42 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     <SidebarContent
       fixedHeader={
         <SidebarGroup className="z-[1]">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <CommandDialogTrigger
-                render={<SidebarMenuButton data-testid="command-palette-trigger" />}
+          {/* mirrors the activity view's search row so the view toggle keeps its slot */}
+          <div className="flex items-center gap-1">
+            <SidebarMenu className="min-w-0 flex-1">
+              <SidebarMenuItem>
+                <CommandDialogTrigger
+                  render={<SidebarMenuButton data-testid="command-palette-trigger" />}
+                >
+                  <SearchIcon />
+                  <span className="flex-1 truncate">Search</span>
+                  {commandPaletteShortcutLabel ? <Kbd>{commandPaletteShortcutLabel}</Kbd> : null}
+                </CommandDialogTrigger>
+              </SidebarMenuItem>
+            </SidebarMenu>
+            <div className="flex shrink-0 items-center">
+              <ProjectSortMenu
+                projectSortOrder={projectSortOrder}
+                threadSortOrder={threadSortOrder}
+                threadPreviewCount={threadPreviewCount}
+                onProjectSortOrderChange={handleProjectSortOrderChange}
+                onThreadSortOrderChange={handleThreadSortOrderChange}
+                onThreadPreviewCountChange={handleThreadPreviewCountChange}
+              />
+              <SidebarViewToggle />
+              <SidebarHeaderIconButton
+                label="Add project"
+                data-testid="sidebar-add-project-trigger"
+                onClick={openAddProject}
               >
-                <SearchIcon />
-                <span className="flex-1 truncate">Search</span>
-                {commandPaletteShortcutLabel ? <Kbd>{commandPaletteShortcutLabel}</Kbd> : null}
-              </CommandDialogTrigger>
-            </SidebarMenuItem>
-          </SidebarMenu>
+                <FolderPlusIcon />
+              </SidebarHeaderIconButton>
+              <SidebarNewThreadButton
+                projectCount={sortedProjects.length}
+                shortcutLabel={newThreadShortcutLabel}
+              />
+            </div>
+          </div>
         </SidebarGroup>
       }
     >
@@ -2943,32 +2998,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           <span className="text-2xs font-medium text-sidebar-muted-foreground/80 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-dim)">
             Projects
           </span>
-          <div className="flex items-center gap-1">
-            <ProjectSortMenu
-              projectSortOrder={projectSortOrder}
-              threadSortOrder={threadSortOrder}
-              threadPreviewCount={threadPreviewCount}
-              onProjectSortOrderChange={handleProjectSortOrderChange}
-              onThreadSortOrderChange={handleThreadSortOrderChange}
-              onThreadPreviewCountChange={handleThreadPreviewCountChange}
-            />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    aria-label="Add project"
-                    data-testid="sidebar-add-project-trigger"
-                    onClick={openAddProject}
-                  />
-                }
-              >
-                <FolderPlusIcon className="size-3.5" />
-              </TooltipTrigger>
-              <TooltipPopup side="right">Add project</TooltipPopup>
-            </Tooltip>
-          </div>
         </div>
 
         {isManualProjectSorting ? (
@@ -3682,7 +3711,7 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
       {prewarmedSidebarThreadRefs.map((threadRef) => (
         <SidebarThreadDetailPrewarmer key={scopedThreadKey(threadRef)} threadRef={threadRef} />
       ))}
-      <SidebarChromeHeader isElectron={isElectron} actions={<SidebarViewToggle />} />
+      <SidebarChromeHeader isElectron={isElectron} />
 
       <SidebarProjectsContent
         showArm64IntelBuildWarning={showArm64IntelBuildWarning}

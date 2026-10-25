@@ -1,8 +1,9 @@
 // packages/shared/src/fincke-wave.ts
 // shares fincke ribbon geometry between web and native svg renderers
 
-// original fincke.dev ribbon geometry, cropped to the opening S
-export const FINCKE_WAVE_FIELD = { x: 0, y: -26, width: 470, height: 150 } as const;
+// original fincke.dev ribbon geometry, cropped so the whole opening S fits the header band:
+// it enters at the top-left & leaves before the bottom fade on the right, under the brand
+export const FINCKE_WAVE_FIELD = { x: 0, y: -6, width: 470, height: 124 } as const;
 
 // same opening S, cropped tighter for the ~40px composer button, which has no text to clear.
 export const FINCKE_WAVE_BUTTON_FIELD = { x: 40, y: -20, width: 420, height: 142 } as const;
