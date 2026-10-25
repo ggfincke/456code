@@ -18,7 +18,7 @@ import {
   type FinckeProjectListItem,
 } from "../../fincke/project-sidebar";
 import { FinckeProjectHeaderRow, FinckeProjectMoreRow } from "../../fincke/ProjectSidebarRows";
-import { SidebarViewToggle } from "../../fincke/SidebarViewToggle";
+import { SidebarRowButton, SidebarViewToggle } from "../../fincke/SidebarViewToggle";
 import { useSidebarView } from "../../fincke/use-sidebar-view";
 import {
   threadSearchMatchKey,
@@ -55,7 +55,6 @@ import { useSavedRemoteConnections } from "../../state/use-remote-environment-re
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { useHomeListOptions } from "../home/home-list-options";
-import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
 import { buildHomeProjectScopes, sortHomeProjectScopes } from "../home/homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
@@ -106,6 +105,8 @@ interface ThreadNavigationSidebarProps {
   readonly selectedThreadKey: string | null;
   readonly onOpenSettings: () => void;
   readonly onOpenEnvironmentSettings: () => void;
+  readonly onAddProject: () => void;
+  readonly onStartNewTask: () => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
   readonly onOpenPendingTask: (pendingTask: PendingNewTask) => void;
@@ -778,19 +779,7 @@ function ThreadNavigationSidebarPane(
   const filterIcon = filterCustomized
     ? "line.3.horizontal.decrease.circle.fill"
     : "line.3.horizontal.decrease.circle";
-  const filterMenu = buildHomeListFilterMenu({
-    environments,
-    projects: projectFilterOptions,
-    selectedEnvironmentId: options.selectedEnvironmentId,
-    selectedProjectKey,
-    onEnvironmentChange: setSelectedEnvironmentId,
-    onProjectChange: setSelectedProjectKey,
-  });
-  const nativeHeaderItems = createSidebarHeaderItems({
-    filterIcon,
-    filterMenu,
-    onOpenSettings: props.onOpenSettings,
-  });
+  const nativeHeaderItems = createSidebarHeaderItems({ onOpenSettings: props.onOpenSettings });
   const listEmpty = (
     <Text
       className={
@@ -818,13 +807,34 @@ function ThreadNavigationSidebarPane(
       bleedLeft={Platform.OS === "android" ? 0 : styles.threadListContent.paddingHorizontal}
       bleedRight={Platform.OS === "android" ? 0 : styles.threadListContent.paddingHorizontal}
     >
-      <View className="flex-row justify-end px-1 pb-1 pt-1.5">
+      {/* ios gets web's search-row buttons: filter, view, add project, new thread. android
+          keeps its toolbar filter & new task fab, so it only needs the view toggle */}
+      <View className="flex-row items-center justify-end gap-0.5 px-1 pb-1 pt-1.5">
+        {props.nativeChrome ? (
+          <Menu actions={listMenuActions} onPressAction={handleListMenuAction}>
+            <SidebarRowButton icon={filterIcon} label="Filter threads" />
+          </Menu>
+        ) : null}
         <SidebarViewToggle
           projectsView={sidebarView.projectsView}
           onChange={sidebarView.setProjectsView}
           ocean={ocean}
           theme={materialTheme}
         />
+        {props.nativeChrome ? (
+          <>
+            <SidebarRowButton
+              icon="folder.badge.plus"
+              label="Add project"
+              onPress={props.onAddProject}
+            />
+            <SidebarRowButton
+              icon="square.and.pencil"
+              label="New thread"
+              onPress={props.onStartNewTask}
+            />
+          </>
+        ) : null}
       </View>
     </FinckeListHeader>
   );
