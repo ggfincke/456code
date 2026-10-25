@@ -11,6 +11,7 @@ import { AppText as Text } from "./ui/AppText";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useAndroidControlSizing } from "./ui/useAndroidControlSizing";
+import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 
 export function brandTitleOffset(): number {
   if (Platform.OS !== "ios") return 0;
@@ -29,6 +30,8 @@ export function CompactBrandTitle(
   } = {},
 ) {
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
+  // fincke: the ocean wave sits behind the title, so it reads white as on desktop
+  const ocean = useAppearancePreferences().themeId === "fincke-ocean";
   const titleOffset = brandTitleOffset();
   const { scale } = useAndroidControlSizing();
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
@@ -58,7 +61,11 @@ export function CompactBrandTitle(
         maxFontSizeMultiplier={1.4}
         numberOfLines={1}
         className="font-t3-medium text-foreground-muted"
-        style={{ fontSize: 21 * scale, letterSpacing: -0.5 * scale }}
+        style={{
+          fontSize: 21 * scale,
+          letterSpacing: -0.5 * scale,
+          ...(ocean ? { color: "#ffffff" } : null),
+        }}
       >
         456code
       </Text>

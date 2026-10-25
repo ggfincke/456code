@@ -53,7 +53,8 @@ projects without their own icon a colored folder, turn on **Settings → Appeara
 Color project folders**.
 
 On iPad and the iPhone Duo's sidebar column, the same two views switch with the two
-buttons beside the filters, and tapping a project folds its threads away. Projects
+buttons above the filters, and tapping a project folds its threads away. On the Duo, the
+sidebar button at the top of the side bar shows or hides the sidebar. Projects
 without their own icon take a stable color when **Settings → Appearance → Project folder
 colors** is on.
 

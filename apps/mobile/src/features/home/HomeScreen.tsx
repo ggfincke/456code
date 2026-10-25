@@ -233,7 +233,11 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
   const insets = useSafeAreaInsets();
   const primaryColumn = use(NativePrimaryColumnContext);
   const restingOffset = useRestingTopOffset(insets.top, props);
+  const { themeId } = useAppearancePreferences();
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
+  // fincke: the ocean wave sits behind the sidebar's header, so UIKit's edge dimming would
+  // cut a hard line through it
+  const waveBehindHeader = primaryColumn !== null && themeId === "fincke-ocean";
 
   // v5 needs the actual content scroll view registered with its screen controller.
   // The layout observer and header siblings prevent UIKit from finding it implicitly.
@@ -242,7 +246,11 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
       style={{ flex: 1 }}
       scrollEdgeEffects={{
         ...nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version),
-        top: Number.parseInt(String(Platform.Version), 10) >= 27 ? "automatic" : "soft",
+        top: waveBehindHeader
+          ? "hidden"
+          : Number.parseInt(String(Platform.Version), 10) >= 27
+            ? "automatic"
+            : "soft",
       }}
     >
       <ScrollView
@@ -861,22 +869,14 @@ export function HomeScreen(props: HomeScreenProps) {
         pullUp={Platform.OS === "ios" ? insets.top : 0}
         bleedLeft={listPaddingLeft}
         bleedRight={listPaddingRight}
-      />
-      <View className="flex-row items-start">
-        <View className="min-w-0 flex-1">
-          {Platform.OS === "ios" && workspace ? (
-            <ThreadListFilters
-              environments={props.environments}
-              projects={projectScopes.map((scope) => ({ key: scope.key, label: scope.title }))}
-              selectedEnvironmentId={props.selectedEnvironmentId}
-              selectedProjectKey={props.selectedProjectKey}
-              onEnvironmentChange={props.onEnvironmentChange}
-              onProjectChange={props.onProjectChange}
-            />
-          ) : null}
-        </View>
+      >
+        {/* fincke: the projects/activity switch rides the wave's lower edge, clear of the
+            filter chips. Native title-row buttons would make UIKit dim the wave behind them */}
         {primaryColumn ? (
-          <View className="pb-2.5 pr-1">
+          <View
+            className="flex-row justify-end pr-1"
+            style={ocean ? { marginTop: -40 } : undefined}
+          >
             <SidebarViewToggle
               projectsView={sidebarView.projectsView}
               onChange={sidebarView.setProjectsView}
@@ -885,7 +885,17 @@ export function HomeScreen(props: HomeScreenProps) {
             />
           </View>
         ) : null}
-      </View>
+      </FinckeListHeader>
+      {Platform.OS === "ios" && workspace ? (
+        <ThreadListFilters
+          environments={props.environments}
+          projects={projectScopes.map((scope) => ({ key: scope.key, label: scope.title }))}
+          selectedEnvironmentId={props.selectedEnvironmentId}
+          selectedProjectKey={props.selectedProjectKey}
+          onEnvironmentChange={props.onEnvironmentChange}
+          onProjectChange={props.onProjectChange}
+        />
+      ) : null}
     </>
   );
 
