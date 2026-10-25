@@ -1,3 +1,5 @@
+// apps/mobile/src/features/archive/ArchivedThreadsScreen.tsx
+// native project navigation and presentation
 import { Button } from "../../components/ui/Button";
 import type {
   EnvironmentProject,
@@ -149,6 +151,7 @@ function ProjectGroupLabel(props: {
         environmentId={props.project.environmentId}
         faviconPath={props.project.faviconPath}
         projectIcon={props.project.projectIcon}
+        projectId={props.project.id}
         projectTitle={props.project.title}
         size={18}
         workspaceRoot={props.project.workspaceRoot}

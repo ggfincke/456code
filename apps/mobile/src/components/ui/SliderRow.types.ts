@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ui/SliderRow.types.ts
+// defines native slider preview and commit callbacks
+
 import type { ComponentProps } from "react";
 import type { SymbolView } from "./AppSymbol";
 
@@ -15,4 +18,5 @@ export interface SliderRowProps {
   readonly step: number;
   readonly value: number;
   readonly onChange: (value: number) => void;
+  readonly onPreview?: (value: number) => void;
 }

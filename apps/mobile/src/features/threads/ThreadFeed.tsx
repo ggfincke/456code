@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ThreadFeed.tsx
+// renders thread messages and interactive native work history
+
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -122,7 +125,7 @@ import { composerImageGallery } from "../../lib/composerImageGallery";
 import { messageImageGallery } from "./messageImageGallery";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { isPdfFile } from "../../lib/filePreview";
-import { flattenThemeColor } from "../../lib/mobileTheme";
+import { FINCKE_OCEAN_INLINE_CODE, flattenThemeColor } from "../../lib/mobileTheme";
 import { PresentationSource } from "../../components/ui/NativePresentation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeInUp, type SharedValue } from "react-native-reanimated";
@@ -874,7 +877,8 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
 });
 
 function useMarkdownStyles(): MarkdownStyleSets {
-  const { appearance } = useAppearancePreferences();
+  const { appearance, themeId } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
   const nativeMarkdownTypography = useMemo(
     () => resolveNativeMarkdownTypography(appearance.baseFontSize),
     [appearance.baseFontSize],
@@ -884,9 +888,12 @@ function useMarkdownStyles(): MarkdownStyleSets {
   const markdownStrongColor = theme["--color-md-strong"];
   const markdownLinkColor = theme["--color-md-link"];
   const markdownBlockquoteBorder = theme["--color-md-blockquote-border"];
-  const markdownCodeBg = theme["--color-md-code-bg"];
+  const markdownCodeBlockBg = theme["--color-md-code-bg"];
+  const markdownCodeBg = ocean ? FINCKE_OCEAN_INLINE_CODE.background : markdownCodeBlockBg;
   const markdownCodeText = theme["--color-md-code-text"];
-  const markdownInlineCodeText = theme["--color-foreground-secondary"];
+  const markdownInlineCodeText = ocean
+    ? FINCKE_OCEAN_INLINE_CODE.color
+    : theme["--color-foreground-secondary"];
   const markdownHrColor = theme["--color-md-hr"];
   // Native chip drawing parses opaque hex only, and this role is translucent.
   const contextChipBorderColor = flattenThemeColor(
@@ -894,9 +901,14 @@ function useMarkdownStyles(): MarkdownStyleSets {
     theme["--color-user-bubble"],
   );
   const markdownUserBodyColor = theme["--color-user-bubble-foreground"];
-  const markdownUserCodeBg = theme["--color-md-user-code-bg"];
+  const markdownUserCodeBg = ocean
+    ? FINCKE_OCEAN_INLINE_CODE.background
+    : theme["--color-md-user-code-bg"];
   const markdownUserCodeText = theme["--color-md-user-code-text"];
-  const markdownUserInlineCodeText = theme["--color-user-bubble-foreground-muted"];
+  const markdownUserInlineCodeText = ocean
+    ? FINCKE_OCEAN_INLINE_CODE.color
+    : theme["--color-user-bubble-foreground-muted"];
+  const markdownUserLinkColor = ocean ? markdownLinkColor : markdownUserBodyColor;
   const markdownUserFenceBg = theme["--color-md-user-fence-bg"];
   const regularFontFamily = FONT_FAMILIES.regular;
   const boldFontFamily = FONT_FAMILIES.bold;
@@ -908,7 +920,7 @@ function useMarkdownStyles(): MarkdownStyleSets {
           color: markdownUserBodyColor,
           strongColor: markdownUserBodyColor,
           mutedColor: markdownUserBodyColor,
-          linkColor: markdownUserBodyColor,
+          linkColor: markdownUserLinkColor,
           inlineCodeColor: markdownUserInlineCodeText,
           codeColor: markdownUserCodeText,
           codeBackgroundColor: markdownUserCodeBg,
@@ -934,7 +946,7 @@ function useMarkdownStyles(): MarkdownStyleSets {
           inlineCodeColor: markdownInlineCodeText,
           codeColor: markdownCodeText,
           codeBackgroundColor: markdownCodeBg,
-          codeBlockBackgroundColor: markdownCodeBg,
+          codeBlockBackgroundColor: markdownCodeBlockBg,
           fileTextColor: markdownCodeText,
           quoteMarkerColor: markdownBlockquoteBorder,
           dividerColor: markdownHrColor,
@@ -954,6 +966,7 @@ function useMarkdownStyles(): MarkdownStyleSets {
     markdownBlockquoteBorder,
     markdownBodyColor,
     markdownCodeBg,
+    markdownCodeBlockBg,
     markdownCodeText,
     markdownHrColor,
     markdownInlineCodeText,
@@ -964,6 +977,7 @@ function useMarkdownStyles(): MarkdownStyleSets {
     markdownUserCodeText,
     markdownUserFenceBg,
     markdownUserInlineCodeText,
+    markdownUserLinkColor,
     nativeMarkdownTypography,
     regularFontFamily,
   ]);
@@ -1427,7 +1441,7 @@ function renderFeedEntry(
         >
           {presentation.attribution === "t3code" ? (
             <Text className="mb-1 pr-1 font-t3-medium text-2xs text-foreground-muted opacity-60">
-              Sent by T3 Code
+              Sent by 456code
             </Text>
           ) : null}
           <View
@@ -1765,6 +1779,7 @@ type UserMessageContentProps = {
 };
 
 function UserMessageContent(props: UserMessageContentProps) {
+  const { themeId } = useAppearancePreferences();
   const [selected, setSelected] = useState<{ contextId: string; label: string } | null>(null);
   const navigation = useNavigation();
   const { selectedThread } = useThreadSelection();
@@ -1852,8 +1867,11 @@ function UserMessageContent(props: UserMessageContentProps) {
             }
           },
           linkCustomization: (href) =>
-            enrichedContextLinkCustomization(href, props.context?.records ?? []) ??
-            props.linkHandlers.linkCustomization?.(href),
+            enrichedContextLinkCustomization(
+              href,
+              props.context?.records ?? [],
+              themeId === "fincke-ocean",
+            ) ?? props.linkHandlers.linkCustomization?.(href),
         }}
       />
       {selected ? (

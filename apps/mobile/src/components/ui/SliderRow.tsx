@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ui/SliderRow.tsx
+// previews native slider movement and commits completed selections
+
 import { Slider } from "@expo/ui/swift-ui";
 import {
   accessibilityLabel,
@@ -60,7 +63,9 @@ export function SliderRow(props: SliderRowProps) {
               accessibilityValue(props.valueLabel),
             ]}
             onValueChange={(value) => {
+              if (props.disabled) return;
               draft.current = value;
+              props.onPreview?.(value);
               // Accessibility adjustments do not begin a touch editing session.
               if (!editing.current) commit(value);
             }}

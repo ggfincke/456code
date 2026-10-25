@@ -1,3 +1,5 @@
+// apps/mobile/src/features/usage/usageProviders.ts
+// native usage series colors and active theme bar accents
 import type { UsageProviderKind } from "@t3tools/contracts";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 
@@ -38,6 +40,17 @@ export function useProviderColors(): Record<UsageProviderKind, string> {
     antigravity: "#8c7bd1",
     pi: "#4d9f8a",
   };
+}
+
+export function useUsageLimitBarColor(remaining: number, fallback: string | null): string | null {
+  const { themeId } = useAppearancePreferences();
+  return themeId === "fincke-ocean"
+    ? remaining <= 10
+      ? "#f07178"
+      : remaining <= 30
+        ? "#ffcb6b"
+        : "#80cbc4"
+    : fallback;
 }
 
 export function useUsageMixColors() {

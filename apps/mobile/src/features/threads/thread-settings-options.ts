@@ -1,4 +1,13 @@
-import type { RuntimeMode } from "@t3tools/contracts";
+// apps/mobile/src/features/threads/thread-settings-options.ts
+// resolves supported native runtime and reasoning choices
+
+import type { ModelSelection, ProviderOptionDescriptor, RuntimeMode } from "@t3tools/contracts";
+import {
+  getDescriptorStringValue,
+  getPromptControlledTraits,
+  REASONING_SELECT_DESCRIPTOR_IDS,
+  selectableProviderOptionChoices,
+} from "@t3tools/client-runtime/model-traits";
 
 export const RUNTIME_MODE_CHOICES: ReadonlyArray<{
   readonly mode: RuntimeMode;
@@ -45,3 +54,38 @@ export function compatibleRuntimeModeForChoices(
 }
 
 export { selectableProviderOptionChoices as selectableChoices } from "@t3tools/client-runtime/model-traits";
+
+export function resolveEffortSlider(input: {
+  readonly descriptor: ProviderOptionDescriptor | undefined;
+  readonly modelAvailable: boolean;
+  readonly selection: ModelSelection | null;
+  readonly reportedSelection: ModelSelection | null;
+  readonly promptTraits: ReturnType<typeof getPromptControlledTraits>;
+}) {
+  const descriptor = input.descriptor;
+  if (
+    !input.modelAvailable ||
+    descriptor?.type !== "select" ||
+    !REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id) ||
+    descriptor.options.length < 2
+  )
+    return null;
+  const choices = selectableProviderOptionChoices(descriptor);
+  const isPrimary = descriptor.id === input.promptTraits.primarySelectDescriptor?.id;
+  const currentValue =
+    isPrimary && input.promptTraits.ultrathinkPromptControlled
+      ? "ultrathink"
+      : getDescriptorStringValue(descriptor, input.selection, input.reportedSelection);
+  const defaultIndex = Math.max(
+    0,
+    choices.findIndex((choice) => choice.isDefault),
+  );
+  const selectedIndex = choices.findIndex((choice) => choice.id === currentValue);
+  return {
+    choices,
+    currentValue,
+    currentIndex: selectedIndex < 0 ? defaultIndex : selectedIndex,
+    defaultIndex,
+    locked: isPrimary && input.promptTraits.ultrathinkInBodyText,
+  };
+}

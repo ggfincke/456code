@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/thread-list-v2-row-appearance.ts
+// native thread row geometry and selected appearance
 import type { ViewStyle } from "react-native";
 import type { MobileThemeVariables } from "../../lib/mobileTheme";
 
@@ -12,6 +14,13 @@ export const THREAD_LIST_V2_SIDEBAR_ROW_STYLE = {
 export const THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE = {
   borderRadius: 12,
   overflow: "hidden",
+} satisfies ViewStyle;
+
+// fincke: compact sidebar rows sit tighter than upstream's cards, and own their padding
+const COMPACT_SIDEBAR_ROW_RADIUS = 8;
+const COMPACT_SIDEBAR_ROW_CONTAINER_STYLE = {
+  ...THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE,
+  borderRadius: COMPACT_SIDEBAR_ROW_RADIUS,
 } satisfies ViewStyle;
 
 export const selectedThreadRowColors = {
@@ -34,11 +43,11 @@ export function getThreadListV2RowAppearance(
   const style: ViewStyle | undefined = sidebarPane
     ? {
         backgroundColor: selected ? selectedBackgroundColor : theme["--color-drawer"],
-        borderRadius: THREAD_LIST_V2_SIDEBAR_ROW_STYLE.borderRadius,
+        borderRadius: COMPACT_SIDEBAR_ROW_RADIUS,
       }
     : undefined;
   const swipeContainerStyle: ViewStyle | undefined = sidebarPane
-    ? THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE
+    ? COMPACT_SIDEBAR_ROW_CONTAINER_STYLE
     : undefined;
 
   return {
@@ -59,7 +68,7 @@ export function getThreadListV2RowAppearance(
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
     style,
-    cardStyle: sidebarPane ? { ...style, ...THREAD_LIST_V2_SIDEBAR_ROW_STYLE } : undefined,
+    cardStyle: style,
     swipeContainerStyle,
     swipeBackgroundColor: theme[sidebarPane ? "--color-drawer" : "--color-screen"],
     providerIconSurfaceColor: sidebarPane

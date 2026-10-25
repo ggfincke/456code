@@ -1,3 +1,6 @@
+// apps/mobile/src/Stack.tsx
+// defines adaptive routes and native screen presentations
+
 import { isDraftThreadRoute } from "./features/threads/thread-route-state";
 import { ComponentCatalogScreen } from "./features/development/ComponentCatalogScreen";
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
@@ -276,7 +279,7 @@ const SettingsContentStack = createV5SheetStackNavigator({
     SettingsAbout: createNativeStackScreen({
       screen: SettingsAboutRouteScreen,
       linking: "about",
-      options: { title: "About T3 Code" },
+      options: { title: "About 456code" },
     }),
     SettingsEnvironmentNew: createNativeStackScreen({
       screen: ConnectionsNewRouteScreen,

@@ -2,33 +2,12 @@
 // project row icon: the project's own favicon or icon, else a plain (optionally tinted) folder
 import type { CSSProperties } from "react";
 import { FolderIcon } from "lucide-react";
+import { finckeFolderTint } from "@t3tools/shared/fincke-folder-tint";
 
 import { ProjectFavicon, type ProjectFaviconProject } from "../components/ProjectFavicon";
 import { useClientSettings } from "../hooks/useSettings";
 import { cn } from "../lib/utils";
 import "./sidebarTokens.css";
-
-// material ocean hues; the hex fallbacks keep tints stable outside the fincke theme
-const FOLDER_TINTS = [
-  "var(--fincke-teal, #80cbc4)",
-  "var(--fincke-purple, #c792ea)",
-  "var(--fincke-red, #f07178)",
-  "var(--fincke-yellow, #ffcb6b)",
-  "var(--fincke-blue, #82aaff)",
-  "var(--fincke-green, #c3e88d)",
-  "var(--fincke-orange, #f78c6c)",
-  "var(--fincke-cyan, #89ddff)",
-] as const;
-
-// fnv-1a keeps a project's hue stable across reloads & machines
-function folderTintForProject(projectId: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < projectId.length; index += 1) {
-    hash ^= projectId.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return FOLDER_TINTS[(hash >>> 0) % FOLDER_TINTS.length]!;
-}
 
 // reads its colors from the wrapper so ProjectFavicon can render it as a plain fallback component
 function FallbackFolderIcon({ className }: { className?: string }) {
@@ -46,7 +25,8 @@ export function ProjectFolderIcon({
   project: ProjectFaviconProject & { readonly id: string };
 }) {
   const tinted = useClientSettings((settings) => settings.sidebarProjectFolderTint);
-  const tint = tinted ? folderTintForProject(project.id) : null;
+  const hue = finckeFolderTint(project.id);
+  const tint = tinted ? `var(--fincke-${hue.token}, ${hue.color})` : null;
   const style = {
     "--project-folder-tint": tint ?? "var(--fincke-sidebar-folder)",
     "--project-folder-fill": tint ? `color-mix(in srgb, ${tint} 80%, transparent)` : "none",

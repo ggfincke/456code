@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/thread-list-v2-row-appearance.android.ts
+// android thread row geometry and selected appearance
 import type { ViewStyle } from "react-native";
 import type { MobileThemeVariables } from "../../lib/mobileTheme";
 
@@ -58,7 +60,8 @@ export function getThreadListV2RowAppearance(
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
     style,
-    cardStyle: sidebarPane ? { ...style, ...THREAD_LIST_V2_SIDEBAR_ROW_STYLE } : style,
+    // fincke: compact sidebar rows own their padding
+    cardStyle: style,
     swipeContainerStyle,
     swipeBackgroundColor: backgroundColor,
     providerIconSurfaceColor: selected ? selectedBackgroundColor : backgroundColor,

@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/mobileTheme.ts
+// mobile palettes and appearance preference transitions
+import finckeOcean from "../../../../assets/fincke/fincke-ocean.json" with { type: "json" };
 import {
   BUILT_IN_THEMES,
   T3_CHAT_THEME,
@@ -16,8 +19,17 @@ import {
 } from "@t3tools/shared/themePreview";
 
 export const DEFAULT_MOBILE_THEME_ID = MOBILE_DEFAULT_THEME_ID;
-export const MOBILE_THEME_IDS = [...SHARED_MOBILE_THEME_IDS, "material-you"] as const;
-export type MobileThemeId = SharedMobileThemeId | "material-you";
+export const FINCKE_OCEAN_THEME_ID = "fincke-ocean";
+export const FINCKE_OCEAN_INLINE_CODE = {
+  color: "#89ddff",
+  background: "rgba(137, 221, 255, 0.07)",
+} as const;
+export const MOBILE_THEME_IDS = [
+  ...SHARED_MOBILE_THEME_IDS,
+  "material-you",
+  FINCKE_OCEAN_THEME_ID,
+] as const;
+export type MobileThemeId = SharedMobileThemeId | "material-you" | typeof FINCKE_OCEAN_THEME_ID;
 export type MobileThemeAppearance = ThemeAppearance;
 export type MobileThemeMode = MobileThemeAppearance | "system";
 export type MobileThemeIds = Readonly<Record<MobileThemeAppearance, MobileThemeId>>;
@@ -28,6 +40,7 @@ export const MOBILE_THEME_OPTIONS: ReadonlyArray<{
 }> = [
   { id: DEFAULT_MOBILE_THEME_ID, label: "T3 Code" },
   { id: "material-you", label: "Material You" },
+  { id: FINCKE_OCEAN_THEME_ID, label: finckeOcean.name },
   ...BUILT_IN_THEMES.map((theme) => ({ id: theme.id as MobileThemeId, label: theme.label })),
 ];
 
@@ -44,6 +57,13 @@ export function normalizeMobileThemeMode(value: unknown): MobileThemeMode {
   return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
+export function supportsMobileThemeAppearance(
+  themeId: MobileThemeId,
+  appearance: MobileThemeAppearance,
+): boolean {
+  return themeId !== FINCKE_OCEAN_THEME_ID || appearance === "dark";
+}
+
 export function resolveMobileThemeIds(preferences: {
   readonly themeId?: unknown;
   readonly lightThemeId?: unknown;
@@ -51,15 +71,20 @@ export function resolveMobileThemeIds(preferences: {
 }): MobileThemeIds {
   const legacyThemeId = normalizeMobileThemeId(preferences.themeId);
   return {
-    light:
+    light: normalizeLightThemeId(
       preferences.lightThemeId === undefined
         ? legacyThemeId
         : normalizeMobileThemeId(preferences.lightThemeId),
+    ),
     dark:
       preferences.darkThemeId === undefined
         ? legacyThemeId
         : normalizeMobileThemeId(preferences.darkThemeId),
   };
+}
+
+function normalizeLightThemeId(themeId: MobileThemeId): MobileThemeId {
+  return supportsMobileThemeAppearance(themeId, "light") ? themeId : DEFAULT_MOBILE_THEME_ID;
 }
 
 export function createMobileThemeSelectionPatch(
@@ -69,7 +94,10 @@ export function createMobileThemeSelectionPatch(
   value: MobileThemeId,
 ) {
   const nextThemeIds: MobileThemeIds = {
-    light: selectedAppearance === "light" ? value : themeIds.light,
+    light:
+      selectedAppearance === "light" && supportsMobileThemeAppearance(value, "light")
+        ? value
+        : themeIds.light,
     dark: selectedAppearance === "dark" ? value : themeIds.dark,
   };
   return {
@@ -79,11 +107,24 @@ export function createMobileThemeSelectionPatch(
   };
 }
 
-export function createMobileThemePairPatch(value: MobileThemeId) {
+export function createMobileThemePairPatch(value: MobileThemeId, themeIds: MobileThemeIds) {
+  if (value === FINCKE_OCEAN_THEME_ID) return createMobileDarkThemeActivationPatch(themeIds, value);
   return {
-    lightThemeId: value,
+    lightThemeId: normalizeLightThemeId(value),
     darkThemeId: value,
     themeId: value,
+  };
+}
+
+export function createMobileDarkThemeActivationPatch(
+  themeIds: MobileThemeIds,
+  value: MobileThemeId,
+) {
+  return {
+    lightThemeId: normalizeLightThemeId(themeIds.light),
+    darkThemeId: value,
+    themeId: value,
+    themeMode: "dark" as const,
   };
 }
 
@@ -369,9 +410,23 @@ export const MOBILE_THEME_VARIABLE_NAMES = Object.keys(
 ) as ReadonlyArray<MobileThemeVariable>;
 
 export function getMobileThemeColors(
-  themeId: SharedMobileThemeId,
+  themeId: Exclude<MobileThemeId, "material-you">,
   appearance: MobileThemeAppearance,
 ): ThemeColors {
+  if (themeId === FINCKE_OCEAN_THEME_ID) {
+    return {
+      ...T3_CODE_DARK_THEME_COLORS,
+      ...finckeOcean.colors,
+      messageAction: finckeOcean.colors.accent,
+      messageActionForeground: finckeOcean.colors.accentForeground,
+      messageForeground: "#d4d8f0",
+      messageSurface: flattenThemeColor(
+        themeColorWithAlpha("#717cb4", 0.22),
+        finckeOcean.colors.canvas,
+      ),
+      sidebarRowActive: flattenThemeColor("#babed80d", finckeOcean.colors.sidebar),
+    };
+  }
   if (themeId === DEFAULT_MOBILE_THEME_ID) {
     return appearance === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS;
   }
@@ -380,7 +435,7 @@ export function getMobileThemeColors(
 }
 
 export function getMobileThemeVariables(
-  themeId: SharedMobileThemeId,
+  themeId: Exclude<MobileThemeId, "material-you">,
   appearance: MobileThemeAppearance,
   overrides: Partial<MobileThemeVariables> | null = null,
 ): MobileThemeVariables {
@@ -419,7 +474,16 @@ export function getMobileThemeVariables(
         : undefined,
   );
 
-  return overrides ? ({ ...baseVariables, ...overrides } as MobileThemeVariables) : baseVariables;
+  const variables =
+    themeId === FINCKE_OCEAN_THEME_ID
+      ? {
+          ...baseVariables,
+          "--color-md-link": "#80cbc4",
+          "--color-thread-selected-foreground": "#80cbc4",
+          "--color-thread-selected-foreground-muted": "#80cbc4",
+        }
+      : baseVariables;
+  return overrides ? ({ ...variables, ...overrides } as MobileThemeVariables) : variables;
 }
 
 export function getMobileThemePreviewColors(
@@ -428,8 +492,7 @@ export function getMobileThemePreviewColors(
 ): ThemePreviewColors {
   if (themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you")
     return STANDARD_THEME_PREVIEW_COLORS[appearance];
-  const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId) ?? T3_CHAT_THEME;
-  const colors = getThemeColorsForAppearance(theme, appearance) ?? theme.colors;
+  const colors = getMobileThemeColors(themeId, appearance);
   return {
     canvas: themeColorToNativeColor(colors.canvas),
     accent: themeColorToNativeColor(colors.accent),

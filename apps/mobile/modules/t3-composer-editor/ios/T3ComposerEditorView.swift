@@ -1,3 +1,6 @@
+// apps/mobile/modules/t3-composer-editor/ios/T3ComposerEditorView.swift
+// renders the native attributed composer and preserves editing state
+
 import ExpoModulesCore
 import UIKit
 
@@ -29,6 +32,7 @@ private struct ComposerControlledDocumentPayload: Decodable {
 private struct ComposerThemePayload: Decodable {
   let text: String
   let placeholder: String
+  let selection: String?
 }
 
 private enum ComposerEnterBehavior: String {
@@ -432,7 +436,8 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
   private var requestedSelection: ComposerSelectionPayload?
   private var theme = ComposerThemePayload(
     text: "#262626",
-    placeholder: "#8e8e93"
+    placeholder: "#8e8e93",
+    selection: nil
   )
   private var fontFamily = "DMSans-Regular"
   private var fontSize: CGFloat = 14
@@ -1097,7 +1102,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
   private func applyTheme() {
     textView.textColor = UIColor(composerHex: theme.text) ?? .label
     placeholderLabel.textColor = UIColor(composerHex: theme.placeholder) ?? .placeholderText
-    tintColor = UIColor.systemBlue
+    tintColor = theme.selection.flatMap { UIColor(composerHex: $0) } ?? UIColor.systemBlue
   }
 
   private func emitTextChange() {

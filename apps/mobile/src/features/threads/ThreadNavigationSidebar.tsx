@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx
+// shared sidebar thread navigation with native chrome
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
@@ -8,6 +10,16 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import { FinckeListHeader } from "../../fincke/FinckeListHeader";
+import {
+  buildProjectSidebarItems,
+  finckeSidebarItemsAreEqual,
+  isFinckeProjectListItem,
+  type FinckeProjectListItem,
+} from "../../fincke/project-sidebar";
+import { FinckeProjectHeaderRow, FinckeProjectMoreRow } from "../../fincke/ProjectSidebarRows";
+import { SidebarViewToggle } from "../../fincke/SidebarViewToggle";
+import { useSidebarView } from "../../fincke/use-sidebar-view";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
@@ -44,7 +56,7 @@ import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { useHomeListOptions } from "../home/home-list-options";
 import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
-import { buildHomeProjectScopes } from "../home/homeThreadList";
+import { buildHomeProjectScopes, sortHomeProjectScopes } from "../home/homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { useThreadListActions } from "../home/useThreadListActions";
@@ -83,6 +95,7 @@ import {
 
 type SidebarListItem =
   | ThreadListV2ListItem
+  | FinckeProjectListItem
   | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number };
 
 const SIDEBAR_STICKY_HEADER_HEIGHT = 106;
@@ -130,7 +143,9 @@ function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {
 function ThreadNavigationSidebarPane(
   props: ThreadNavigationSidebarProps & { readonly nativeChrome: boolean },
 ) {
-  const { themeVariables: materialTheme } = useAppearancePreferences();
+  const { themeId, themeVariables: materialTheme } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
+  const sidebarView = useSidebarView();
   const drawerColor = materialTheme["--color-drawer"];
 
   const insets = useSafeAreaInsets();
@@ -326,27 +341,28 @@ function ThreadNavigationSidebarPane(
       ...(workingShelfEnabled ? [] : sectionAvailability("active")),
     ]);
   })();
+  const threadListV2LayoutInput = {
+    pendingOrder,
+    threads: threads.filter((thread) => thread.archivedAt === null),
+    environmentId: options.selectedEnvironmentId,
+    projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
+    searchQuery: props.searchQuery,
+    matchedThreadKeys,
+    settlementEnvironmentIds,
+    snoozeEnvironmentIds,
+    queuedThreadKeys,
+    settledLimit: settledVisibleCount,
+    now,
+    workingShelfEnabled,
+    workingShelfExpanded,
+    inboxReturnAt: threadListInboxReturns.returnedAt,
+    snoozedShelfExpanded,
+    settledShelfExpanded,
+    selectedThreadKey: props.selectedThreadKey ?? null,
+  };
   const threadListV2Layout = (() => {
     threadListInboxReturns.observe(workingShelfEnabled ? threads : null);
-    return buildThreadListV2Items({
-      pendingOrder,
-      threads: threads.filter((thread) => thread.archivedAt === null),
-      environmentId: options.selectedEnvironmentId,
-      projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
-      searchQuery: props.searchQuery,
-      matchedThreadKeys,
-      settlementEnvironmentIds,
-      snoozeEnvironmentIds,
-      queuedThreadKeys,
-      settledLimit: settledVisibleCount,
-      now,
-      workingShelfEnabled,
-      workingShelfExpanded,
-      inboxReturnAt: threadListInboxReturns.returnedAt,
-      snoozedShelfExpanded,
-      settledShelfExpanded,
-      selectedThreadKey: props.selectedThreadKey ?? null,
-    });
+    return buildThreadListV2Items(threadListV2LayoutInput);
   })();
   const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt;
   useEffect(() => {
@@ -376,6 +392,26 @@ function ThreadNavigationSidebarPane(
         (v2SearchQuery.length === 0 ||
           pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
     );
+    // fincke: the projects view groups the same rows under their projects, like desktop
+    if (sidebarView.projectsView) {
+      return buildProjectSidebarItems({
+        layoutInput: threadListV2LayoutInput,
+        pendingTasks: v2PendingTasks,
+        snoozeLabelNow: `${nowMinute}:00.000Z`,
+        snoozeEnvironmentIds,
+        queuedThreadKeys,
+        scopes: sortHomeProjectScopes({
+          scopes: selectedProjectScope === null ? projectScopes : [selectedProjectScope],
+          threads,
+          pendingTasks,
+          projectSortOrder: options.projectSortOrder,
+        }),
+        collapsedScopeKeys: sidebarView.collapsedProjectKeys,
+        expandedScopeKeys: sidebarView.expandedProjectKeys,
+        selectedThreadKey: props.selectedThreadKey ?? null,
+        selectedPendingKey: activeNewTask?.pendingKey ?? null,
+      });
+    }
     const items: SidebarListItem[] = buildThreadListV2ListItems({
       items: threadListV2Layout.items,
       pendingTasks: v2PendingTasks,
@@ -393,6 +429,7 @@ function ThreadNavigationSidebarPane(
       queuedThreadKeys,
       moveAvailability: threadMoveAvailability,
       shelfPreferencesLoading: !shelfPreferencesLoaded,
+      timeOnStatusRows: true,
     });
     if (settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0) {
       items.push({
@@ -538,14 +575,22 @@ function ThreadNavigationSidebarPane(
     listEnvironments,
     threadSearchMatchByKey,
     workingShelfEnabled,
+    // recycled rows compare equal across the two views, so the view must re-render them
+    projectsView: sidebarView.projectsView,
   };
-  useThreadJumpShortcuts(listItems, handleSelectThread);
+  useThreadJumpShortcuts(
+    listItems.filter((item) => !isFinckeProjectListItem(item)),
+    handleSelectThread,
+  );
   const sidebarItemsAreEqual = (previous: SidebarListItem, item: SidebarListItem): boolean => {
     if (isThreadListV2ListItem(previous) && isThreadListV2ListItem(item)) {
       return threadListV2ListItemsAreEqual(previous, item);
     }
     if (previous.type === "v2-show-more" && item.type === "v2-show-more") {
       return previous.hiddenCount === item.hiddenCount;
+    }
+    if (isFinckeProjectListItem(previous) && isFinckeProjectListItem(item)) {
+      return finckeSidebarItemsAreEqual(previous, item);
     }
     return false;
   };
@@ -567,8 +612,21 @@ function ThreadNavigationSidebarPane(
     return true;
   };
   useHardwareKeyboardCommand("focusSearch", focusSearch);
+  const sidebarLayout = sidebarView.projectsView ? "project" : "activity";
   const renderListItem = ({ item }: { readonly item: SidebarListItem }) => {
     switch (item.type) {
+      case "fincke-project":
+        return (
+          <FinckeProjectHeaderRow
+            item={item}
+            ocean={ocean}
+            theme={materialTheme}
+            onToggle={sidebarView.toggleProjectCollapsed}
+            onNewThread={props.onNewThreadInProject}
+          />
+        );
+      case "fincke-project-more":
+        return <FinckeProjectMoreRow item={item} onToggle={sidebarView.toggleProjectExpanded} />;
       case "v2-pending": {
         const pendingScopeKey = scopedProjectKey(
           item.pendingTask.environmentId,
@@ -576,6 +634,7 @@ function ThreadNavigationSidebarPane(
         );
         return (
           <ThreadListV2PendingRow
+            sidebarLayout={sidebarLayout}
             pendingTask={item.pendingTask}
             selected={
               activeNewTask?.pendingKey === item.pendingTask.key ||
@@ -609,6 +668,7 @@ function ThreadNavigationSidebarPane(
         const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
         return (
           <ThreadListV2Row
+            sidebarLayout={sidebarLayout}
             onNewThreadOnBranch={props.onNewThreadOnBranch}
             thread={thread}
             variant={item.item.variant}
@@ -753,6 +813,22 @@ function ThreadNavigationSidebarPane(
     </Text>
   );
 
+  const listHeader = (
+    <FinckeListHeader
+      bleedLeft={Platform.OS === "android" ? 0 : styles.threadListContent.paddingHorizontal}
+      bleedRight={Platform.OS === "android" ? 0 : styles.threadListContent.paddingHorizontal}
+    >
+      <View className="flex-row justify-end px-1 pb-1 pt-1.5">
+        <SidebarViewToggle
+          projectsView={sidebarView.projectsView}
+          onChange={sidebarView.setProjectsView}
+          ocean={ocean}
+          theme={materialTheme}
+        />
+      </View>
+    </FinckeListHeader>
+  );
+
   if (props.nativeChrome) {
     return (
       <>
@@ -816,6 +892,7 @@ function ThreadNavigationSidebarPane(
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
                 ListEmptyComponent={listEmpty}
+                ListHeaderComponent={listHeader}
               />
             </GestureDetector>
           </SwipeableScrollGateProvider>
@@ -884,6 +961,7 @@ function ThreadNavigationSidebarPane(
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
                 ListEmptyComponent={listEmpty}
+                ListHeaderComponent={listHeader}
               />
             </GestureDetector>
           </SwipeableScrollGateProvider>

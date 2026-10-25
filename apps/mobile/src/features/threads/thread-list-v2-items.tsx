@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/thread-list-v2-items.tsx
+// native project navigation and presentation
 import * as Dialog from "../../components/ui/Dialog";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
@@ -42,6 +44,13 @@ import { ProviderIcon, ProviderInstanceIcon } from "../../components/ProviderIco
 import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { resolveSidebarStatus } from "../../fincke/SidebarStatusGlyph";
+import {
+  SidebarPendingRowContent,
+  SidebarThreadRowContent,
+  type SidebarRowLayout,
+} from "../../fincke/SidebarThreadRowContent";
 import { useEnvironmentScope } from "../../state/session";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
@@ -320,6 +329,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   readonly environmentLabel: string | null;
   readonly environmentMachine?: EnvironmentMachineKind;
   readonly pane?: "screen" | "sidebar";
+  readonly sidebarLayout?: SidebarRowLayout;
   readonly showPendingDivider: boolean;
   readonly showTrailingDivider?: boolean;
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
@@ -335,6 +345,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   const dormant = useSwipeRowDormant(props.activationKey);
   const theme = useUniwindTheme();
   const sidebarPane = props.pane === "sidebar";
+  const { themeId } = useAppearancePreferences();
   const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, props.selected ?? false);
   const isDraft = pendingTask.kind === "draft";
   const deleteLabel = isDraft ? "Discard" : "Delete";
@@ -370,6 +381,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
             environmentId={pendingTask.environmentId}
             faviconPath={props.project.faviconPath}
             projectIcon={props.project.projectIcon}
+            projectId={props.project.id}
             size={15}
             projectTitle={props.project.title}
             workspaceRoot={props.project.workspaceRoot}
@@ -505,7 +517,15 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
               style={rowAppearance.cardStyle}
             >
               {sidebarPane ? (
-                rowContent
+                <SidebarPendingRowContent
+                  layout={props.sidebarLayout ?? "activity"}
+                  title={pendingTask.title}
+                  projectTitle={projectTitle || null}
+                  draft={isDraft}
+                  selected={props.selected ?? false}
+                  ocean={themeId === "fincke-ocean"}
+                  theme={theme}
+                />
               ) : (
                 <View>
                   <View className="px-5 py-2.5">{rowContent}</View>
@@ -539,6 +559,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly environmentLabel: string | null;
   readonly environmentMachine?: EnvironmentMachineKind;
   readonly pane?: "screen" | "sidebar";
+  readonly sidebarLayout?: SidebarRowLayout;
   readonly showTrailingDivider?: boolean;
   readonly selected?: boolean;
   readonly fullSwipeWidth?: number;
@@ -624,16 +645,36 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const theme = useUniwindTheme();
   const sidebarPane = props.pane === "sidebar";
   const selected = props.selected === true;
+  const { themeId } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
   const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, selected);
 
   const status = resolveThreadListV2Status(thread);
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
-  const workingLabel = STATUS_LABEL_BY_STATUS[status];
+  const baseStatusLabel = STATUS_LABEL_BY_STATUS[status];
+  const workingLabel =
+    ocean && baseStatusLabel && (status === "working" || status === "input")
+      ? {
+          ...baseStatusLabel,
+          className: status === "working" ? "text-primary-text" : "text-warning-foreground",
+          iconTintClassName:
+            status === "working" ? "accent-primary-text" : "accent-warning-foreground",
+        }
+      : baseStatusLabel;
   const showsWoke = status === "ready" && props.wokeAt !== null;
   const statusLabel =
     (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
       ? { ...workingLabel, label: "Goal" }
-      : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
+      : workingLabel) ??
+    (isUnread
+      ? ocean
+        ? {
+            ...DONE_STATUS_LABEL,
+            className: "text-update-foreground",
+            iconTintClassName: "accent-update-foreground",
+          }
+        : DONE_STATUS_LABEL
+      : undefined);
   const recede = shouldRecedeThreadRow({ status, selected });
   const timeLabel = props.timeLabel;
 
@@ -979,6 +1020,48 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ? `Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`
       : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
+  const prBadge = pr ? (
+    <Pressable
+      // Padding cancelled by negative margin grows the touch target into
+      // the row padding without moving the badge.
+      className="-m-2.5 flex-row items-center gap-1 p-2.5"
+      accessibilityRole="button"
+      accessibilityLabel={prBadgeLabel ?? undefined}
+      onPress={handleOpenPullRequests}
+      // Without a long-press handler a hold that opens the row's iOS
+      // context menu would also open the pull request on release.
+      onLongPress={() => undefined}
+      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+    >
+      <SymbolView
+        name={
+          pr.kind === "stack"
+            ? PullRequestGlyph.stack
+            : pr.state === null
+              ? PullRequestGlyph.pullRequest
+              : pullRequestStatus({ state: pr.state, isDraft: pr.isDraft }).icon
+        }
+        size={12}
+        tintColorClassName={
+          pr.state === null || pr.isDraft
+            ? rowAppearance.mutedIconTintClassName
+            : pr.state === "open"
+              ? "accent-adaptive-emerald-600-400"
+              : pr.state === "closed"
+                ? "accent-adaptive-rose-600-400"
+                : "accent-adaptive-violet-600-400"
+        }
+      />
+      <Text
+        accessibilityLabel={pr.accessibilityLabel}
+        className={cn("text-xs", pr.textClassName)}
+        style={{ fontFamily: MONO_FONT }}
+      >
+        {pr.label}
+      </Text>
+    </Pressable>
+  ) : null;
+
   const cardContent = (
     <>
       <View className="flex-row items-center gap-1.5">
@@ -987,6 +1070,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             environmentId={thread.environmentId}
             faviconPath={props.project.faviconPath}
             projectIcon={props.project.projectIcon}
+            projectId={props.project.id}
             size={15}
             projectTitle={props.project.title}
             workspaceRoot={props.project.workspaceRoot}
@@ -1168,47 +1252,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : (
           <View className="flex-1" />
         )}
-        {pr ? (
-          <Pressable
-            // Padding cancelled by negative margin grows the touch target into
-            // the row padding without moving the badge.
-            className="-m-2.5 flex-row items-center gap-1 p-2.5"
-            accessibilityRole="button"
-            accessibilityLabel={prBadgeLabel ?? undefined}
-            onPress={handleOpenPullRequests}
-            // Without a long-press handler a hold that opens the row's iOS
-            // context menu would also open the pull request on release.
-            onLongPress={() => undefined}
-            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-          >
-            <SymbolView
-              name={
-                pr.kind === "stack"
-                  ? PullRequestGlyph.stack
-                  : pr.state === null
-                    ? PullRequestGlyph.pullRequest
-                    : pullRequestStatus({ state: pr.state, isDraft: pr.isDraft }).icon
-              }
-              size={12}
-              tintColorClassName={
-                pr.state === null || pr.isDraft
-                  ? rowAppearance.mutedIconTintClassName
-                  : pr.state === "open"
-                    ? "accent-adaptive-emerald-600-400"
-                    : pr.state === "closed"
-                      ? "accent-adaptive-rose-600-400"
-                      : "accent-adaptive-violet-600-400"
-              }
-            />
-            <Text
-              accessibilityLabel={pr.accessibilityLabel}
-              className={cn("text-xs", pr.textClassName)}
-              style={{ fontFamily: MONO_FONT }}
-            >
-              {pr.label}
-            </Text>
-          </Pressable>
-        ) : null}
+        {prBadge}
         {providerInstance ? (
           <View className="flex-row items-center">
             {providerDrivers.slice(0, -1).map((driver, index) => (
@@ -1229,6 +1273,104 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : null}
       </View>
     </>
+  );
+
+  // fincke: sidebar panes use desktop's compact rows. A project-less thread names
+  // its machine up front, so the trailing machine icon is not repeated
+  const compactMachine =
+    props.environmentLabel && props.environmentMachine ? (
+      <EnvironmentMachineSymbol
+        kind={props.environmentMachine}
+        size={11}
+        tintColorClassName={rowAppearance.tertiaryIconTintClassName}
+      />
+    ) : null;
+  const compactScratchMachine = props.project?.isScratch === true && !thread.branch;
+  const compactContent = (
+    <SidebarThreadRowContent
+      layout={props.sidebarLayout ?? "activity"}
+      thread={thread}
+      projectTitle={props.projectTitle ?? props.project?.title ?? null}
+      selected={selected}
+      recede={recede || variant === "slim"}
+      emphasized={isUnread || showsWoke || status === "input"}
+      ocean={ocean}
+      theme={theme}
+      status={
+        showsWoke ? null : resolveSidebarStatus(status, isUnread, thread.goal?.status === "active")
+      }
+      timeLabel={
+        snoozedRow && props.snoozeWakeLabelText !== undefined
+          ? props.snoozeWakeLabelText
+          : timeLabel
+      }
+      pinned={pinnedRow}
+      slim={variant === "slim"}
+      projectIcon={
+        props.project ? (
+          <ProjectFavicon
+            environmentId={thread.environmentId}
+            faviconPath={props.project.faviconPath}
+            projectIcon={props.project.projectIcon}
+            projectId={props.project.id}
+            size={15}
+            projectTitle={props.project.title}
+            workspaceRoot={props.project.workspaceRoot}
+          />
+        ) : null
+      }
+      metaLeading={compactScratchMachine ? compactMachine : null}
+      statusSlot={
+        showsWoke ? (
+          <Pressable
+            className="-m-2.5 flex-row items-center gap-1 p-2.5"
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss Woke notification"
+            onPress={handleAcknowledgeWoke}
+            onLongPress={() => undefined}
+            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+          >
+            <SymbolView
+              name="bell.badge"
+              size={12}
+              tintColorClassName="accent-warning-foreground"
+              type="monochrome"
+              weight="semibold"
+            />
+            <Text className="text-xs font-t3-bold text-warning-foreground">Woke</Text>
+          </Pressable>
+        ) : undefined
+      }
+      leading={props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+      trailing={
+        variant === "slim" ? (
+          prBadge
+        ) : (
+          <>
+            {thread.worktreePath?.trim() ? (
+              <SymbolView
+                name="arrow.triangle.branch"
+                size={11}
+                tintColorClassName={rowAppearance.tertiaryIconTintClassName}
+                type="monochrome"
+              />
+            ) : null}
+            {prBadge}
+            {compactScratchMachine ? null : compactMachine}
+          </>
+        )
+      }
+      footer={
+        props.searchMatch ? (
+          <ThreadSearchMatchExcerpt
+            sidebar
+            match={props.searchMatch}
+            query={props.searchQuery ?? ""}
+            selected={selected}
+          />
+        ) : null
+      }
+    />
   );
 
   const fadedCardContent = recede ? (
@@ -1262,7 +1404,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         style={rowAppearance.cardStyle}
       >
         {sidebarPane ? (
-          fadedCardContent
+          compactContent
         ) : (
           <View>
             <View className={THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME}>{fadedCardContent}</View>
@@ -1290,62 +1432,67 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         }}
         style={rowAppearance.style}
       >
-        <View
-          className={cn(
-            "min-h-[44px] flex-row items-center gap-2.5 py-2",
-            sidebarPane ? "px-3" : "px-5",
-          )}
-        >
-          {props.project ? (
-            <View className="opacity-40">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                faviconPath={props.project.faviconPath}
-                projectIcon={props.project.projectIcon}
-                size={15}
-                projectTitle={props.project.title}
-                workspaceRoot={props.project.workspaceRoot}
-              />
+        {sidebarPane ? (
+          compactContent
+        ) : (
+          <View
+            className={cn(
+              "min-h-[44px] flex-row items-center gap-2.5 py-2",
+              sidebarPane ? "px-3" : "px-5",
+            )}
+          >
+            {props.project ? (
+              <View className="opacity-40">
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  faviconPath={props.project.faviconPath}
+                  projectIcon={props.project.projectIcon}
+                  projectId={props.project.id}
+                  size={15}
+                  projectTitle={props.project.title}
+                  workspaceRoot={props.project.workspaceRoot}
+                />
+              </View>
+            ) : null}
+            <View className="min-w-0 flex-1">
+              <Text
+                className={cn(
+                  "text-base",
+                  selected
+                    ? selectedThreadRowColors.foregroundClassName
+                    : rowAppearance.mutedForegroundClassName,
+                )}
+                numberOfLines={1}
+              >
+                {thread.title}
+              </Text>
+              {props.searchMatch ? (
+                <ThreadSearchMatchExcerpt
+                  sidebar={sidebarPane}
+                  match={props.searchMatch}
+                  query={props.searchQuery ?? ""}
+                  selected={selected}
+                />
+              ) : null}
             </View>
-          ) : null}
-          <View className="min-w-0 flex-1">
+            {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
             <Text
               className={cn(
-                "text-base",
+                "text-sm tabular-nums",
                 selected
-                  ? selectedThreadRowColors.foregroundClassName
-                  : rowAppearance.mutedForegroundClassName,
+                  ? selectedThreadRowColors.mutedForegroundClassName
+                  : snoozedRow
+                    ? rowAppearance.mutedForegroundClassName
+                    : rowAppearance.tertiaryForegroundClassName,
               )}
-              numberOfLines={1}
+              style={{ fontFamily: MONO_FONT }}
             >
-              {thread.title}
+              {snoozedRow && props.snoozeWakeLabelText !== undefined
+                ? props.snoozeWakeLabelText
+                : timeLabel}
             </Text>
-            {props.searchMatch ? (
-              <ThreadSearchMatchExcerpt
-                sidebar={sidebarPane}
-                match={props.searchMatch}
-                query={props.searchQuery ?? ""}
-                selected={selected}
-              />
-            ) : null}
           </View>
-          {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
-          <Text
-            className={cn(
-              "text-sm tabular-nums",
-              selected
-                ? selectedThreadRowColors.mutedForegroundClassName
-                : snoozedRow
-                  ? rowAppearance.mutedForegroundClassName
-                  : rowAppearance.tertiaryForegroundClassName,
-            )}
-            style={{ fontFamily: MONO_FONT }}
-          >
-            {snoozedRow && props.snoozeWakeLabelText !== undefined
-              ? props.snoozeWakeLabelText
-              : timeLabel}
-          </Text>
-        </View>
+        )}
       </RowPressable>
     );
 

@@ -1,3 +1,5 @@
+// apps/mobile/src/features/home/HomeScreen.tsx
+// adaptive native thread list and workspace navigation
 import { useActiveNewTask } from "../../state/active-new-task";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
@@ -6,6 +8,16 @@ import { computeThreadMoveAvailability } from "../threads/threadOrder";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { THREAD_SIDEBAR_ROW_LAYOUT } from "../threads/threadListAnimations";
+import { FinckeListHeader } from "../../fincke/FinckeListHeader";
+import {
+  buildProjectSidebarItems,
+  finckeSidebarItemsAreEqual,
+  type FinckeSidebarListItem,
+} from "../../fincke/project-sidebar";
+import { FinckeProjectHeaderRow, FinckeProjectMoreRow } from "../../fincke/ProjectSidebarRows";
+import { SidebarViewToggle } from "../../fincke/SidebarViewToggle";
+import { useSidebarView } from "../../fincke/use-sidebar-view";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
@@ -73,17 +85,17 @@ import {
   buildThreadListV2Items,
   getThreadListV2OrderedSection,
   buildThreadListV2ListItems,
-  threadListV2ListItemsAreEqual,
+  isThreadListV2ListItem,
   threadListInboxReturns,
   THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
-  type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
   findHomeProjectScope,
+  sortHomeProjectScopes,
   type HomeProjectSortOrder,
 } from "./homeThreadList";
 import { createSwipeRowActivation } from "./swipe-row-activation";
@@ -221,7 +233,11 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
   const insets = useSafeAreaInsets();
   const primaryColumn = use(NativePrimaryColumnContext);
   const restingOffset = useRestingTopOffset(insets.top, props);
+  const { themeId } = useAppearancePreferences();
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
+  // fincke: the ocean wave sits behind the sidebar's header, so UIKit's edge dimming would
+  // cut a hard line through it
+  const waveBehindHeader = primaryColumn !== null && themeId === "fincke-ocean";
 
   // v5 needs the actual content scroll view registered with its screen controller.
   // The layout observer and header siblings prevent UIKit from finding it implicitly.
@@ -230,7 +246,11 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
       style={{ flex: 1 }}
       scrollEdgeEffects={{
         ...nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version),
-        top: Number.parseInt(String(Platform.Version), 10) >= 27 ? "automatic" : "soft",
+        top: waveBehindHeader
+          ? "hidden"
+          : Number.parseInt(String(Platform.Version), 10) >= 27
+            ? "automatic"
+            : "soft",
       }}
     >
       <ScrollView
@@ -352,7 +372,7 @@ export function HomeScreen(props: HomeScreenProps) {
     });
   }, [searchMode, insets.top, restoredOffset]);
   const swipeRowActivation = createSwipeRowActivation();
-  const activateVisibleRows = (rows: ReadonlyArray<ThreadListV2ListItem>) => {
+  const activateVisibleRows = (rows: ReadonlyArray<{ readonly key: string }>) => {
     const state = listRef.current?.getState();
     if (state === undefined || !(state.end >= 0)) return;
     swipeRowActivation.activate(
@@ -503,27 +523,28 @@ export function HomeScreen(props: HomeScreenProps) {
       ...(workingShelfEnabled ? [] : sectionAvailability("active")),
     ]);
   })();
+  const threadListV2LayoutInput = {
+    pendingOrder,
+    threads: props.threads.filter((thread) => thread.archivedAt === null),
+    environmentId: props.selectedEnvironmentId,
+    projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
+    searchQuery: props.searchQuery,
+    matchedThreadKeys,
+    settlementEnvironmentIds,
+    snoozeEnvironmentIds,
+    queuedThreadKeys,
+    settledLimit: settledVisibleCount,
+    now,
+    workingShelfEnabled,
+    workingShelfExpanded,
+    inboxReturnAt: threadListInboxReturns.returnedAt,
+    snoozedShelfExpanded,
+    settledShelfExpanded,
+    selectedThreadKey,
+  };
   const threadListV2Layout = (() => {
     threadListInboxReturns.observe(workingShelfEnabled ? props.threads : null);
-    return buildThreadListV2Items({
-      pendingOrder,
-      threads: props.threads.filter((thread) => thread.archivedAt === null),
-      environmentId: props.selectedEnvironmentId,
-      projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
-      searchQuery: props.searchQuery,
-      matchedThreadKeys,
-      settlementEnvironmentIds,
-      snoozeEnvironmentIds,
-      queuedThreadKeys,
-      settledLimit: settledVisibleCount,
-      now,
-      workingShelfEnabled,
-      workingShelfExpanded,
-      inboxReturnAt: threadListInboxReturns.returnedAt,
-      snoozedShelfExpanded,
-      settledShelfExpanded,
-      selectedThreadKey,
-    });
+    return buildThreadListV2Items(threadListV2LayoutInput);
   })();
   const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt;
   useEffect(() => {
@@ -568,14 +589,58 @@ export function HomeScreen(props: HomeScreenProps) {
     queuedThreadKeys,
     moveAvailability: threadMoveAvailability,
     shelfPreferencesLoading: !shelfPreferencesLoaded,
+    timeOnStatusRows: primaryColumn !== null,
   });
 
-  useThreadJumpShortcuts(threadListV2Items, props.onSelectThread);
-  useEffect(() => {
-    if (swipeEnabled) activateVisibleRows(threadListV2Items);
-  }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
+  // fincke: the sidebar column can group its rows under projects, like desktop
+  const { themeId, themeVariables } = useAppearancePreferences();
+  const ocean = themeId === "fincke-ocean";
+  const sidebarView = useSidebarView();
+  const projectsView = primaryColumn !== null && sidebarView.projectsView;
+  const listItems: FinckeSidebarListItem[] = projectsView
+    ? buildProjectSidebarItems({
+        layoutInput: threadListV2LayoutInput,
+        pendingTasks: v2PendingTasks,
+        snoozeLabelNow: `${nowMinute}:00.000Z`,
+        snoozeEnvironmentIds,
+        queuedThreadKeys,
+        scopes: sortHomeProjectScopes({
+          scopes: v2ScopedProjectGroup === null ? projectScopes : [v2ScopedProjectGroup],
+          threads: props.threads,
+          pendingTasks: props.pendingTasks,
+          projectSortOrder: props.projectSortOrder,
+        }),
+        collapsedScopeKeys: sidebarView.collapsedProjectKeys,
+        expandedScopeKeys: sidebarView.expandedProjectKeys,
+        selectedThreadKey,
+        selectedPendingKey: activeNewTask?.pendingKey ?? null,
+      })
+    : threadListV2Items;
 
-  const renderV2Item = ({ item }: { readonly item: ThreadListV2ListItem }) => {
+  useThreadJumpShortcuts(
+    projectsView ? listItems.filter(isThreadListV2ListItem) : threadListV2Items,
+    props.onSelectThread,
+  );
+  useEffect(() => {
+    if (swipeEnabled) activateVisibleRows(listItems);
+  }, [activateVisibleRows, swipeEnabled, listItems]);
+
+  const sidebarLayout = projectsView ? "project" : "activity";
+  const renderV2Item = ({ item }: { readonly item: FinckeSidebarListItem }) => {
+    if (item.type === "fincke-project") {
+      return (
+        <FinckeProjectHeaderRow
+          item={item}
+          ocean={ocean}
+          theme={themeVariables}
+          onToggle={sidebarView.toggleProjectCollapsed}
+          onNewThread={props.onNewThreadInProject}
+        />
+      );
+    }
+    if (item.type === "fincke-project-more") {
+      return <FinckeProjectMoreRow item={item} onToggle={sidebarView.toggleProjectExpanded} />;
+    }
     if (item.type === "v2-pending") {
       const pendingScopeKey = scopedProjectKey(
         item.pendingTask.environmentId,
@@ -584,6 +649,7 @@ export function HomeScreen(props: HomeScreenProps) {
       return (
         <ThreadListV2PendingRow
           pane={primaryColumn ? "sidebar" : "screen"}
+          sidebarLayout={sidebarLayout}
           pendingTask={item.pendingTask}
           selected={
             activeNewTask?.pendingKey === item.pendingTask.key ||
@@ -646,6 +712,7 @@ export function HomeScreen(props: HomeScreenProps) {
     return (
       <ThreadListV2Row
         pane={primaryColumn ? "sidebar" : "screen"}
+        sidebarLayout={sidebarLayout}
         selected={scopedThreadKey(thread.environmentId, thread.id) === selectedThreadKey}
         fullSwipeWidth={fullSwipeWidth}
         onNewThreadOnBranch={props.onNewThreadOnBranch}
@@ -711,7 +778,7 @@ export function HomeScreen(props: HomeScreenProps) {
       />
     );
   };
-  const v2KeyExtractor = (item: ThreadListV2ListItem) => item.key;
+  const v2KeyExtractor = (item: FinckeSidebarListItem) => item.key;
 
   // FlatList/LegendList treat a changed extraData identity as "re-render every
   // visible row", so an inline object literal would invalidate all rows on
@@ -727,6 +794,8 @@ export function HomeScreen(props: HomeScreenProps) {
     selectedThreadKey,
     threadSearchMatchByKey,
     workingShelfEnabled,
+    // recycled rows compare equal across the two views, so the view must re-render them
+    projectsView,
   };
 
   const hasAnyThreads =
@@ -788,10 +857,35 @@ export function HomeScreen(props: HomeScreenProps) {
   }
 
   const listHeader = Platform.OS === "ios" ? undefined : <HomeTopContentSpacer />;
+  const listPaddingLeft =
+    (contentSideInsets?.left ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter;
+  const listPaddingRight =
+    (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter;
 
   const v2ListHeader = (
     <>
       {listHeader}
+      <FinckeListHeader
+        pullUp={Platform.OS === "ios" ? insets.top : 0}
+        bleedLeft={listPaddingLeft}
+        bleedRight={listPaddingRight}
+      >
+        {/* fincke: the projects/activity switch rides the wave's lower edge, clear of the
+            filter chips. Native title-row buttons would make UIKit dim the wave behind them */}
+        {primaryColumn ? (
+          <View
+            className="flex-row justify-end pr-1"
+            style={ocean ? { marginTop: -40 } : undefined}
+          >
+            <SidebarViewToggle
+              projectsView={sidebarView.projectsView}
+              onChange={sidebarView.setProjectsView}
+              ocean={ocean}
+              theme={themeVariables}
+            />
+          </View>
+        ) : null}
+      </FinckeListHeader>
       {Platform.OS === "ios" && workspace ? (
         <ThreadListFilters
           environments={props.environments}
@@ -864,18 +958,20 @@ export function HomeScreen(props: HomeScreenProps) {
               onTouchEnd={(event) => trackListTouches(event, false)}
               onTouchCancel={(event) => trackListTouches(event, false)}
               renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
-              data={threadListV2Items}
+              data={listItems}
               renderItem={renderV2Item}
               keyExtractor={v2KeyExtractor}
               getItemType={(item) => item.type}
-              itemsAreEqual={threadListV2ListItemsAreEqual}
+              itemsAreEqual={finckeSidebarItemsAreEqual}
               estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
               drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
               recycleItems
               extraData={v2ExtraData}
               ListHeaderComponent={v2ListHeader}
               ListFooterComponent={
-                settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
+                !projectsView &&
+                settledShelfExpanded &&
+                threadListV2Layout.hiddenSettledCount > 0 ? (
                   <ThreadListV2ShowMoreRow
                     hiddenCount={threadListV2Layout.hiddenSettledCount}
                     onPress={showMoreSettled}
@@ -899,10 +995,8 @@ export function HomeScreen(props: HomeScreenProps) {
               {...scrollGateHandlers}
               scrollEventThrottle={16}
               contentContainerStyle={{
-                paddingLeft:
-                  (contentSideInsets?.left ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter,
-                paddingRight:
-                  (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter,
+                paddingLeft: listPaddingLeft,
+                paddingRight: listPaddingRight,
                 paddingBottom:
                   Platform.OS === "ios"
                     ? iosBottomClearance

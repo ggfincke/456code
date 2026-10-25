@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/thread-settings-sheet-state.test.ts
+// protects native model selection and effort editing lifecycle
+
 import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 
@@ -11,7 +14,12 @@ import {
   rememberModelOptions,
   withRememberedModelOptions,
 } from "../../state/use-model-option-memory";
-import { canCommitPendingModel, pendingModelAfterPress } from "./thread-settings-sheet-state";
+import {
+  canCommitPendingModel,
+  createEffortSelectionSession,
+  pendingModelAfterPress,
+  resolvePendingCatalogModel,
+} from "./thread-settings-sheet-state";
 
 function modelOption(
   model: string,
@@ -69,6 +77,121 @@ afterEach(() => {
 });
 
 describe("thread settings sheet state", () => {
+  it("invalidates staged effort when the live catalog replaces, hides, or removes its model", () => {
+    const pending = modelOption("gpt-next", [{ id: "effort", value: "high" }]);
+    const onCommit = vi.fn();
+    let models = [pending];
+    const current = () =>
+      resolvePendingCatalogModel(pending, [
+        { providerKey: "codex", providerLabel: "Codex", models },
+      ]);
+    expect(current()?.selection.options).toEqual([{ id: "effort", value: "high" }]);
+    const { options: _options, ...withoutOptions } = pending.selection;
+    expect(
+      resolvePendingCatalogModel({ ...pending, selection: withoutOptions }, [
+        { providerKey: "codex", providerLabel: "Codex", models },
+      ])?.selection,
+    ).not.toHaveProperty("options");
+    const identity = () => JSON.stringify(current());
+    const selection = createEffortSelectionSession(
+      {
+        identity: identity(),
+        choices: [
+          { id: "medium", label: "Medium", isDefault: true },
+          { id: "high", label: "High" },
+        ],
+        currentValue: "medium",
+        defaultIndex: 0,
+      },
+      () => ({ identity: identity(), disabled: current() === null, onCommit }),
+    );
+    models = [
+      {
+        ...pending,
+        capabilities: {
+          optionDescriptors: [
+            {
+              id: "effort",
+              label: "Reasoning",
+              type: "select",
+              options: [{ id: "low", label: "Low", isDefault: true }],
+            },
+          ],
+        },
+      },
+    ];
+    expect(selection.commit(1)).toBe(false);
+    expect(current()?.selection.options).toEqual([{ id: "effort", value: "low" }]);
+    models = [{ ...pending, isHidden: true }];
+    expect(current()).toBeNull();
+    expect(selection.commit(1)).toBe(false);
+    models = [{ ...pending, isUnavailable: true }];
+    expect(current()).toBeNull();
+    models = [];
+    expect(current()).toBeNull();
+    expect(selection.commit(1)).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("previews effort locally, commits a release once, and resets through the provider default", () => {
+    const onCommit = vi.fn();
+    const selection = createEffortSelectionSession(
+      {
+        identity: "codex:gpt-next:effort",
+        choices: [
+          { id: "low", label: "Low" },
+          { id: "medium", label: "Medium", isDefault: true },
+          { id: "high", label: "High" },
+        ],
+        currentValue: "low",
+        defaultIndex: 1,
+      },
+      () => ({ identity: "codex:gpt-next:effort", disabled: false, onCommit }),
+    );
+    expect(selection.preview(2)?.id).toBe("high");
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(selection.commit(2)).toBe(true);
+    expect(selection.commit(2)).toBe(false);
+    expect(onCommit.mock.calls).toEqual([["high"]]);
+    expect(selection.reset()).toBe(true);
+    expect(selection.reset()).toBe(false);
+    expect(selection.commit(0)).toBe(true);
+    expect(onCommit.mock.calls).toEqual([["high"], ["medium"], ["low"]]);
+  });
+
+  it("rejects disabled, stale model/catalog, and dismissed effort callbacks", () => {
+    const onCommit = vi.fn();
+    let live: { identity: string; disabled: boolean; onCommit: typeof onCommit } | null = {
+      identity: "provider:model:choices",
+      disabled: false,
+      onCommit,
+    };
+    const initial = live;
+    const selection = createEffortSelectionSession(
+      {
+        identity: initial.identity,
+        choices: [
+          { id: "low", label: "Low" },
+          { id: "high", label: "High" },
+        ],
+        currentValue: "low",
+        defaultIndex: 0,
+      },
+      () => live,
+    );
+    live = { ...initial, disabled: true };
+    expect(selection.preview(1)).toBeUndefined();
+    expect(selection.commit(1)).toBe(false);
+    live = { ...initial, identity: "other-provider:model:new-choices" };
+    expect(selection.commit(1)).toBe(false);
+    live = null;
+    expect(selection.commit(1)).toBe(false);
+    selection.dispose();
+    live = initial;
+    expect(selection.commit(1)).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it("preserves in-progress edits when the staged model is pressed again", () => {
     rememberModelOptions("codex", "gpt-next", [{ id: "effort", value: "medium" }]);
     const pending = modelOption("gpt-next", [{ id: "effort", value: "high" }]);

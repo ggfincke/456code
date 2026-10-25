@@ -1,3 +1,6 @@
+// apps/mobile/src/features/workspace/WorkspaceRootScreen.tsx
+// presents native workspace tabs and navigation
+
 import { useNavigation } from "@react-navigation/native";
 import { use, useCallback, useMemo } from "react";
 import { Platform, View, useWindowDimensions } from "react-native";
@@ -44,7 +47,7 @@ function WorkspaceRootTitle(props: {
     <View style={{ width: props.maxWidth, minHeight: 32, justifyContent: "center" }}>
       <WorkspaceConnectionTitle
         brand={
-          <CompactBrandTitle accessibilityLabel={`T3 Code, ${TAB_TITLES[state.selectedTab]}`} />
+          <CompactBrandTitle accessibilityLabel={`456code, ${TAB_TITLES[state.selectedTab]}`} />
         }
         maxWidth={props.maxWidth}
         onPress={props.onOpenEnvironments}
@@ -125,7 +128,7 @@ function WorkspaceRootContent() {
           />
         ) : (
           <AndroidScreenHeader
-            title="T3 Code"
+            title="456code"
             titleContent={renderHeaderTitle()}
             actions={[
               {

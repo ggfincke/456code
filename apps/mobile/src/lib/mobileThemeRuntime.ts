@@ -1,3 +1,5 @@
+// apps/mobile/src/lib/mobileThemeRuntime.ts
+// named uniwind registration and native appearance synchronization
 import { resolveTextScaleVariables } from "./appearancePreferences";
 import { BUILT_IN_THEME_IDS, type BuiltInThemeId } from "@t3tools/shared/themePalettes";
 import {
@@ -9,6 +11,7 @@ import {
 
 export type MobileUniwindThemeName =
   | MobileThemeAppearance
+  | "fincke-ocean-dark"
   | `${BuiltInThemeId}-${MobileThemeAppearance}`;
 
 export interface MobileThemeRuntimeState {
@@ -32,6 +35,7 @@ export type MobileThemeRuntimeOperation =
 const UNIWIND_THEME_NAMES: ReadonlyArray<"light" | "dark" | MobileUniwindThemeName> = [
   "light",
   "dark",
+  "fincke-ocean-dark",
   ...BUILT_IN_THEME_IDS.flatMap((themeId) => [
     `${themeId}-light` as const,
     `${themeId}-dark` as const,
@@ -42,6 +46,7 @@ export function getMobileUniwindThemeName(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
 ): MobileUniwindThemeName {
+  if (themeId === "fincke-ocean") return "fincke-ocean-dark";
   return themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you"
     ? appearance
     : `${themeId}-${appearance}`;

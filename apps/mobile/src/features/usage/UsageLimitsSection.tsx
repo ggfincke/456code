@@ -1,3 +1,5 @@
+// apps/mobile/src/features/usage/UsageLimitsSection.tsx
+// account usage windows and existing reset-credit actions
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -27,7 +29,7 @@ import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { usageProviderKind, useProviderColors } from "./usageProviders";
+import { usageProviderKind, useProviderColors, useUsageLimitBarColor } from "./usageProviders";
 
 const PACE_LABEL = { ahead: "ahead of pace", on: "on pace", under: "under pace" } as const;
 
@@ -46,6 +48,7 @@ function WindowRow(props: {
 }) {
   const { window, now } = props;
   const remaining = remainingPercent(window);
+  const barColor = useUsageLimitBarColor(remaining, remaining > 30 ? props.color : null);
   const timeLeft = paceRemainingPercent(window, now);
   const pace = paceOf(window, now);
   const resetsIn = formatResetsIn(window, now);
@@ -67,10 +70,7 @@ function WindowRow(props: {
               ? "h-full rounded-full bg-amber-500"
               : "h-full rounded-full bg-foreground"
         }
-        style={[
-          { flex: remaining },
-          remaining > 30 && props.color ? { backgroundColor: props.color } : null,
-        ]}
+        style={[{ flex: remaining }, barColor ? { backgroundColor: barColor } : null]}
       />
       <View style={{ flex: 100 - remaining }} />
     </View>

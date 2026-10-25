@@ -1,3 +1,6 @@
+// apps/mobile/src/native/T3ComposerEditor.ios.tsx
+// bridges composer editing state and native theme colors on ios
+
 import { PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES } from "@t3tools/client-runtime/text-paste";
 import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@t3tools/contracts";
 import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
@@ -24,8 +27,10 @@ import {
 import { contextChipIconUri } from "../lib/contextChipIconSource";
 import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { createNativeComposerTheme } from "../lib/nativeComposerTheme";
+import { finckeFileIconColor } from "../fincke/file-icon-color";
 import { FONT_FAMILIES } from "../lib/fontFamilies";
 import { useScaledTextRole } from "../features/settings/appearance/useScaledTextRole";
+import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import {
   acknowledgeComposerNativeEvent,
   assumeComposerControlledState,
@@ -143,6 +148,7 @@ export function ComposerEditor({
   const confirmedTokensRef = useRef(collectComposerInlineTokens(props.value));
   const bodyText = useScaledTextRole("body");
   const theme = useUniwindTheme();
+  const { themeId } = useAppearancePreferences();
   const fontFamily = FONT_FAMILIES.regular;
 
   useImperativeHandle(
@@ -181,7 +187,10 @@ export function ComposerEditor({
           source: token.source,
           start: token.start,
           end: token.end,
-          accent: presentation.accent,
+          accent:
+            themeId === "fincke-ocean" && icon.kind === "file"
+              ? finckeFileIconColor(icon.name)
+              : presentation.accent,
           label:
             token.type === "skill"
               ? (skillLabels.get(token.value) ?? token.value)
@@ -190,11 +199,11 @@ export function ComposerEditor({
                 : basename(token.value),
           detail: token.type === "context" ? composerChipSizeSuffix(record) : "",
           iconUri: contextChipIconUri(icon),
-          tintsIcon: icon.kind === "chip",
+          tintsIcon: icon.kind === "chip" || (themeId === "fincke-ocean" && icon.kind === "file"),
         };
       }),
     );
-  }, [props.value, props.context, skillLabels]);
+  }, [props.value, props.context, skillLabels, themeId]);
   // Every render resolves against the snapshot history, so a render whose
   // (value, selection) lags the acknowledged native state is stamped behind
   // the native revision and rejected by the editor instead of re-applying a
@@ -258,7 +267,12 @@ export function ComposerEditor({
     },
     [],
   );
-  const themeJson = JSON.stringify(createNativeComposerTheme(theme));
+  const themeJson = JSON.stringify(
+    createNativeComposerTheme(
+      theme,
+      themeId === "fincke-ocean" ? theme["--color-primary"] : undefined,
+    ),
+  );
   const resolvedTextStyle = StyleSheet.flatten(textStyle) ?? {};
   return (
     <NativeView

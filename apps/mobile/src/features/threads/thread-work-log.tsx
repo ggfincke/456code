@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/thread-work-log.tsx
+// presents expandable native work activity and tool output
+
 import { Button } from "../../components/ui/Button";
 import { SubagentStatusDot } from "./SubagentStatusDot";
 import { ThreadSubagentGroup } from "./thread-subagent-group";
@@ -61,7 +64,7 @@ import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import { T3Wordmark } from "../../components/T3Wordmark";
+import { MOBILE_BRAND_MARK_SOURCE } from "../../components/brandAssets";
 import { BrowserAppIcon } from "./BrowserAppIcon";
 import { cn } from "../../lib/cn";
 import { THREAD_WORK_ROW_MIN_HEIGHT, type deriveThreadWorkLogSizing } from "../../lib/layout";
@@ -131,7 +134,11 @@ function WorkLogIcon(props: {
   const colorClassName = props.highlighted ? "accent-foreground" : props.colorClassName;
   if (props.icon === "t3-code") {
     return (
-      <T3Wordmark height={10} {...(colorClassName ? { colorClassName } : { color: props.color })} />
+      <Image
+        source={MOBILE_BRAND_MARK_SOURCE}
+        accessibilityLabel="456code"
+        style={{ width: 14, height: 14, borderRadius: 4 }}
+      />
     );
   }
   if (props.icon === "computer") {

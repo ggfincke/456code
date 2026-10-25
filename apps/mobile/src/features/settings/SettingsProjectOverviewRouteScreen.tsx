@@ -1,3 +1,5 @@
+// apps/mobile/src/features/settings/SettingsProjectOverviewRouteScreen.tsx
+// native project navigation and presentation
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
@@ -247,6 +249,7 @@ function ProjectOverviewContent(props: {
           workspaceRoot={representative.workspaceRoot}
           faviconPath={representative.faviconPath}
           projectIcon={representative.projectIcon}
+          projectId={representative.id}
           size={48}
         />
         <View className="min-w-0 flex-1">

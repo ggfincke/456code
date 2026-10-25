@@ -1,4 +1,8 @@
+// apps/mobile/src/features/threads/floating-working-status.ts
+// models native floating thread status and available actions
+
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import type { PendingBackgroundWorkPresentation } from "@t3tools/client-runtime/state/thread-execution";
 
 export interface FloatingStatusAction {
   readonly label: string;
@@ -19,6 +23,7 @@ export type FloatingWorkingStatus =
     }
   | {
       readonly kind: "background";
+      readonly presentation?: PendingBackgroundWorkPresentation;
       readonly label: string;
       readonly accessibilityLabel: string;
       readonly waiting: boolean;

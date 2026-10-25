@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/SettingsRouteScreen.tsx
+// presents native mobile settings navigation
+
 import { Toolbar } from "../../components/ui/Toolbar";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useAuth, useUser } from "@clerk/expo";
@@ -216,7 +219,7 @@ function SettingsIndexSections() {
 
       <SettingsSection title="App">
         <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
-        <SettingsRow icon="info.circle" label="About T3 Code" target="SettingsAbout" />
+        <SettingsRow icon="info.circle" label="About 456code" target="SettingsAbout" />
       </SettingsSection>
     </>
   );

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/pull-requests/PullRequestToolbar.android.tsx
+// presents pull request navigation on android
+
 import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { useCallback, useEffect, useRef } from "react";
 import { BackHandler, Keyboard, View, type TextInputInstance } from "react-native";
@@ -70,7 +73,7 @@ export function PullRequestToolbar(props: { readonly onRequestVisibility?: () =>
         onCloseSearch={closeSearch}
         onOpenSearch={openSearch}
         searchAccessibilityLabel="Search pull requests"
-        titleAccessibilityLabel="T3 Code, Pull requests"
+        titleAccessibilityLabel="456code, Pull requests"
         onOpenEnvironments={() =>
           navigation.navigate("SettingsSheet", {
             screen: "SettingsContent",
