@@ -194,14 +194,7 @@ export function useComposerMenuItems({
                 type: "slash-command",
                 command: "plan",
                 label: "/plan",
-                description: "Switch this thread into plan mode",
-              },
-              {
-                id: "slash:default",
-                type: "slash-command",
-                command: "default",
-                label: "/default",
-                description: "Switch this thread back to normal build mode",
+                description: "Toggle plan mode",
               },
             ] as const)
           : []),

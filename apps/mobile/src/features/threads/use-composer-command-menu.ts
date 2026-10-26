@@ -88,14 +88,7 @@ export function buildComposerSlashCommandItems(input: {
       type: "slash-command",
       command: "plan",
       label: "/plan",
-      description: "Switch to plan mode",
-    },
-    {
-      id: "cmd:default",
-      type: "slash-command",
-      command: "default",
-      label: "/default",
-      description: "Switch to default mode",
+      description: "Toggle plan mode",
     },
   ] satisfies ComposerCommandItem[];
   const items: ComposerCommandItem[] = builtIn.filter(
@@ -134,20 +127,17 @@ export function resolveComposerCommandSelection(input: {
   readonly trigger: Pick<ComposerTrigger, "rangeStart" | "rangeEnd">;
   readonly item: ComposerCommandItem;
   readonly allowInteractionMode: boolean;
+  readonly currentInteractionMode: ProviderInteractionMode;
 }): {
   readonly text: string;
   readonly cursor: number;
   readonly interactionMode: ProviderInteractionMode | null;
 } {
   const { draftMessage, trigger, item } = input;
-  if (
-    input.allowInteractionMode &&
-    item.type === "slash-command" &&
-    (item.command === "plan" || item.command === "default")
-  ) {
+  if (input.allowInteractionMode && item.type === "slash-command" && item.command === "plan") {
     return {
       ...replaceTextRange(draftMessage, trigger.rangeStart, trigger.rangeEnd, ""),
-      interactionMode: item.command,
+      interactionMode: input.currentInteractionMode === "plan" ? "default" : "plan",
     };
   }
 
@@ -183,6 +173,7 @@ export function useComposerCommandMenu({
   offersUsageLimits = false,
   enabled = true,
   onChangeDraftMessage,
+  interactionMode,
   onUpdateInteractionMode,
   onUsageLimits,
 }: {
@@ -201,6 +192,7 @@ export function useComposerCommandMenu({
   readonly offersUsageLimits?: boolean;
   readonly enabled?: boolean;
   readonly onChangeDraftMessage: (value: string) => void;
+  readonly interactionMode: ProviderInteractionMode;
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
   readonly onUsageLimits?: () => void;
 }) {
@@ -605,6 +597,7 @@ export function useComposerCommandMenu({
       allowInteractionMode:
         onUpdateInteractionMode !== undefined &&
         selectedProviderStatus?.showInteractionModeToggle !== false,
+      currentInteractionMode: interactionMode,
     });
     setSelection({ start: result.cursor, end: result.cursor });
     onChangeDraftMessage(result.text);

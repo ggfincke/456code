@@ -85,6 +85,7 @@ import IconLayoutSidebarRight from "@tabler/icons-react-native/IconLayoutSidebar
 import IconLetterSpacing from "@tabler/icons-react-native/IconLetterSpacing";
 import IconMicrophone from "@tabler/icons-react-native/IconMicrophone";
 import IconLink from "@tabler/icons-react-native/IconLink";
+import IconList from "@tabler/icons-react-native/IconList";
 import IconListNumbers from "@tabler/icons-react-native/IconListNumbers";
 import IconMenu2 from "@tabler/icons-react-native/IconMenu2";
 import IconMessageCircleQuestion from "@tabler/icons-react-native/IconMessageCircleQuestion";
@@ -216,6 +217,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   keyboard: IconKeyboard,
   laptopcomputer: IconDeviceLaptop,
   link: IconLink,
+  "list.bullet": IconList,
   "list.number": IconListNumbers,
   "line.3.horizontal": IconMenu2,
   "line.3.horizontal.decrease": IconFilter,
