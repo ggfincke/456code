@@ -12,7 +12,10 @@ import { environmentSessionStatesAtom } from "~/state/session";
 import { getProviderUpdateRunOutcome } from "../ProviderUpdateLaunchNotification.logic";
 import { useProviderUpdates } from "../ProviderUpdatesAction";
 import { canUpdateServer, type ServerUpdateOutcome, useServerUpdate } from "../ServerUpdateAction";
-import { withHostAppUpdateTargets } from "~/fincke/hostAppUpdateTargets";
+import {
+  withHostAppUpdateTargets,
+  withoutUnstagedDesktopTargets,
+} from "~/fincke/hostAppUpdateTargets";
 import {
   closeFinishedUpdateRun,
   collectRestartingMachines,
@@ -56,10 +59,12 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
     updateState: updateStates[index]!,
     hostAppUpdate: environment.serverConfig?.hostAppUpdate,
   }));
-  const { targets: behindServers, skipped: unreachable } = collectServerUpdateTargets(
+  const { targets: skewedServers, skipped: unreachable } = collectServerUpdateTargets(
     machines,
     targetVersion,
   );
+  // fincke: desktop-hosted servers wait for their own staged build
+  const behindServers = withoutUnstagedDesktopTargets(skewedServers, machines);
   // A desktop-managed server installs from its own app's update feed, so only
   // servers that download t3 from npm wait for npm to publish the version.
   const needsNpm = behindServers.some((server) => server.selfUpdate !== "desktop-managed");
