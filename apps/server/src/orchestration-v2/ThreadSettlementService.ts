@@ -141,9 +141,8 @@ function pullRequestSettles(
   pullRequest: SettlementPullRequest,
   autoSettleOnMerge: boolean,
 ): boolean {
-  if (pullRequest.state !== "closed" && (pullRequest.state !== "merged" || !autoSettleOnMerge)) {
-    return false;
-  }
+  // a closed pull request only archives its thread when the merge setting is on, same as a merge
+  if (pullRequest.state === "open" || !autoSettleOnMerge) return false;
   const terminalAt = pullRequest.state === "merged" ? pullRequest.mergedAt : pullRequest.closedAt;
   if (terminalAt == null) return false;
   const userAnchorMs = latestMillis([

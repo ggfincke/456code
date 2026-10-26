@@ -22,7 +22,6 @@ export type ThreadActionMenuId =
   | "copy-path"
   | "copy-branch"
   | "copy-thread-id"
-  | "archive"
   | "delete";
 
 export type DraftActionMenuId =
@@ -76,8 +75,6 @@ export interface ThreadActionMenuState {
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
-  /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
-  readonly isRunning: boolean;
   readonly supports: {
     readonly settlement: boolean;
     readonly autoSettleOptOut: boolean;
@@ -124,8 +121,8 @@ export function buildThreadActionMenuItems(
     ...(state.supports.settlement
       ? [
           state.isSettled
-            ? { id: "unsettle" as const, label: "Un-settle thread", icon: "circle-check" }
-            : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
+            ? { id: "unsettle" as const, label: "Unarchive thread", icon: "archive" }
+            : { id: "settle" as const, label: "Archive thread", icon: "archive" },
         ]
       : []),
     ...(state.supports.snooze
@@ -174,7 +171,7 @@ export function buildThreadActionMenuItems(
       ? [
           {
             id: "auto-settle" as const,
-            label: "Auto-settle behavior",
+            label: "Auto-archive",
             icon: "timer",
             children: [
               {
@@ -206,17 +203,11 @@ export function buildThreadActionMenuItems(
     },
     { id: "project-settings", label: "Project settings", icon: "settings" },
     {
-      id: "archive",
-      label: "Archive thread",
-      icon: "archive",
-      disabled: state.isRunning,
-      separatorBefore: true,
-    },
-    {
       id: "delete",
       label: "Delete",
       destructive: true,
       icon: "trash",
+      separatorBefore: true,
     },
   ];
   return state.canOperate

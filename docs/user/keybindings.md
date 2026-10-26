@@ -149,7 +149,7 @@ the composer's command menu takes Escape first, and so does a text field other
 than the composer, so Escape there only closes or cancels it.
 
 `thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the
-bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a
+bottom of the sidebar, such as unpin, archive, snooze, or discarding a
 draft. Consecutive
 actions of the same kind undo together. The notice remains available for five
 seconds after the latest action. Right after an action, the shortcut works even

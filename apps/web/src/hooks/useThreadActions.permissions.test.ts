@@ -172,14 +172,6 @@ const target = { environmentId: secondary, threadId: ThreadId.make("thread") };
 type ThreadActions = ReturnType<typeof useThreadActions>;
 const operations = [
   {
-    name: "archive",
-    run: (actions: ThreadActions, ref: ScopedThreadRef) => actions.archiveThread(ref),
-  },
-  {
-    name: "unarchive",
-    run: (actions: ThreadActions, ref: ScopedThreadRef) => actions.unarchiveThread(ref),
-  },
-  {
     name: "settle",
     run: (actions: ThreadActions, ref: ScopedThreadRef) => actions.settleThread(ref),
   },

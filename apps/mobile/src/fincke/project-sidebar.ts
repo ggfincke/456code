@@ -100,8 +100,8 @@ export function buildProjectSidebarItems(input: {
     ...input.layoutInput,
     workingShelfEnabled: false,
     snoozedShelfExpanded: true,
-    settledShelfExpanded: true,
-    settledLimit: Number.POSITIVE_INFINITY,
+    // archived threads stay in the activity view's shelf; only the open one shows here
+    settledShelfExpanded: false,
   });
   const listItems = buildThreadListV2ListItems({
     items: layout.items,

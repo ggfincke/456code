@@ -12,7 +12,6 @@ const baseState: ThreadActionMenuState = {
   isSnoozed: false,
   canSnoozeNow: true,
   isRegeneratingTitle: false,
-  isRunning: false,
   supports: {
     settlement: true,
     autoSettleOptOut: true,
@@ -37,26 +36,8 @@ describe("buildThreadActionMenuItems", () => {
         isSnoozed: reversed,
       });
       const expected = reversed
-        ? [
-            "unpin",
-            "unsettle",
-            "unsnooze",
-            "rename",
-            "regenerate-title",
-            "auto-settle",
-            "archive",
-            "delete",
-          ]
-        : [
-            "pin",
-            "settle",
-            "snooze",
-            "rename",
-            "regenerate-title",
-            "auto-settle",
-            "archive",
-            "delete",
-          ];
+        ? ["unpin", "unsettle", "unsnooze", "rename", "regenerate-title", "auto-settle", "delete"]
+        : ["pin", "settle", "snooze", "rename", "regenerate-title", "auto-settle", "delete"];
       expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(expected);
       expect(
         items.find((item) => item.id === "snooze")?.children?.every((child) => child.disabled) ??
@@ -64,11 +45,4 @@ describe("buildThreadActionMenuItems", () => {
       ).toBe(true);
     },
   );
-
-  it("disables archive while the thread is running", () => {
-    const archiveItem = buildThreadActionMenuItems({ ...baseState, isRunning: true }).find(
-      (item) => item.id === "archive",
-    );
-    expect(archiveItem?.disabled).toBe(true);
-  });
 });

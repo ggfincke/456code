@@ -27,8 +27,7 @@ export type SettingsPath =
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/storage"
-  | "/settings/connections"
-  | "/settings/archived";
+  | "/settings/connections";
 
 export type SettingsSearchScope =
   | "environment"
@@ -86,7 +85,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
   "/settings/connections": "Connections",
-  "/settings/archived": "Archive",
 };
 
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
@@ -338,7 +336,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-inactive-threads",
-    title: "Auto-settle inactive threads",
+    title: "Auto-archive inactive threads",
     to: "/settings/general",
     searchTerms: ["sidebar inactivity days no activity automatically"],
     requiresThreadAutoSettlement: true,
@@ -353,7 +351,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-merged-threads",
-    title: "Auto-settle merged threads",
+    title: "Auto-archive merged threads",
     to: "/settings/general",
     searchTerms: ["pull request merge closed automatically sidebar"],
     requiresThreadAutoSettlement: true,
@@ -361,7 +359,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "days-before-auto-settle",
-    title: "Days of inactivity before auto-settle",
+    title: "Days of inactivity before auto-archive",
     to: "/settings/general",
     targetId: "auto-settle-inactive-threads",
     searchTerms: ["thread timeout activity sidebar"],
@@ -996,12 +994,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/connections",
     searchTerms: ["pull request trusted environments shared credentials permissions read actions"],
   },
-  {
-    id: "archive",
-    title: "Archived threads",
-    to: "/settings/archived",
-    searchTerms: ["restore reopen deleted history projects"],
-  },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
@@ -1021,7 +1013,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/storage": "project-defaults",
   "/settings/connections": "connections",
   "/settings/scheduled-tasks": null,
-  "/settings/archived": "project-defaults",
 };
 
 export function getSettingsSearchTargetScope(targetId: string) {

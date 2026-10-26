@@ -87,8 +87,8 @@ const ACTION_VERBS: Record<ThreadListAction, string> = {
   archive: "archived",
   unarchive: "unarchived",
   delete: "deleted",
-  settle: "settled",
-  unsettle: "un-settled",
+  settle: "archived",
+  unsettle: "unarchived",
 };
 
 function actionFailureMessage(action: ThreadListAction, cause: Cause.Cause<unknown>): string {
@@ -106,8 +106,8 @@ function selectionHaptic(): void {
 function actionFailureTitle(action: ThreadListAction): string {
   if (action === "archive") return "Could not archive thread";
   if (action === "unarchive") return "Could not unarchive thread";
-  if (action === "settle") return "Could not settle thread";
-  if (action === "unsettle") return "Could not un-settle thread";
+  if (action === "settle") return "Could not archive thread";
+  if (action === "unsettle") return "Could not unarchive thread";
   return "Could not delete thread";
 }
 
@@ -147,7 +147,7 @@ function useThreadActionExecutor(
       ) {
         Dialog.alert(
           actionFailureTitle(action),
-          "This environment's server does not support settling yet. Update the server to use Settle.",
+          "This environment's server does not support archiving yet. Update the server to use Archive.",
         );
         return false;
       }
@@ -261,7 +261,7 @@ export function useThreadListActions(): {
   const archiveThread = (thread: EnvironmentThreadShell) => executeAction("archive", thread);
   const offerUndo = (
     thread: EnvironmentThreadShell,
-    action: "Settled" | "Snoozed" | "Unpinned",
+    action: "Archived" | "Snoozed" | "Unpinned",
     claim: ReturnType<typeof ThreadUndo.begin>,
     plan: ThreadUndo.ThreadUndoPlan,
   ) =>
@@ -282,7 +282,7 @@ export function useThreadListActions(): {
                   return pinThread(thread, step.orderKey);
                 case "snooze": {
                   const failureTitle =
-                    action === "Unpinned" ? "Could not undo unpin" : "Could not undo settle";
+                    action === "Unpinned" ? "Could not undo unpin" : "Could not undo archive";
                   if (!checkThreadOperationPermission(thread, failureTitle)) return false;
                   const result = await snoozeMutation({
                     environmentId: thread.environmentId,
@@ -320,7 +320,7 @@ export function useThreadListActions(): {
       claim = ThreadUndo.begin("settle", key);
     });
     if (claim) {
-      if (succeeded) offerUndo(thread, "Settled", claim, plan);
+      if (succeeded) offerUndo(thread, "Archived", claim, plan);
       else claim.finish();
     }
     return succeeded;
@@ -515,8 +515,8 @@ export function useThreadListActions(): {
   const setThreadAutoSettle = async (thread: EnvironmentThreadShell, enabled: boolean) => {
     if (!environmentSupportsAutoSettleOptOut(thread.environmentId)) {
       Dialog.alert(
-        "Could not update auto-settle",
-        "This environment's server does not support turning auto-settle off per thread yet. Update the server to use it.",
+        "Could not update auto-archive",
+        "This environment's server does not support turning auto-archive off per thread yet. Update the server to use it.",
       );
       return false;
     }
@@ -528,10 +528,10 @@ export function useThreadListActions(): {
     if (result._tag === "Failure") {
       const error = Cause.squash(result.cause);
       Dialog.alert(
-        "Could not update auto-settle",
+        "Could not update auto-archive",
         error instanceof Error && error.message.trim().length > 0
           ? error.message
-          : "The auto-settle setting could not be changed.",
+          : "The auto-archive setting could not be changed.",
       );
       return false;
     }
@@ -783,23 +783,4 @@ export function useThreadListActions(): {
     renameThread,
     regenerateThreadTitle,
   };
-}
-
-export function useArchivedThreadListActions(
-  onCompleted: (thread: EnvironmentThreadShell) => void,
-): {
-  readonly unarchiveThread: (thread: EnvironmentThreadShell) => void;
-  readonly confirmDeleteThread: (thread: EnvironmentThreadShell) => void;
-} {
-  const handleCompleted = (_action: ThreadListAction, thread: EnvironmentThreadShell) => {
-    onCompleted(thread);
-  };
-  const executeAction = useThreadActionExecutor(handleCompleted);
-  const unarchiveThread = (thread: EnvironmentThreadShell) => {
-    void executeAction("unarchive", thread);
-  };
-  const confirmDeleteThread = (thread: EnvironmentThreadShell) =>
-    confirmThreadDeletion(executeAction, thread);
-
-  return { unarchiveThread, confirmDeleteThread };
 }

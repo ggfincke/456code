@@ -55,7 +55,7 @@ export function SettingsThreadsRouteScreen() {
   );
 }
 
-const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_SERVER_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
+const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_SERVER_SETTINGS.sidebarAutoSettleAfterDays ?? 14;
 
 function AutoSettleSettingsRows() {
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
@@ -193,17 +193,17 @@ function AutoSettleSettingsRows() {
           />
         </SettingsSection>
       ) : null}
-      <SettingsSection title="Auto-settle">
+      <SettingsSection title="Auto-archive">
         <SettingsSwitchRow
           icon="arrow.triangle.branch"
-          label="Auto-settle merged threads"
+          label="Auto-archive merged threads"
           value={referenceSettings.sidebarAutoSettleOnMerge}
           disabled={disabled}
           onValueChange={(value) => writeToAll({ sidebarAutoSettleOnMerge: value })}
         />
         <SettingsSwitchRow
           icon="clock"
-          label="Auto-settle inactive threads"
+          label="Auto-archive inactive threads"
           value={afterDays !== null}
           disabled={disabled}
           onValueChange={(value) =>
@@ -225,12 +225,12 @@ function AutoSettleSettingsRows() {
       {pendingWrites === 0 && mismatches.length > 0 ? (
         <SettingsSection title="Across environments">
           <View className="gap-3 p-4">
-            <Text className="text-base text-foreground">Auto-settle defaults differ</Text>
+            <Text className="text-base text-foreground">Auto-archive defaults differ</Text>
             <Text className="text-sm text-foreground-muted">
               {mismatches.map((mismatch) => mismatch.label).join(", ")}
             </Text>
             <Button
-              label="Apply auto-settle defaults"
+              label="Apply auto-archive defaults"
               tone="secondary"
               disabled={disabled}
               onPress={() => writeToAll(autoSettlePatch)}

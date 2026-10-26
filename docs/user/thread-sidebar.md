@@ -46,8 +46,8 @@ and worktree while you stay in the new thread composer. This requires a Git proj
 ## Choose a sidebar view
 
 On web and desktop, the sidebar has two views. **Projects** nests each project's
-recent threads under it. **Activity** shows threads from every project in one list,
-grouped by state. Switch with the two buttons next to the app name, press
+recent threads under it and leaves archived threads out. **Activity** shows threads from every
+project in one list, grouped by state, with archived threads in the **Archived** shelf. Switch with the two buttons next to the app name, press
 `mod+alt+u`, or run **Toggle sidebar view** from the command palette. To give
 projects without their own icon a colored folder, turn on **Settings → Appearance →
 Color project folders**.
@@ -58,14 +58,14 @@ sidebar button at the top of the side bar shows or hides the sidebar. Projects
 without their own icon take a stable color when **Settings → Appearance → Project folder
 colors** is on.
 
-## Pin and reorder threads
+## Pin and order threads
 
-Pin a thread from its menu to keep it above your active work.
+Pin a thread from its menu to keep it above your active work. Active threads are ordered by
+last activity: the most recent message, run start, or run finish puts a thread at the top.
 
-On web and desktop, unpinning, settling, snoozing, and archiving a thread each show
+On web and desktop, unpinning, archiving, and snoozing a thread each show
 a notification with **Undo** for five seconds. Undo restores the thread's previous
-state, including its pinned position, and reopens an archived thread you were
-viewing. Discarding an unsent draft from the sidebar works the same way: Undo brings
+state, including its pinned position. Discarding an unsent draft from the sidebar works the same way: Undo brings
 back its text and attachments. `mod+z` triggers the most recent Undo, even from the composer; see
 [Keybindings](./keybindings.md#commands-with-special-behavior).
 
@@ -77,42 +77,40 @@ files directly; see [Attach files](./composer.md#attach-files).
 On web and desktop, pinning or unpinning a thread keeps the sidebar at your current
 scroll position instead of following the thread to its new place in the list.
 
-Pinning does not prevent automatic settlement. Settling a thread removes its pin.
+Pinning prevents automatic archiving. Archiving a thread removes its pin.
 
 On web and desktop, drag a thread between sections to change its state. Drag a thread up into
 the pinned section to pin it at the spot you drop it; drag a pinned thread down into the active
-list to unpin it. Dragging a thread onto the **Settled** header settles it, and dragging a settled
-thread into the active list un-settles it. A snoozed thread can be dragged out of the snoozed
+list to unpin it. Dragging a thread onto the **Archived** header archives it, and dragging an archived
+thread into the active list unarchives it. A snoozed thread can be dragged out of the snoozed
 shelf, which wakes it, but threads cannot be dragged into the shelf because snoozing needs a wake
 time. Dragging a pinned thread out of the pinned section does not ask for unpin confirmation.
 Pinned and active boundary labels appear only while dragging, without moving the rows. The
 other rows slide aside to show where the thread will land. When you cross into another section,
 the dragged thread shows the action the drop performs, with its icon: **Pin**, **Unpin**,
-**Settle**, **Un-settle**, or **Wake**. Its status and hover actions hide during the drag. A pinned
+**Archive**, **Unarchive**, or **Wake**. Its status and hover actions hide during the drag. A pinned
 thread keeps its pin only while it stays in the pinned section; once it leaves, the badge takes
 over. Reordering within the same section shows no badge. When there are no pins, drag to the top
 edge to pin a thread. Section labels stay readable for the whole drag, and the section the
 thread is over takes the accent color. Section labels also
-identify empty sections and a collapsed settled shelf.
+identify empty sections and a collapsed archived shelf.
 
-Drag within the pinned or active section to change its order. Other rows slide aside to show the
-spot where the thread will land. Drops into either section keep the position you choose. On
-mobile, open a thread's menu and choose **Arrange threads**. Drag a handle within or between
-**Pinned** and **Active** to reorder, pin, or unpin. Drop onto the **Settled** divider to
-settle a thread. The dragged card shows the action before you release it. Expand **Snoozed**
-or **Settled** to drag a parked thread back into either live section. Each drop saves; close the sheet to return to the thread list.
-**Move up** and **Move down** are also available in the thread menu. The server
-saves the order, so it survives a refresh and appears on your other connected devices.
+Drag within the pinned section to change its order. Other rows slide aside to show the
+spot where the thread will land. On
+mobile, open a thread's menu and choose **Arrange threads**. Drag a handle within **Pinned**
+to reorder, or between **Pinned** and **Active** to pin or unpin. Drop onto the **Archived** divider to
+archive a thread. The dragged card shows the action before you release it. Expand **Snoozed**
+or **Archived** to drag a parked thread back into either live section. Each drop saves; close the sheet to return to the thread list.
+**Move up** and **Move down** are also available in a pinned thread's menu. The server
+saves the pinned order, so it survives a refresh and appears on your other connected devices.
 
 On web and desktop, the list also animates section changes made with thread actions such as
-**Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion
+**Pin**, **Archive**, and **Snooze**. These transitions respect your system's reduced-motion
 preference. While dragging, rows follow the insertion gap without replaying a second transition
 after the drop.
 
-New threads appear above the active threads you have arranged. Settling clears a thread's active
-position, so using **Un-settle** returns it to the top. Pinning and snoozing preserve its active
-position until you move it again. Thread activity does not change the order. The settled shelf
-continues to use settlement time.
+Unarchiving a thread returns it to the top of the active list. The archived shelf is ordered
+by when each thread was archived.
 
 If dragging is unavailable for one environment, update the T3 Code server running in that
 environment. Pinned and active reordering require server support. Threads from older servers keep
@@ -136,44 +134,44 @@ of the active list when it finishes, fails, or needs an approval or answer. The 
 lists the thread you last sent work to first. Pinned threads stay in the pinned section. Each
 device keeps its own choice.
 
-While this is on, the active list is ordered by when each thread last came back to you, so you
-cannot drag or move threads within it. Your saved order returns when you turn it off.
+While this is on, a thread that leaves the Working section counts as new activity, so it
+returns to the top of the active list.
 
-## Settle finished work
+## Archive finished work
 
-Choose **Settle thread** from its menu to move finished work out of the active list
-without deleting the conversation. **Un-settle thread** restores it to active work
-and prevents automatic settlement until new activity resumes the usual rules.
-Manually settling an idle thread dismisses unanswered async questions without
-sending an answer or restarting the agent. Settling also closes the thread's
+Choose **Archive thread** from its menu to move finished work out of the active list
+into the **Archived** shelf without deleting the conversation. **Unarchive thread** restores it to
+active work and prevents automatic archiving until new activity resumes the usual rules.
+Manually archiving an idle thread dismisses unanswered async questions without
+sending an answer or restarting the agent. Archiving also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A terminal that
-runs a command, such as a dev server, stays open.
+runs a command, such as a dev server, stays open. New activity in an archived thread
+moves it back to the active list.
 
-To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
-thread settles** for one of the project's actions, or set `"runOnSettle": true` on a
+To reclaim disk space from archived work, turn on **Run in the thread's worktree when the
+thread is archived** for one of the project's actions, or set `"runOnSettle": true` on a
 `t3.json` script, for example `cargo clean`. It runs each time a thread in its own
-worktree settles, manually or automatically, even if a terminal there still runs a
+worktree is archived, manually or automatically, even if a terminal there still runs a
 command such as a dev server. Threads in the project's main checkout skip it. Its terminal
 closes when the command succeeds and stays open when it fails.
 
-On web and desktop, press a thread's **Settle** button and drag up or down to
-settle every thread in that section between it and the one you release on.
-The **Un-settle** and **Wake** buttons work the same way in their sections.
+On web and desktop, press a thread's **Archive** button and drag up or down to
+archive every thread in that section between it and the one you release on.
+The **Unarchive** and **Wake** buttons work the same way in their sections.
 Press `Escape` while dragging to cancel.
 
-By default, environments settle inactive threads after three days and settle
-threads whose pull request merged. A closed pull request can also settle an idle
-thread. An empty thread's inactivity counts from when it was created.
-Work in progress, pending questions or approvals, and live background work
-prevent automatic settlement. An open pull request does not prevent inactivity
-settlement unless you turn on **Keep threads with a PR** in **Settings → General**,
-but an old closed or merged pull request does not settle work you
-resumed after it closed. Only your own messages count as resuming. A turn that
-finished background work or a pull request watch starts on its own does not.
+By default, environments archive threads that have had no activity for 14 days. An empty
+thread's inactivity counts from when it was created. Work in progress, pending questions or
+approvals, live background work, and pinning prevent automatic archiving.
+Turn on **Auto-archive merged threads** to also archive a thread when its pull request merges
+or closes; an old pull request does not archive work you resumed after it closed. Only your own
+messages count as resuming. A turn that finished background work or a pull request watch starts
+on its own does not. Turn on **Keep threads with a PR** to stop inactivity from archiving
+threads that have any pull request.
 
-To keep one thread out of the settled shelf no matter how long it sits idle, open its menu,
-choose **Auto-settle behavior**, and pick **Disabled**. The current option is checked. Pick
-**Enabled** to return to the usual rules. Manual settle, snooze, and archive still work while it
+To keep one thread out of the archived shelf no matter how long it sits idle, open its menu,
+choose **Auto-archive**, and pick **Disabled**. The current option is checked. Pick
+**Enabled** to return to the usual rules. Manual archive and snooze still work while it
 is disabled.
 
 Change these rules in **Settings → General** on web and desktop, or **Settings → Thread behavior** on mobile.
@@ -182,18 +180,18 @@ top to change only its rules, or **All environments** to update connected enviro
 Mixed values show where the selected environments disagree. Mobile applies these
 rules to connected environments that support shared settings. Offline environments
 and older servers keep their previous values. Changing a rule does not reopen
-already settled threads.
+already archived threads.
 
 ## Link a pull request
 
-The server finds the PR for each unsettled thread's saved branch, even when your
-apps are closed. Settled threads keep their saved links. Update the server if
+The server finds the PR for each active thread's saved branch, even when your
+apps are closed. Archived threads keep their saved links. Update the server if
 automatic branch links do not appear.
 
 On web and desktop, right-click a pull request link in a thread and choose
 **Link to thread** to select a different PR. Use **Unlink from thread** on the
 same link to return to the branch PR, if one exists.
-The linked pull request participates in automatic settlement.
+The linked pull request participates in automatic archiving.
 
 ## Find and reference work
 
@@ -222,7 +220,7 @@ threads** in **Settings → General** on web and desktop, or **Settings → Thre
 behavior** on mobile, to schedule limit stops by default.
 The environment must be running when the reset arrives; it resumes overdue
 continuations after a restart. Stopping the thread, sending a new message,
-archiving, or settling it prevents a pending continuation from starting.
+or archiving it prevents a pending continuation from starting.
 
 Choose **Snooze until reset** to hide the thread until its allowance returns.
 Snooze and auto-resume are independent: snooze alone wakes the thread without

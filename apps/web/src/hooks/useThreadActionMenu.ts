@@ -41,7 +41,6 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
-import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
@@ -80,7 +79,6 @@ export function useThreadActionMenu(input: {
     pinThread,
     confirmAndUnpinThread,
     setThreadAutoSettle,
-    archiveThread,
     deleteThread,
     markThreadUnread,
   } = useThreadActions();
@@ -89,7 +87,6 @@ export function useThreadActionMenu(input: {
   });
   const handleNewThread = useNewThreadHandler();
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
-  const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
@@ -138,7 +135,6 @@ export function useThreadActionMenu(input: {
         isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
         canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
         isRegeneratingTitle,
-        isRunning: !threadRuntimeCanArchive(thread.runtime),
         supports,
         snoozePresets,
       });
@@ -207,10 +203,10 @@ export function useThreadActionMenu(input: {
           return;
         }
         case "settle":
-          await reportFailure("Failed to settle thread", () => settleThread(threadRef));
+          await reportFailure("Failed to archive thread", () => settleThread(threadRef));
           return;
         case "unsettle":
-          await reportFailure("Failed to un-settle thread", () => unsettleThread(threadRef));
+          await reportFailure("Failed to unarchive thread", () => unsettleThread(threadRef));
           return;
         case "unsnooze":
           await reportFailure("Failed to wake thread", () => unsnoozeThread(threadRef));
@@ -224,7 +220,7 @@ export function useThreadActionMenu(input: {
         }
         case "auto-settle:enabled":
         case "auto-settle:disabled":
-          await reportFailure("Failed to update auto-settle", () =>
+          await reportFailure("Failed to update auto-archive", () =>
             setThreadAutoSettle(threadRef, action === "auto-settle:enabled"),
           );
           return;
@@ -266,27 +262,6 @@ export function useThreadActionMenu(input: {
         case "copy-thread-id":
           copyThreadIdToClipboard(thread.id, { threadId: thread.id });
           return;
-        case "archive": {
-          if (confirmThreadArchive) {
-            const confirmed = await settlePromise(() =>
-              api.dialogs.confirm(`Archive thread "${thread.title}"?`),
-            );
-            if (confirmed._tag === "Failure" || !confirmed.value) return;
-          }
-          let didArchive = false;
-          const result = await archiveThread(threadRef, {
-            onArchived: () => {
-              didArchive = true;
-            },
-          });
-          if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-            failureToast(
-              didArchive ? "Thread archived, but navigation failed" : "Failed to archive thread",
-              squashAtomCommandFailure(result),
-            );
-          }
-          return;
-        }
         case "delete": {
           if (confirmThreadDelete) {
             const confirmed = await settlePromise(() =>

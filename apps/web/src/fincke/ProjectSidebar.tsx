@@ -1153,6 +1153,18 @@ function resolveProjectThreadStatus(
   });
 }
 
+// archived threads live in the activity view's Archived shelf, so the projects tree skips them
+function filterProjectTreeThreads<
+  T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage" | "settledOverride"> & {
+    environmentId: string;
+    projectId: string;
+  },
+>(threads: readonly T[]): T[] {
+  return filterSidebarV2VisibleThreads(threads, null).filter(
+    (thread) => thread.settledOverride !== "settled",
+  );
+}
+
 // Thread derivations for one project row. Built in their own hooks so they reach
 // SidebarProjectItem frozen: inline, its later calls made the compiler fuse the
 // ordered keys with the route-dependent panel, handing every row a new array.
@@ -1205,7 +1217,7 @@ function useProjectThreads(project: SidebarProjectSnapshot) {
     ]),
   );
   const visibleProjectThreads = sortThreads(
-    filterSidebarV2VisibleThreads(sidebarThreads, null),
+    filterProjectTreeThreads(sidebarThreads),
     threadSortOrder,
   );
   const projectStatus = resolveProjectStatusIndicator(
@@ -3252,7 +3264,7 @@ function useLegacySidebarThreads(input: {
   }
   const visibleSidebarThreadKeys = sortedProjects.flatMap((project) => {
     const projectThreads = sortThreads(
-      filterSidebarV2VisibleThreads(threadsByProjectKey.get(project.projectKey) ?? [], null),
+      filterProjectTreeThreads(threadsByProjectKey.get(project.projectKey) ?? []),
       sidebarThreadSortOrder,
     );
     const projectExpanded = resolveProjectExpanded(

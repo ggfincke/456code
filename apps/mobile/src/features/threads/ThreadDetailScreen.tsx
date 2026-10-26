@@ -757,9 +757,9 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
         snoozed && snoozedUntil !== null
           ? `Snoozed, wakes in ${snoozeWakeLabel(snoozedUntil, { now: lifecycleNow })}`
           : settled
-            ? "Settled"
+            ? "Archived"
             : "Woke from snooze";
-      const actionLabel = snoozed ? "Wake now" : settled ? "Un-settle" : "Dismiss";
+      const actionLabel = snoozed ? "Wake now" : settled ? "Unarchive" : "Dismiss";
       return {
         kind: "lifecycle",
         state,
@@ -769,7 +769,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
             ? snoozed
               ? "Waking..."
               : settled
-                ? "Un-settling..."
+                ? "Unarchiving..."
                 : "Dismissing..."
             : actionLabel,
           accessibilityLabel: actionLabel,

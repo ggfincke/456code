@@ -42,7 +42,6 @@ import {
   RenderFailureView,
   type RenderFailureProps,
 } from "./components/RenderErrorBoundary";
-import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
 import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
@@ -286,13 +285,6 @@ const SettingsContentStack = createV5SheetStackNavigator({
       linking: "environment-new",
       options: {
         title: "Add Environment",
-      },
-    }),
-    SettingsArchive: createNativeStackScreen({
-      screen: ArchivedThreadsRouteScreen,
-      linking: "archive",
-      options: {
-        title: "Archived Threads",
       },
     }),
     SettingsAppearance: createNativeStackScreen({

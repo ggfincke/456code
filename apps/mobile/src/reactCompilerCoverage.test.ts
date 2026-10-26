@@ -148,10 +148,7 @@ describe("React Compiler coverage", () => {
   it("Metro's transformer applies the compiler", async () => {
     const { transformer } = await metroConfig;
     const metroTransformer = requireFromMobile(transformer.babelTransformerPath);
-    const filename = NodePath.join(
-      mobileRoot,
-      "src/features/archive/ArchivedThreadsRouteScreen.tsx",
-    );
+    const filename = NodePath.join(mobileRoot, "src/features/settings/SettingsRouteScreen.tsx");
     const transformed = (reactCompiler: string) => {
       const { ast } = metroTransformer.transform({
         filename,

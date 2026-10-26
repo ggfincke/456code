@@ -311,7 +311,6 @@ function ThreadNavigationSidebarPane(
     pinningEnvironmentIds,
     autoSettleOptOutEnvironmentIds,
     pinReorderEnvironmentIds,
-    activeReorderEnvironmentIds,
     titleRegenerationEnvironmentIds,
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
@@ -319,29 +318,23 @@ function ThreadNavigationSidebarPane(
   // Up/down menu availability for every card, computed once per section per
   // rebuild (see computeThreadMoveAvailability): per-thread planner calls made
   // list construction quadratic, and this list rebuilds on every minute tick.
-  const threadMoveAvailability = (() => {
-    const sectionAvailability = (section: "pinned" | "active") =>
-      computeThreadMoveAvailability({
-        allThreads: threads,
-        section,
+  const threadMoveAvailability = new Map(
+    computeThreadMoveAvailability({
+      allThreads: threads,
+      section: "pinned",
+      pendingOrder,
+      reorderableEnvironmentIds: pinReorderEnvironmentIds,
+      ordered: getThreadListV2OrderedSection({
+        threads,
+        section: "pinned",
         pendingOrder,
-        reorderableEnvironmentIds:
-          section === "pinned" ? pinReorderEnvironmentIds : activeReorderEnvironmentIds,
-        ordered: getThreadListV2OrderedSection({
-          threads,
-          section,
-          pendingOrder,
-          now,
-          settlementEnvironmentIds,
-          snoozeEnvironmentIds,
-          queuedThreadKeys,
-        }),
-      });
-    return new Map([
-      ...sectionAvailability("pinned"),
-      ...(workingShelfEnabled ? [] : sectionAvailability("active")),
-    ]);
-  })();
+        now,
+        settlementEnvironmentIds,
+        snoozeEnvironmentIds,
+        queuedThreadKeys,
+      }),
+    }),
+  );
   const threadListV2LayoutInput = {
     pendingOrder,
     threads: threads.filter((thread) => thread.archivedAt === null),
@@ -716,9 +709,7 @@ function ThreadNavigationSidebarPane(
             pinningSupported={pinningEnvironmentIds.has(thread.environmentId)}
             autoSettleOptOutSupported={autoSettleOptOutEnvironmentIds.has(thread.environmentId)}
             reorderSupported={
-              item.item.pinned
-                ? pinReorderEnvironmentIds.has(thread.environmentId)
-                : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId)
+              item.item.pinned ? pinReorderEnvironmentIds.has(thread.environmentId) : false
             }
             canMoveUp={item.canMoveUp}
             canMoveDown={item.canMoveDown}
