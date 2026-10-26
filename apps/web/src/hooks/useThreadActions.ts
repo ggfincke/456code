@@ -6,7 +6,6 @@ import {
 } from "@t3tools/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -30,7 +29,6 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
-import { useNewThreadHandler } from "./useHandleNewThread";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
@@ -60,18 +58,6 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 
-export class ThreadArchiveBlockedError extends Schema.TaggedError<ThreadArchiveBlockedError>()(
-  "ThreadArchiveBlockedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "Cannot archive while the provider is active.";
-  }
-}
-
 export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadSettlementUnsupportedError>()(
   "ThreadSettlementUnsupportedError",
   {
@@ -80,7 +66,7 @@ export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadS
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support settling yet. Update the server to use Settle.";
+    return "This environment's server does not support archiving yet. Update the server to use Archive.";
   }
 }
 
@@ -125,7 +111,7 @@ export class ThreadAutoSettleOptOutUnsupportedError extends Schema.TaggedError<T
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support turning auto-settle off per thread yet. Update the server to use it.";
+    return "This environment's server does not support turning auto-archive off per thread yet. Update the server to use it.";
   }
 }
 
@@ -246,12 +232,6 @@ function threadOperationFailure(target: ScopedThreadRef) {
 }
 
 export function useThreadActions() {
-  const archiveThreadMutation = useOrchestrationCommand(threadEnvironment.archive, {
-    reportFailure: false,
-  });
-  const unarchiveThreadMutation = useOrchestrationCommand(threadEnvironment.unarchive, {
-    reportFailure: false,
-  });
   const deleteThreadMutation = useOrchestrationCommand(threadEnvironment.delete, {
     reportFailure: false,
   });
@@ -303,7 +283,6 @@ export function useThreadActions() {
   const clearTerminalUiState = useTerminalUiStateStore((state) => state.clearTerminalUiState);
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const router = useRouter();
-  const handleNewThread = useNewThreadHandler();
 
   const resolveThreadTarget = (target: ScopedThreadRef) => {
     const thread = readThreadShell(target);
@@ -320,79 +299,12 @@ export function useThreadActions() {
     return resolveThreadRouteRef(currentRouteParams);
   };
 
-  const unarchiveThread = async (target: ScopedThreadRef, opts: { navigate?: boolean } = {}) => {
-    ThreadUndo.invalidate("archive", scopedThreadKey(target));
-    const result = await unarchiveThreadMutation({
-      environmentId: target.environmentId,
-      input: { threadId: target.threadId },
-    });
-    if (result._tag === "Failure") {
-      return result;
-    }
-    refreshArchivedThreadsForEnvironment(target.environmentId);
-    if (opts.navigate) {
-      return settlePromise(() =>
-        router.navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(target),
-        }),
-      );
-    }
-    return result;
-  };
-
+  // fincke: "Archive" is the soft archive (settle), so archived threads stay reachable in the
+  // Archived shelf; the server's hidden archive has no entry point left
   const archiveThread = async (target: ScopedThreadRef, opts: { onArchived?: () => void } = {}) => {
-    const resolved = resolveThreadTarget(target);
-    if (!resolved) return AsyncResult.success(undefined);
-    const { thread, threadRef } = resolved;
-    if (!threadRuntimeCanArchive(thread.runtime)) {
-      return AsyncResult.failure(
-        Cause.fail(
-          new ThreadArchiveBlockedError({
-            environmentId: threadRef.environmentId,
-            threadId: threadRef.threadId,
-          }),
-        ),
-      );
-    }
-
-    const currentRouteThreadRef = getCurrentRouteThreadRef();
-    const shouldNavigateToDraft =
-      currentRouteThreadRef?.threadId === threadRef.threadId &&
-      currentRouteThreadRef.environmentId === threadRef.environmentId;
-    const action = ThreadUndo.begin("archive", scopedThreadKey(threadRef));
-    const archiveResult = await archiveThreadMutation({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    });
-    if (archiveResult._tag === "Failure") {
-      action.finish();
-      return archiveResult;
-    }
-    const wokeAt = threadWokeAt(thread, { now: new Date().toISOString() });
-    if (wokeAt !== null) {
-      markThreadVisited(scopedThreadKey(threadRef), wokeAt);
-    }
-    refreshArchivedThreadsForEnvironment(threadRef.environmentId);
-    opts.onArchived?.();
-    showThreadUndoNotice({
-      action: "Archived",
-      claim: action,
-      undo: () => unarchiveThread(threadRef, { navigate: shouldNavigateToDraft }),
-      failureTitle: "Failed to undo archive",
-    });
-
-    if (shouldNavigateToDraft) {
-      const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(thread.environmentId, thread.projectId)),
-      );
-      if (navigationResult._tag === "Failure") {
-        return navigationResult;
-      }
-      return archiveResult;
-    }
-
-    return archiveResult;
+    const result = await settleThread(target);
+    if (result._tag === "Success") opts.onArchived?.();
+    return result;
   };
 
   const deleteThread = async (
@@ -726,10 +638,10 @@ export function useThreadActions() {
       markThreadVisited(scopedThreadKey(target), wokeAt);
     }
     showThreadUndoNotice({
-      action: "Settled",
+      action: "Archived",
       claim: action,
       undo: () => runUndoPlan(target, undoPlan),
-      failureTitle: "Failed to undo settle",
+      failureTitle: "Failed to undo archive",
     });
     return result;
   };
@@ -900,7 +812,6 @@ export function useThreadActions() {
 
   return {
     archiveThread,
-    unarchiveThread,
     deleteThread,
     confirmAndDeleteThread,
     settleThread,

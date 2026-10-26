@@ -109,10 +109,9 @@ afterEach(() => {
 
 describe("concurrent thread action Undo", () => {
   it.each([
-    ["settleThread", "settle", "unsettle", "Settled"],
+    ["settleThread", "settle", "unsettle", "Archived"],
     ["snoozeThread", "snooze", "unsnooze", "Snoozed"],
     ["unpinThread", "unpin", "pin", "Unpinned"],
-    ["archiveThread", "archive", "unarchive", "Archived"],
   ] as const)(
     "%s retains one undo for concurrent successful requests",
     async (handler, action, inverse, notice) => {
@@ -179,37 +178,12 @@ describe("unpin Undo", () => {
   });
 });
 
-describe("archive Undo", () => {
-  it("unarchives and returns to the thread when archiving left it", async () => {
-    const add = vi.spyOn(toastManager, "add").mockReturnValue("toast");
-    router.state.matches[0]!.params = {
-      environmentId: target.environmentId,
-      threadId: target.threadId,
-    };
-    const actions = useThreadActions();
-    await actions.archiveThread(target);
-    expect(useThreadUndoNotice.getState().notice).toMatchObject({ action: "Archived", count: 1 });
-    expect(add).not.toHaveBeenCalled();
-    await currentUndo()();
-    expect(commands.unarchive).toHaveBeenCalledExactlyOnceWith({
-      environmentId: target.environmentId,
-      input: { threadId: target.threadId },
-    });
-    expect(router.navigate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: "/$environmentId/$threadId",
-        params: { environmentId: target.environmentId, threadId: target.threadId },
-      }),
-    );
-  });
-});
-
 describe("settle and snooze Undo", () => {
   it("un-settles from the notice and expires the Undo after a manual un-settle", async () => {
     const add = vi.spyOn(toastManager, "add").mockReturnValue("toast");
     const actions = useThreadActions();
     await actions.settleThread(target);
-    expect(useThreadUndoNotice.getState().notice).toMatchObject({ action: "Settled", count: 1 });
+    expect(useThreadUndoNotice.getState().notice).toMatchObject({ action: "Archived", count: 1 });
     expect(add).not.toHaveBeenCalled();
     const undo = currentUndo();
     await actions.unsettleThread(target);

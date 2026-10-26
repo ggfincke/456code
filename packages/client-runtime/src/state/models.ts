@@ -344,13 +344,6 @@ export function presentThreadShell(
   };
 }
 
-export function scopeThreadShell(
-  environmentId: EnvironmentId,
-  thread: OrchestrationV2ThreadShell,
-): EnvironmentThreadShell {
-  return presentThreadShell(environmentId, thread);
-}
-
 const THREAD_PROVIDER_STACK_LIMIT = 3;
 
 export function resolveThreadProviderStack(

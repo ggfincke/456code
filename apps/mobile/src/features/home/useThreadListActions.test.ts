@@ -285,7 +285,7 @@ describe("pinned thread operation permissions", () => {
 
 describe("thread action undo", () => {
   it.each([
-    ["settleThread", "settle", "Settled", "unsettle"],
+    ["settleThread", "settle", "Archived", "unsettle"],
     ["snoozeThread", "snooze", "Snoozed", "unsnooze"],
   ] as const)(
     "%s keeps the successful request's undo when a duplicate is rejected",
@@ -333,7 +333,7 @@ describe("thread action undo", () => {
     });
     expect(await useThreadListActions().settleThread(thread)).toBe(true);
     const undo = readThreadUndoNotice()!.undo;
-    expect(readThreadUndoNotice()?.action).toBe("Settled");
+    expect(readThreadUndoNotice()?.action).toBe("Archived");
     await undo();
     await undo();
     expect(state.requests.map(({ action }) => action)).toEqual([
@@ -431,7 +431,7 @@ describe("thread action undo", () => {
     state.failedAction = "unsettle";
     await readThreadUndoNotice()!.undo();
     expect(state.requests.map(({ action }) => action)).toEqual(["settle", "unsettle"]);
-    expect(state.alerts.at(-1)?.title).toBe("Could not un-settle thread");
+    expect(state.alerts.at(-1)?.title).toBe("Could not unarchive thread");
   });
 
   it("rechecks the destination permission before undoing", async () => {

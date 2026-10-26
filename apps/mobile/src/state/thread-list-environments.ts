@@ -69,7 +69,6 @@ function collectEnvironments(environments: ReadonlyMap<EnvironmentId, ListEnviro
   const pinningEnvironmentIds = new Set<EnvironmentId>();
   const autoSettleOptOutEnvironmentIds = new Set<EnvironmentId>();
   const pinReorderEnvironmentIds = new Set<EnvironmentId>();
-  const activeReorderEnvironmentIds = new Set<EnvironmentId>();
   const titleRegenerationEnvironmentIds = new Set<EnvironmentId>();
   for (const [id, { providers, machineKind, capabilities }] of environments) {
     providersByEnvironmentId.set(id, providers);
@@ -79,7 +78,6 @@ function collectEnvironments(environments: ReadonlyMap<EnvironmentId, ListEnviro
     if (capabilities.threadAutoSettleOptOut === true) autoSettleOptOutEnvironmentIds.add(id);
     if (capabilities.threadPinning === true) pinningEnvironmentIds.add(id);
     if (capabilities.threadPinReorder === true) pinReorderEnvironmentIds.add(id);
-    if (capabilities.threadActiveReorder === true) activeReorderEnvironmentIds.add(id);
     if (capabilities.threadTitleRegeneration === true) titleRegenerationEnvironmentIds.add(id);
   }
   return {
@@ -90,7 +88,6 @@ function collectEnvironments(environments: ReadonlyMap<EnvironmentId, ListEnviro
     pinningEnvironmentIds,
     autoSettleOptOutEnvironmentIds,
     pinReorderEnvironmentIds,
-    activeReorderEnvironmentIds,
     titleRegenerationEnvironmentIds,
   };
 }

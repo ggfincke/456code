@@ -277,14 +277,15 @@ describe("resolveAutoSettlementAt", () => {
         pullRequest: { state: "merged", mergedAt: DateTime.formatIso(at(-3 * 60 * 60 * 1_000)) },
       }),
     ).toBeNull();
+    const closed = {
+      ...input,
+      thread: shell(),
+      pullRequest: { state: "closed" as const, closedAt: DateTime.formatIso(at(-1)) },
+    };
+    expect(ThreadSettlementService.resolveAutoSettlementAt(closed)).toEqual(shell().createdAt);
     expect(
-      ThreadSettlementService.resolveAutoSettlementAt({
-        ...input,
-        thread: shell(),
-        pullRequest: { state: "closed", closedAt: DateTime.formatIso(at(-1)) },
-        autoSettleOnMerge: false,
-      }),
-    ).toEqual(shell().createdAt);
+      ThreadSettlementService.resolveAutoSettlementAt({ ...closed, autoSettleOnMerge: false }),
+    ).toBeNull();
   });
 
   it("settles on merge after agent-started runs, but not after the user writes again", () => {
@@ -484,7 +485,10 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const snapshotReadCount = yield* Ref.make(0);
   const snapshotReads = yield* Queue.unbounded<number>();
   const candidateReads = yield* Ref.make<ReadonlyArray<string | undefined>>([]);
-  const settings = yield* Ref.make(options.settings ?? DEFAULT_SERVER_SETTINGS);
+  // the worker cases exercise merge archiving, which is opt-in by default
+  const settings = yield* Ref.make(
+    options.settings ?? { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleOnMerge: true },
+  );
   const settingsChanges = yield* PubSub.unbounded<ContractServerSettings>();
   const mergedPullRequests = yield* PubSub.unbounded<PullRequestService.PullRequestMergeEvent>();
   const commands = yield* Ref.make<ReadonlyArray<AutoSettleCommand>>([]);
@@ -683,7 +687,11 @@ describe("ThreadSettlementServiceV2 worker", () => {
         });
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot([thread]),
-          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: true,
+          },
         });
 
         yield* Effect.gen(function* () {

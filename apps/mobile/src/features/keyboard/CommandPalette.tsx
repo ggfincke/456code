@@ -255,17 +255,6 @@ export function CommandPalette(props: {
             params: { screen: "SettingsUsage" },
           }),
       },
-      {
-        key: "archive",
-        kind: "action",
-        title: "Archived threads",
-        searchTerms: ["restore", "history"],
-        run: () =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "SettingsArchive" },
-          }),
-      },
     ];
     const projectByKey = new Map(
       projects.map((project) => [scopedProjectKey(project.environmentId, project.id), project]),

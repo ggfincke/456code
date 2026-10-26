@@ -29,12 +29,18 @@ import {
   type ThreadMoveDestination,
 } from "./threadOrder";
 import { getThreadListV2OrderedSection, threadListInboxReturns } from "./threadListV2";
-import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 
 const ROW_HEIGHT = 56;
 const HEADER_HEIGHT = 48;
 const keyOf = (thread: EnvironmentThreadShell) => scopedThreadKey(thread.environmentId, thread.id);
 type Section = "pinned" | "active" | "snoozed" | "settled";
+
+const SECTION_LABEL: Record<Section, string> = {
+  pinned: "Pinned",
+  active: "Active",
+  snoozed: "Snoozed",
+  settled: "Archived",
+};
 type Destination = Exclude<ThreadMoveDestination, string>;
 type Row = {
   key: string;
@@ -155,7 +161,6 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
   const pendingOrder = useAtomValue(pendingThreadOrderAtom);
   const dropBusy = useAtomValue(threadDropBusyAtom);
   const { moveThread } = useThreadListActions();
-  const { workingShelfEnabled } = useThreadListV2ShelfPreferences();
   const [now, setNow] = useState(() => new Date().toISOString());
   const [expanded, setExpanded] = useState({ snoozed: false, settled: false });
   useEffect(() => {
@@ -197,13 +202,11 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
     );
     return {
       pinned,
-      active: workingShelfEnabled
-        ? sortInboxThreadsByReturn(active, threadListInboxReturns.returnedAt)
-        : active,
+      active: sortInboxThreadsByReturn(active, threadListInboxReturns.returnedAt),
       snoozed: parked.filter((thread) => effectiveSnoozed(thread, { now })),
       settled: parked.filter((thread) => !effectiveSnoozed(thread, { now })),
     };
-  }, [threads, configs, now, queuedThreadKeys, pendingOrder, workingShelfEnabled]);
+  }, [threads, configs, now, queuedThreadKeys, pendingOrder]);
   const planners = useMemo(() => {
     const planner = (section: "pinned" | "active") =>
       createThreadMovePlanner({
@@ -212,18 +215,12 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
         section,
         reorderableEnvironmentIds: new Set(
           [...configs].flatMap(([id, config]) =>
-            (
-              section === "pinned"
-                ? config.environment.capabilities.threadPinReorder
-                : !workingShelfEnabled && config.environment.capabilities.threadActiveReorder
-            )
-              ? [id]
-              : [],
+            section === "pinned" && config.environment.capabilities.threadPinReorder ? [id] : [],
           ),
         ),
       });
     return { pinned: planner("pinned"), active: planner("active") };
-  }, [sections, threads, configs, workingShelfEnabled]);
+  }, [sections, threads, configs]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     let offset = 0;
@@ -384,7 +381,7 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
                 accessibilityLabel="Close arrange threads"
               />
               <Text className="px-5 pb-3 text-sm text-foreground-muted">
-                Drag to reorder, pin, or settle. Changes save when you drop.
+                Drag to pin, unpin, or archive. Changes save when you drop.
               </Text>
               <View
                 onLayout={(event) => {
@@ -518,8 +515,7 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
                             }}
                           >
                             <Text className="text-sm font-t3-semibold text-foreground-muted">
-                              {item.section[0]!.toUpperCase() + item.section.slice(1)} (
-                              {sections[item.section].length})
+                              {SECTION_LABEL[item.section]} ({sections[item.section].length})
                             </Text>
                           </Pressable>
                         )}

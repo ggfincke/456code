@@ -35,7 +35,6 @@ import {
   resolveThreadListV2SnoozeMenuSelection,
   resolveThreadListV2Status,
   resolveThreadListV2WokeAt,
-  sortThreadsForListV2,
   threadListV2ListItemsAreEqual,
   threadHasUnseenCompletion,
   type ThreadListV2ListItem,
@@ -148,17 +147,6 @@ describe("queued messages keep a settled thread active", () => {
       ["settled", "slim"],
     ]);
     expect(layout.settledCount).toBe(1);
-  });
-});
-
-describe("sortThreadsForListV2", () => {
-  it("honors a saved active order and leaves new threads above it", () => {
-    const sorted = sortThreadsForListV2([
-      { id: "newer-arranged", createdAt: "2026-06-01T12:00:00.000Z", activeOrderKey: "t" },
-      { id: "older-arranged", createdAt: "2026-06-01T08:00:00.000Z", activeOrderKey: "f" },
-      { id: "new", createdAt: "2026-06-01T13:00:00.000Z" },
-    ]);
-    expect(sorted.map((thread) => thread.id)).toEqual(["new", "older-arranged", "newer-arranged"]);
   });
 });
 
@@ -765,7 +753,8 @@ describe("pending mobile thread moves", () => {
     }).items.map((item) => item.thread.id);
   }
 
-  it.each(["active", "pinned"] as const)(
+  // active threads sort by activity, so only the pinned section renders a held order
+  it.each(["pinned"] as const)(
     "holds %s order through every intermediate key upsert",
     (section) => {
       const { rows, assignments, pending, update } = fixture(section);
@@ -788,7 +777,7 @@ describe("pending mobile thread moves", () => {
   );
 
   it("keeps the action guard pending when receipts precede canonical shells", () => {
-    const { rows, assignments, pending, update } = fixture();
+    const { rows, assignments, pending, update } = fixture("pinned");
     let hold: PendingThreadOrder | null = { ...pending, commandsComplete: true };
     let current = rows;
     expect(reconcilePendingThreadOrder(hold, current)).toBe(hold);

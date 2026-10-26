@@ -3,7 +3,6 @@ export type SettingsSheetTarget =
   | "SettingsNotifications"
   | "SettingsThreads"
   | "SettingsAbout"
-  | "SettingsArchive"
   | "SettingsAppearance"
   | "SettingsOrganization"
   | "SettingsProjectOverview"

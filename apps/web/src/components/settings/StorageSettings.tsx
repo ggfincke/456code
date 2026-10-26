@@ -578,7 +578,7 @@ export function StorageSettingsPanel() {
                   true,
               ) && (
                 <SettingsRow
-                  title="Delete settled worktrees"
+                  title="Delete archived worktrees"
                   status={[
                     ruleStatus("worktreeSettledAfterDays"),
                     environments.length > connectedEnvironments.length
@@ -587,11 +587,11 @@ export function StorageSettingsPanel() {
                   ]
                     .filter(Boolean)
                     .join(". ")}
-                  description="Remove worktrees this many days after their thread settles. Set 0 days to remove them at the next cleanup. Branches and thread history are kept."
+                  description="Remove worktrees this many days after their thread is archived. Set 0 days to remove them at the next cleanup. Branches and thread history are kept."
                   serverScoped={!isProjectScope}
                   control={
                     <RetentionControl
-                      label="Delete settled worktrees"
+                      label="Delete archived worktrees"
                       value={settings.worktreeSettledAfterDays}
                       minimum={0}
                       onChange={(worktreeSettledAfterDays) =>
