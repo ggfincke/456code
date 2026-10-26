@@ -741,7 +741,12 @@ export function useComposerSend(input: ComposerSendInput) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand && multipleModelSelections === null) {
-      handleInteractionModeChange(standaloneSlashCommand);
+      // a typed /plan toggles, matching the menu item
+      handleInteractionModeChange(
+        standaloneSlashCommand === "plan" && sendInteractionMode === "plan"
+          ? "default"
+          : standaloneSlashCommand,
+      );
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();

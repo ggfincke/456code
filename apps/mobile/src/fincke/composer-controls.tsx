@@ -1,5 +1,5 @@
 // apps/mobile/src/fincke/composer-controls.tsx
-// touch controls for interaction mode, reasoning, and low usage
+// touch controls for the plan mode chip, reasoning, and low usage
 
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 import { Pressable, View } from "react-native";
@@ -59,7 +59,9 @@ export function ComposerControls(props: {
     readonly onPress: () => void;
   };
 }) {
-  if (!props.mode && !props.effort && !props.usage) return null;
+  // like codex, plan mode shows only while it is on; /plan turns it on & the chip turns it off
+  const planMode = props.mode?.value === "plan" ? props.mode : undefined;
+  if (!planMode && !props.effort && !props.usage) return null;
   return (
     <ComposerToolbarRow
       paddingTop={0}
@@ -68,45 +70,31 @@ export function ComposerControls(props: {
       style={{ minHeight: 44 }}
     >
       <ComposerToolbarScroller fadeSurface="sheet">
-        {props.mode ? (
-          <View
-            className="flex-row items-center"
-            accessibilityRole="radiogroup"
-            accessibilityLabel="Interaction mode"
+        {planMode ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Plan mode on"
+            accessibilityHint="Turns plan mode off"
+            accessibilityState={{ disabled: planMode.disabled }}
+            disabled={planMode.disabled}
+            onPress={() => planMode.onChange("default")}
+            className="h-11 flex-row items-center gap-1.5 rounded-xl bg-primary/12 px-3 active:opacity-60"
+            style={{ opacity: planMode.disabled ? 0.45 : 1 }}
           >
-            {(["default", "plan"] as const).map((mode) => {
-              const selected = props.mode?.value === mode;
-              return (
-                <Pressable
-                  key={mode}
-                  accessibilityLabel={mode === "default" ? "Build mode" : "Plan mode"}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: selected, disabled: props.mode?.disabled }}
-                  disabled={props.mode?.disabled}
-                  className={cn(
-                    "h-11 min-w-[64px] items-center justify-center rounded-xl px-3 active:opacity-60",
-                    selected && "bg-primary/12",
-                  )}
-                  style={{
-                    opacity: props.mode?.disabled ? 0.45 : 1,
-                  }}
-                  onPress={() => {
-                    if (!selected) props.mode?.onChange(mode);
-                  }}
-                >
-                  <Text
-                    className={
-                      selected
-                        ? "text-sm font-t3-medium text-primary-text"
-                        : "text-sm font-t3-medium text-foreground-muted"
-                    }
-                  >
-                    {mode === "default" ? "Build" : "Plan"}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+            <SymbolView
+              name="list.bullet"
+              size={14}
+              tintColorClassName="accent-primary-text"
+              type="monochrome"
+            />
+            <Text className="text-sm font-t3-medium text-primary-text">Plan</Text>
+            <SymbolView
+              name="xmark"
+              size={10}
+              tintColorClassName="accent-primary-text"
+              type="monochrome"
+            />
+          </Pressable>
         ) : null}
         {props.effort ? (
           <Pressable

@@ -54,6 +54,7 @@ describe("mobile slash commands", () => {
           trigger: { rangeStart: 0, rangeEnd: 3 },
           item,
           allowInteractionMode,
+          currentInteractionMode: "default",
         }),
       ).toEqual({ text: "/plan ", cursor: 6, interactionMode: null });
     },
@@ -78,6 +79,7 @@ describe("mobile slash commands", () => {
         trigger: { rangeStart: 0, rangeEnd: 5 },
         item,
         allowInteractionMode: true,
+        currentInteractionMode: "default",
       }),
     ).toEqual({ text: "", cursor: 0, interactionMode: "plan" });
 
@@ -87,6 +89,7 @@ describe("mobile slash commands", () => {
         trigger: { rangeStart: 0, rangeEnd: 5 },
         item,
         allowInteractionMode: false,
+        currentInteractionMode: "default",
       }),
     ).toEqual({ text: "/plan ", cursor: 6, interactionMode: null });
   });

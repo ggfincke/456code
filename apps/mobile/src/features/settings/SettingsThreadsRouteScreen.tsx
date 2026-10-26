@@ -284,8 +284,8 @@ function LegacySettingsSection() {
         />
       </SettingsSection>
       <Text className="px-2 text-sm text-foreground-muted">
-        Opt into retired interfaces kept for compatibility. Plan Mode restores the Build/Plan
-        control; otherwise every task runs in Build mode.
+        Opt into retired interfaces kept for compatibility. Plan Mode enables /plan and the plan
+        mode chip; otherwise every task runs in Build mode.
       </Text>
     </View>
   );

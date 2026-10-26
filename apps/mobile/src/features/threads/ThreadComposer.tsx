@@ -612,6 +612,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     hasThread: !props.isDraft,
     hasCompactableConversation: props.hasCompactableConversation,
     onChangeDraftMessage: props.onChangeDraftMessage,
+    interactionMode: props.selectedThread.interactionMode,
     onUpdateInteractionMode:
       selectedProviderStatus?.showInteractionModeToggle === false
         ? undefined

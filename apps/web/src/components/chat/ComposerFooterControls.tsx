@@ -8,7 +8,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 import { BotIcon, PencilRulerIcon } from "lucide-react";
 import { type ComponentProps, memo } from "react";
 
-import { InteractionModeSegments } from "../../fincke/InteractionModeSegments";
+import { PlanModeChip } from "../../fincke/PlanModeChip";
 import { useFinckeOcean } from "../../fincke/useFinckeOcean";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
@@ -55,15 +55,14 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
       : "Default mode — click to enter plan mode";
 
   const finckeOcean = useFinckeOcean();
-  const interactionModeToggle = props.showInteractionModeToggle ? (
+  // fincke: plan mode is entered with /plan and only shows, as a chip, while it is on
+  const showModeControl =
+    props.showInteractionModeToggle && (!finckeOcean || props.interactionMode === "plan");
+  const interactionModeToggle = showModeControl ? (
     <>
       <ComposerControlSeparator size={size} />
       {finckeOcean ? (
-        <InteractionModeSegments
-          interactionMode={props.interactionMode}
-          tooltip={interactionModeTooltip}
-          onToggleInteractionMode={props.onToggleInteractionMode}
-        />
+        <PlanModeChip onExitPlanMode={props.onToggleInteractionMode} />
       ) : (
         <Tooltip>
           <TooltipTrigger

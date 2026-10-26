@@ -85,23 +85,14 @@ html[data-theme-id="fincke-ocean"]:not([data-diff-color-scheme="blue-orange"])
   --diff-deletion: var(--fincke-red);
 }
 
-/* build | plan: the active segment takes the teal tint */
-html[data-theme-id="fincke-ocean"] [data-slot="fincke-mode-segments"] [data-slot="toggle"] {
-  color: var(--fincke-dim);
-}
-
-html[data-theme-id="fincke-ocean"]
-  [data-slot="fincke-mode-segments"]
-  [data-slot="toggle"]:not([data-pressed]):hover {
-  color: var(--foreground);
-}
-
-html[data-theme-id="fincke-ocean"]
-  [data-slot="fincke-mode-segments"]
-  [data-slot="toggle"][data-pressed] {
+/* plan mode chip takes the teal tint */
+html[data-theme-id="fincke-ocean"] [data-slot="fincke-plan-chip"] {
   background: color-mix(in srgb, var(--fincke-teal) 12%, transparent);
   color: var(--fincke-teal);
-  box-shadow: none;
+}
+
+html[data-theme-id="fincke-ocean"] [data-slot="fincke-plan-chip"] svg {
+  color: currentColor;
 }
 
 /* send button: light waves on teal with a dark arrow, faded until there is something to send */
