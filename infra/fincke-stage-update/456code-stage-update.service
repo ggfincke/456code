@@ -1,0 +1,15 @@
+# infra/fincke-stage-update/456code-stage-update.service
+# stages the latest green origin/main desktop build for the in-app update button
+
+# The stager checkout is moved to origin/main before each run, so the script that runs is
+# always the merged one. See docs/operations/release.md#staged-updates.
+[Unit]
+Description=Stage the latest green 456code build
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+Environment=STAGER=%h/Projects/Applications/456code-stager
+ExecStart=/bin/sh -c 'git -C "$STAGER" fetch --quiet origin main && git -C "$STAGER" checkout --quiet --detach origin/main && exec "$HOME/.local/share/mise/shims/node" "$STAGER/scripts/fincke-stage-update.ts"'

@@ -77,6 +77,8 @@ import * as DesktopWindow from "./window/DesktopWindow.ts";
 import * as DesktopWslBackend from "./wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "./wsl/DesktopWslEnvironment.ts";
 import * as DesktopWslServerTree from "./wsl/DesktopWslServerTree.ts";
+import { isFinckeDesktop } from "./fincke/build.ts";
+import * as FinckeStagedUpdater from "./fincke/StagedUpdater.ts";
 
 if (process.argv.includes("--version")) {
   try {
@@ -203,6 +205,11 @@ const layerDesktopLocalEnvironmentAuth = DesktopLocalEnvironmentAuth.layer.pipe(
   Layer.provideMerge(layerDesktopBackend),
 );
 
+// fincke: updates come from the locally staged build instead of electron-updater's feed
+const layerUpdateFeed: typeof FinckeStagedUpdater.layer = isFinckeDesktop
+  ? FinckeStagedUpdater.layer
+  : ElectronUpdater.layer;
+
 const layerDesktopApplication = Layer.mergeAll(
   DesktopLifecycle.layer,
   layerDesktopAppActivation,
@@ -213,7 +220,7 @@ const layerDesktopApplication = Layer.mergeAll(
   layerDesktopSsh,
 ).pipe(
   Layer.provideMerge(layerDesktopSnapShot),
-  Layer.provideMerge(DesktopUpdates.layer),
+  Layer.provideMerge(DesktopUpdates.layer.pipe(Layer.provide(layerUpdateFeed))),
   Layer.provideMerge(layerDesktopWslBackend),
   Layer.provideMerge(layerDesktopLocalEnvironmentAuth),
 );

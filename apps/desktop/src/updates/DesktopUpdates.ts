@@ -413,7 +413,11 @@ export const make = Effect.gen(function* () {
       : false;
 
   const hasUpdateFeedConfig = Ref.get(appUpdateYmlConfigRef).pipe(
-    Effect.map((appUpdateYmlConfig) => Option.isSome(appUpdateYmlConfig) || config.mockUpdates),
+    // fincke: the locally staged build is this build's feed (see fincke/StagedUpdater.ts)
+    Effect.map(
+      (appUpdateYmlConfig) =>
+        Option.isSome(appUpdateYmlConfig) || config.mockUpdates || isFinckeDesktop,
+    ),
   );
 
   const resolveDisabledReason = Effect.gen(function* () {
@@ -425,7 +429,7 @@ export const make = Effect.gen(function* () {
         platform: environment.platform,
         appImage: Option.getOrUndefined(config.appImagePath),
         isDebPackage,
-        disabledByEnv: isFinckeDesktop || config.disableAutoUpdate,
+        disabledByEnv: config.disableAutoUpdate,
         hasUpdateFeedConfig: hasFeedConfig,
       }),
     );

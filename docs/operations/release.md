@@ -37,11 +37,51 @@ keeps its existing unsigned packaging policy; packaging success is not signing o
 Run the relevant existing packaging helper tests and `pnpm run release:smoke`. Add the local
 binary directory to `PATH` for smoke subprocesses. Keep runtime smoke state disposable and
 separate from the installed application's profile. Inspect a DMG through a read-only mount
-without launching Finder or the application.
+without launching Finder or the application. Day-to-day installs go through staged updates
+below rather than a manually copied artifact.
 
-Scheduled installation requires a human-approved merged upstream-sync PR and passing quality
-CI on the exact current `origin/main` commit. A verified artifact waits when the installed app or
-its helpers are running, or when their absence cannot be reliably established. Preserve a
-verified recovery copy before replacing the closed bundle, verify installed files and the
-embedded source revision, and leave the app closed. Do not migrate or modify profile data.
-Artifact and installed-file checks do not establish interactive client acceptance.
+## Staged updates
+
+The desktop app updates itself only from a build staged on the same machine; nothing is
+published. Every 15 minutes `scripts/fincke-stage-update.ts` checks `origin/main`. Once CI has
+passed on a new commit, it builds the app in a temporary sibling checkout, numbers it
+`0.1.<main commit count>`, and stages it under `~/.456code-thin/updates/<linux|mac>/` with a
+`manifest.json` written last. It never installs or restarts anything.
+
+The running app's updater (`apps/desktop/src/fincke/StagedUpdater.ts`) offers that build through
+upstream's update flow. Its own update pill installs it locally. A host also announces it to
+connected clients (`hostAppUpdate` on the server config stream), so the sidebar update pill on
+web and desktop, and the environment screen on iOS, can start the remote install. Installing
+moves the staged build over the running AppImage or `.app` once the app has quit, then relaunches
+it; clients reconnect on their own. There is no recovery copy: rebuild an older commit instead.
+
+Set up each host once. The timer runs the stager from its own checkout, which it moves to
+`origin/main` before every run, so a feature branch in the main checkout never changes it:
+
+```bash
+git -C ~/Projects/Applications/456code worktree add --detach ../456code-stager origin/main
+(cd ~/Projects/Applications/456code-stager && vp i --frozen-lockfile)
+```
+
+The `node` on the timer's `PATH` (mise shims) only runs the stager. Builds use the exact version
+`package.json` pins, which must already be installed with mise.
+
+On furnace (Linux, AppImage at `~/Applications/456code.AppImage`):
+
+```bash
+cp infra/fincke-stage-update/456code-stage-update.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now 456code-stage-update.timer
+journalctl --user -u 456code-stage-update.service
+```
+
+On the Mac (installed in `/Applications`), the LaunchAgent runs in the logged-in session:
+
+```bash
+sed "s|__HOME__|$HOME|g" infra/fincke-stage-update/dev.fincke.456code-stage-update.plist \
+  > ~/Library/LaunchAgents/dev.fincke.456code-stage-update.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/dev.fincke.456code-stage-update.plist
+tail -f ~/Library/Logs/456code-stage-update.log
+```
+
+Do not migrate or modify profile data as part of an update.

@@ -250,6 +250,7 @@ import {
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
+import * as HostAppUpdates from "./fincke/HostAppUpdates.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
@@ -1157,6 +1158,7 @@ export const layerWsRpc = (
             );
       const usage = yield* UsageService.UsageService;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
+      const hostAppUpdates = yield* HostAppUpdates.HostAppUpdates;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
@@ -2937,6 +2939,16 @@ export const layerWsRpc = (
                       })),
                     )
                   : Stream.empty;
+              const hostAppUpdateUpdates =
+                input.hostAppUpdate === true
+                  ? hostAppUpdates.streamChanges.pipe(
+                      Stream.map((update) => ({
+                        version: 1 as const,
+                        type: "hostAppUpdateUpdated" as const,
+                        payload: { update },
+                      })),
+                    )
+                  : Stream.empty;
               const settingsUpdates = settingsChanges.pipe(
                 Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
                 Stream.map((settings) => ({
@@ -2952,7 +2964,10 @@ export const layerWsRpc = (
                   providerStatuses,
                   Stream.merge(
                     settingsUpdates,
-                    Stream.merge(environmentThemeUpdates, usageLimitSourceUpdates),
+                    Stream.merge(
+                      environmentThemeUpdates,
+                      Stream.merge(usageLimitSourceUpdates, hostAppUpdateUpdates),
+                    ),
                   ),
                 ),
               );

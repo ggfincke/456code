@@ -599,6 +599,13 @@ export const ServerEventLoopStall = Schema.Struct({
 });
 export type ServerEventLoopStall = typeof ServerEventLoopStall.Type;
 
+/** fincke: a newer build the hosting desktop app has staged and can install on request. */
+export const HostAppUpdate = Schema.Struct({
+  currentVersion: TrimmedNonEmptyString,
+  availableVersion: TrimmedNonEmptyString,
+});
+export type HostAppUpdate = typeof HostAppUpdate.Type;
+
 export const ServerConfig = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,
@@ -646,6 +653,11 @@ export const ServerConfig = Schema.Struct({
    * on subscribe, and it stays absent for subscribers that did not opt in.
    */
   usageLimitSources: Schema.optional(UsageLimitSourceSnapshots),
+  /**
+   * fincke: like usage sources, never in a snapshot. The hosting desktop app's newer staged
+   * build, so remote clients can offer to install it; null once there is none.
+   */
+  hostAppUpdate: Schema.optional(Schema.NullOr(HostAppUpdate)),
 });
 export type ServerConfig = typeof ServerConfig.Type;
 
@@ -767,6 +779,14 @@ export const ServerConfigStreamUsageLimitSourcesUpdatedEvent = Schema.Struct({
 export type ServerConfigStreamUsageLimitSourcesUpdatedEvent =
   typeof ServerConfigStreamUsageLimitSourcesUpdatedEvent.Type;
 
+export const ServerConfigStreamHostAppUpdateUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("hostAppUpdateUpdated"),
+  payload: Schema.Struct({ update: Schema.NullOr(HostAppUpdate) }),
+});
+export type ServerConfigStreamHostAppUpdateUpdatedEvent =
+  typeof ServerConfigStreamHostAppUpdateUpdatedEvent.Type;
+
 export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
@@ -774,6 +794,7 @@ export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSettingsUpdatedEvent,
   ServerConfigStreamEnvironmentThemesUpdatedEvent,
   ServerConfigStreamUsageLimitSourcesUpdatedEvent,
+  ServerConfigStreamHostAppUpdateUpdatedEvent,
 ]);
 export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
 
