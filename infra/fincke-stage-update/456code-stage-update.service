@@ -12,4 +12,6 @@ Wants=network-online.target
 Type=oneshot
 Nice=10
 Environment=STAGER=%h/Projects/Applications/456code-stager
+# user units get a minimal PATH; the AppImage build needs cargo for its native helpers
+Environment=PATH=%h/.cargo/bin:%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin
 ExecStart=/bin/sh -c 'git -C "$STAGER" fetch --quiet origin main && git -C "$STAGER" checkout --quiet --detach origin/main && exec "$HOME/.local/share/mise/shims/node" "$STAGER/scripts/fincke-stage-update.ts"'
