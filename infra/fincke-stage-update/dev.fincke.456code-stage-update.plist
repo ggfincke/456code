@@ -18,7 +18,7 @@
     <key>STAGER</key>
     <string>__HOME__/Projects/Applications/456code-stager</string>
     <key>PATH</key>
-    <string>__HOME__/.local/share/mise/shims:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>__HOME__/.cargo/bin:__HOME__/.local/share/mise/shims:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StartInterval</key>
   <integer>900</integer>
