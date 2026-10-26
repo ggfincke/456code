@@ -12,6 +12,7 @@ import { environmentSessionStatesAtom } from "~/state/session";
 import { getProviderUpdateRunOutcome } from "../ProviderUpdateLaunchNotification.logic";
 import { useProviderUpdates } from "../ProviderUpdatesAction";
 import { canUpdateServer, type ServerUpdateOutcome, useServerUpdate } from "../ServerUpdateAction";
+import { withHostAppUpdateTargets } from "~/fincke/hostAppUpdateTargets";
 import {
   closeFinishedUpdateRun,
   collectRestartingMachines,
@@ -53,6 +54,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
         isDesktopLocalConnectionTarget(environment.entry.target)),
     canMaintain: canUpdateServer(sessionStates[index]!),
     updateState: updateStates[index]!,
+    hostAppUpdate: environment.serverConfig?.hostAppUpdate,
   }));
   const { targets: behindServers, skipped: unreachable } = collectServerUpdateTargets(
     machines,
@@ -62,9 +64,13 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   // servers that download t3 from npm wait for npm to publish the version.
   const needsNpm = behindServers.some((server) => server.selfUpdate !== "desktop-managed");
   const published = useNpmReleasePublished(needsNpm ? targetVersion : null);
-  const servers = published
-    ? behindServers
-    : behindServers.filter((server) => server.selfUpdate === "desktop-managed");
+  // fincke: hosts with a newer staged desktop build are targets too
+  const servers = withHostAppUpdateTargets(
+    published
+      ? behindServers
+      : behindServers.filter((server) => server.selfUpdate === "desktop-managed"),
+    machines,
+  );
   const skipped: ReadonlyArray<SkippedMachine> = [
     ...unreachable,
     ...behindServers

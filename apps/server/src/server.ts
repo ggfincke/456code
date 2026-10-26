@@ -153,6 +153,7 @@ import {
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
 import * as ReleaseUpdates from "./fincke/ReleaseUpdates.ts";
+import * as HostAppUpdates from "./fincke/HostAppUpdates.ts";
 import * as DesktopAppUpdate from "./desktopUpdate/DesktopAppUpdate.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
@@ -611,7 +612,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
   Layer.provideMerge(layerPersistence),
   Layer.provideMerge(
-    Layer.mergeAll(Keybindings.layer, EnvironmentTheme.layer, UsageLimitSources.layer),
+    Layer.mergeAll(
+      Keybindings.layer,
+      EnvironmentTheme.layer,
+      UsageLimitSources.layer,
+      HostAppUpdates.layer.pipe(Layer.provide(layerDesktopTelemetryReceiver)),
+    ),
   ),
   Layer.provideMerge(ProviderRegistry.layer),
   Layer.provideMerge(ProviderInstanceRegistryHydration.layer),

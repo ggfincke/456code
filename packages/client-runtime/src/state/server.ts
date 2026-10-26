@@ -356,6 +356,7 @@ export interface ServerConfigSubscriptionOptions {
   readonly environmentThemes?: boolean;
   readonly usageLimitSources?: boolean;
   readonly usageLimitsCommand?: boolean;
+  readonly hostAppUpdate?: boolean;
 }
 
 export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConfigState.make")(
@@ -430,6 +431,7 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
     yield* subscribe(WS_METHODS.subscribeServerConfig, {
       ...(subscription.environmentThemes === true ? { environmentThemes: true } : {}),
       ...(subscription.usageLimitSources === true ? { usageLimitSources: true } : {}),
+      ...(subscription.hostAppUpdate === true ? { hostAppUpdate: true } : {}),
       ...(subscription.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
     }).pipe(
       Stream.runForEach((event) =>
@@ -614,6 +616,7 @@ export function createServerEnvironmentAtoms<R, E>(
     readonly environmentThemes?: boolean;
     readonly usageLimitSources?: boolean;
     readonly usageLimitsCommand?: boolean;
+    readonly hostAppUpdate?: boolean;
   },
 ) {
   const configScheduler = createAtomCommandScheduler();
@@ -628,6 +631,7 @@ export function createServerEnvironmentAtoms<R, E>(
         serverConfigStateChanges(environmentId, {
           ...(options.environmentThemes === true ? { environmentThemes: true } : {}),
           ...(options.usageLimitSources === true ? { usageLimitSources: true } : {}),
+          ...(options.hostAppUpdate === true ? { hostAppUpdate: true } : {}),
           ...(options.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
         }),
       )

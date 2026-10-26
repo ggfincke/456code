@@ -1,0 +1,12 @@
+# infra/fincke-stage-update/456code-stage-update.timer
+# runs the staged-update builder every 15 minutes
+
+[Unit]
+Description=Stage the latest green 456code build every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=15min
+
+[Install]
+WantedBy=timers.target

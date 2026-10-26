@@ -138,5 +138,11 @@ export function applyServerConfigProjection(
         latestEvent: event,
         source: "live",
       }));
+    case "hostAppUpdateUpdated":
+      return Option.map(current, (projection) => ({
+        config: { ...projection.config, hostAppUpdate: event.payload.update },
+        latestEvent: event,
+        source: "live",
+      }));
   }
 }

@@ -23,6 +23,8 @@
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
+        // the staged-update timer (infra/fincke-stage-update) runs this directly
+        "fincke-stage-update.ts",
         "apply-web-brand-assets.ts",
         "smoke-cli-archive.ts",
         "sign-macos.ts",

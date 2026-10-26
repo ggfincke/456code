@@ -92,7 +92,14 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
   const busy = !connected || pending !== null || running || providerBusy;
   const disabled = !allowed || busy;
   const version = config?.environment.serverVersion;
-  const checkedRelease = release?.fromVersion === version ? release : null;
+  // fincke: a host announcing a newer staged desktop build offers it w/o a release lookup
+  const hostAppUpdate = config?.hostAppUpdate ?? null;
+  const checkedRelease =
+    hostAppUpdate !== null && version !== undefined
+      ? { fromVersion: version, targetVersion: hostAppUpdate.availableVersion }
+      : release?.fromVersion === version
+        ? release
+        : null;
   const capabilities = config?.environment.capabilities;
 
   async function run(label: string, action: () => Promise<void>) {

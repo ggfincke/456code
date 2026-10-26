@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- infra/fincke-stage-update/dev.fincke.456code-stage-update.plist -->
+<!-- macOS LaunchAgent that stages the latest green origin/main build every 15 minutes -->
+<!-- Install with __HOME__ replaced; see docs/operations/release.md#staged-updates. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.fincke.456code-stage-update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>git -C "$STAGER" fetch --quiet origin main &amp;&amp; git -C "$STAGER" checkout --quiet --detach origin/main &amp;&amp; exec node "$STAGER/scripts/fincke-stage-update.ts"</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>STAGER</key>
+    <string>__HOME__/Projects/Applications/456code-stager</string>
+    <key>PATH</key>
+    <string>__HOME__/.local/share/mise/shims:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/456code-stage-update.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/456code-stage-update.log</string>
+</dict>
+</plist>

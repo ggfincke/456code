@@ -1768,6 +1768,8 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
      */
     environmentThemes: Schema.optional(Schema.Boolean),
     usageLimitSources: Schema.optional(Schema.Boolean),
+    /** fincke: opt into `hostAppUpdateUpdated`, gated like the theme stream above. */
+    hostAppUpdate: Schema.optional(Schema.Boolean),
     /**
      * Whether this client answers `/usage-limits` itself. The server injects
      * that command into provider catalogs only for such clients; an older
