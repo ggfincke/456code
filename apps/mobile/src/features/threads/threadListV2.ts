@@ -269,6 +269,8 @@ export interface ThreadListV2Layout {
   readonly listedSettledThreads: ReadonlyArray<EnvironmentThreadShell>;
   readonly workingCount: number;
   readonly workingShelfHeaderIndex: number | null;
+  /** fincke: Working sits between pinned and active, so active rows start here. */
+  readonly workingShelfEndIndex: number | null;
   readonly snoozedCount: number;
   readonly snoozedShelfHeaderIndex: number | null;
   readonly settledCount: number;
@@ -428,6 +430,7 @@ export function buildThreadListV2ListItems(input: {
   readonly workingCount?: number;
   readonly workingShelfExpanded?: boolean;
   readonly workingShelfHeaderIndex?: number | null;
+  readonly workingShelfEndIndex?: number | null;
   readonly snoozedCount?: number;
   readonly snoozedShelfExpanded?: boolean;
   readonly snoozedShelfHeaderIndex?: number | null;
@@ -492,9 +495,12 @@ export function buildThreadListV2ListItems(input: {
   const settledCount = input.settledCount ?? 0;
   const settledShelfHeaderIndex = input.settledShelfHeaderIndex ?? null;
   const snoozedEnd = settledShelfHeaderIndex ?? threadItems.length;
-  const workingEnd = snoozedShelfHeaderIndex ?? snoozedEnd;
-  const activeEnd = workingShelfHeaderIndex ?? workingEnd;
-  const result: ThreadListV2ListItem[] = [...pendingItems, ...threadItems.slice(0, activeEnd)];
+  const activeEnd = snoozedShelfHeaderIndex ?? snoozedEnd;
+  // fincke: order is pinned, Working shelf, active; w/o a shelf pinned & active are contiguous
+  const pinnedEnd = workingShelfHeaderIndex ?? 0;
+  const activeStart =
+    workingShelfHeaderIndex === null ? 0 : (input.workingShelfEndIndex ?? workingShelfHeaderIndex);
+  const result: ThreadListV2ListItem[] = [...pendingItems, ...threadItems.slice(0, pinnedEnd)];
   const shelfDisabled = input.shelfPreferencesLoading === true;
   if (workingShelfHeaderIndex !== null && workingCount > 0) {
     result.push({
@@ -504,8 +510,9 @@ export function buildThreadListV2ListItems(input: {
       expanded: input.workingShelfExpanded === true,
       disabled: shelfDisabled,
     });
-    result.push(...threadItems.slice(workingShelfHeaderIndex, workingEnd));
+    result.push(...threadItems.slice(workingShelfHeaderIndex, activeStart));
   }
+  result.push(...threadItems.slice(activeStart, activeEnd));
   if (snoozedShelfHeaderIndex !== null && snoozedCount > 0) {
     result.push({
       type: "v2-snoozed-shelf",
@@ -700,6 +707,7 @@ export function buildThreadListV2Items(input: {
       listedSettledThreads: [],
       workingCount: 0,
       workingShelfHeaderIndex: null,
+      workingShelfEndIndex: null,
       snoozedCount: 0,
       snoozedShelfHeaderIndex: null,
       settledCount: 0,
@@ -769,7 +777,9 @@ export function buildThreadListV2Items(input: {
       isLast: false,
     });
   }
-  for (const thread of orderedActive) {
+  // fincke: the Working shelf sits below pinned threads and above the active list
+  const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
+  for (const thread of visibleWorking) {
     items.push({
       thread,
       variant: "card",
@@ -779,8 +789,8 @@ export function buildThreadListV2Items(input: {
       isLast: false,
     });
   }
-  const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
-  for (const thread of visibleWorking) {
+  const workingShelfEndIndex = workingShelfHeaderIndex === null ? null : items.length;
+  for (const thread of orderedActive) {
     items.push({
       thread,
       variant: "card",
@@ -822,6 +832,7 @@ export function buildThreadListV2Items(input: {
     listedSettledThreads: listedSettled,
     workingCount: orderedWorking.length,
     workingShelfHeaderIndex,
+    workingShelfEndIndex,
     snoozedCount: orderedSnoozed.length,
     snoozedShelfHeaderIndex,
     settledCount: settledTotal,
