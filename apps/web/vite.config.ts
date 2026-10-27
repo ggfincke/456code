@@ -319,12 +319,23 @@ export default defineConfig(() => {
     },
     resolve: {
       tsconfigPaths: true,
-      alias: {
-        "@betteroffice/fonts-cjk": new URL(
-          "./src/components/files/office/fonts-cjk.ts",
-          import.meta.url,
-        ).pathname,
-      },
+      alias: [
+        {
+          find: "@betteroffice/fonts-cjk",
+          replacement: new URL("./src/components/files/office/fonts-cjk.ts", import.meta.url)
+            .pathname,
+        },
+        // fincke: hugeicons free glyphs w/ lucide fallback. exact-match regexes, so the shims'
+        // own imports of the real lucide entry files are not re-aliased.
+        {
+          find: /^lucide-react$/,
+          replacement: new URL("./src/fincke/icons/lucide-react.ts", import.meta.url).pathname,
+        },
+        {
+          find: /^lucide$/,
+          replacement: new URL("./src/fincke/icons/lucide.ts", import.meta.url).pathname,
+        },
+      ],
       dedupe: ["react", "react-dom"],
     },
     experimental: {

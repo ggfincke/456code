@@ -102,6 +102,10 @@
         "src/components/LegacySidebar.tsx",
         "src/components/sidebar/SidebarThreadRow.tsx",
         "src/components/sidebar/SidebarDraftBlock.tsx",
+        // vite.config.ts aliases lucide-react and lucide to these generated shims
+        "src/fincke/icons/lucide-react.ts",
+        "src/fincke/icons/lucide.ts",
+        "scripts/generate-hugeicons-shims.ts",
       ],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
