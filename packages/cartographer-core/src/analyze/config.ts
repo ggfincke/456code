@@ -189,7 +189,6 @@ export const MAX_RUNTIMES = 6;
 export const MAX_RUNTIME_ROOTS = 8;
 const KEBAB_CASE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // C0/C1 control characters incl. NUL, excluding ordinary whitespace handling
-// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 
 function parseRule(rule: unknown, index: number, field: "groups" | "systems"): SystemRule {

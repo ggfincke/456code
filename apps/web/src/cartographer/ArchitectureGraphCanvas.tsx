@@ -558,6 +558,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
     ),
   };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Observe the viewport element's size, which only exists after mount.
   useEffect(() => {
     const element = viewportRef.current;
     if (element === null) return;
@@ -576,6 +577,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
     return observeResize(element, measure);
   }, []);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Fit the camera once per scene and reclamp it, which needs the viewport the resize observer measured.
   useEffect(() => {
     if (viewport.width === 0 || viewport.height === 0 || props.nodes.length === 0) return;
 
@@ -637,6 +639,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
     viewport,
   ]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Report the committed camera, including effect-driven fits, so the panel can restore it after the source view.
   useEffect(() => {
     if (viewport.width === 0 || viewport.height === 0 || fittedSceneRef.current !== sceneIdentity)
       return;

@@ -13,7 +13,7 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   normalizeModelSlug,
 } from "@t3tools/shared/model";
-import { BrainIcon, RotateCcwIcon, SparklesIcon, ZapIcon } from "lucide-react";
+import { BrainIcon, GaugeIcon, RotateCcwIcon, SparklesIcon, ZapIcon } from "lucide-react";
 import { type ComponentProps, memo, type ReactNode, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -204,7 +204,6 @@ export const EffortPicker = memo(function EffortPicker(props: ComponentProps<typ
     model;
   const isCodexStyle = provider === "codex";
   const chipUltra = level?.ultra === true;
-  const ChipIcon = chipUltra ? SparklesIcon : BrainIcon;
 
   return (
     <Popover
@@ -244,11 +243,19 @@ export const EffortPicker = memo(function EffortPicker(props: ComponentProps<typ
                 className="fill-current text-(--fincke-yellow,var(--warning))"
               />
             ) : null}
-            <ComposerControlIcon
-              icon={ChipIcon}
-              size={size}
-              className={chipUltra ? "text-current" : undefined}
-            />
+            {/* the redesign swaps TraitsPicker's brain for a gauge; ultra keeps its sparkle */}
+            {chipUltra ? (
+              <ComposerControlIcon icon={SparklesIcon} size={size} className="text-current" />
+            ) : (
+              <>
+                <ComposerControlIcon icon={BrainIcon} size={size} className="redesign:hidden" />
+                <ComposerControlIcon
+                  icon={GaugeIcon}
+                  size={size}
+                  className="hidden redesign:block"
+                />
+              </>
+            )}
             <span data-composer-control-label className="min-w-0 truncate">
               {level?.label ?? triggerLabel}
             </span>

@@ -11,6 +11,8 @@ import * as TestClock from "effect/testing/TestClock";
 import { makeCoralTextGeneration } from "../../../../apps/server/src/textGeneration/CoralTextGeneration.ts";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 
+const decodeCoralSettings = Schema.decodeEffect(CoralSettings);
+
 it.effect("forwards title context and preserves refinement from a real child process", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -27,7 +29,7 @@ writeFileSync(process.env.CORAL_TEST_PROMPT, readFileSync(args[args.indexOf("--p
 console.log(JSON.stringify({ version: 1, status: "completed", response: JSON.stringify({ title: "Repair title context", needsRefinement: true }) }));
 `,
     });
-    const settings = yield* Schema.decodeUnknownEffect(CoralSettings)({
+    const settings = yield* decodeCoralSettings({
       enabled: true,
       binaryPath,
     });

@@ -48,7 +48,7 @@ const failure = (cause: unknown): CartographerError =>
     detail: cause instanceof Error ? cause.message : "Cartographer could not complete the request.",
   });
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const config = yield* ServerConfig.ServerConfig;
@@ -60,6 +60,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
   const executable = yield* HostProcess.IsExecutable;
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
   const worker = yield* path.fromFileUrl(
     new URL(
       import.meta.url.endsWith(".ts") ? "../cartographerWorker.ts" : "./cartographerWorker.mjs",
@@ -78,7 +79,7 @@ export const make = Effect.gen(function* () {
   const spawn = async (cwd: string, args: readonly string[]) => {
     if (closed) throw new Error("The analysis service has stopped.");
     const controller = new AbortController();
-    const work = Effect.runPromise(
+    const work = runPromise(
       runner.run({
         command: process.execPath,
         args: ["--max-old-space-size=1024", worker, ...args],
@@ -218,7 +219,7 @@ export const make = Effect.gen(function* () {
         }
       });
       yield* validate;
-      validateCapture = () => Effect.runPromise(validate);
+      validateCapture = () => runPromise(validate);
     }
     return yield* attempt(() =>
       store.analyze({
@@ -228,7 +229,7 @@ export const make = Effect.gen(function* () {
         ...(validateCapture ? { validateCapture } : {}),
       }),
     );
-  });
+  }, Effect.mapError(failure));
   const get = Effect.fn("Cartographer.get")(function* (input: CartographerGetInput) {
     const task = yield* context(input.threadId);
     const manifest = input.id
@@ -238,13 +239,13 @@ export const make = Effect.gen(function* () {
     return id
       ? yield* attempt(() => store.view(input.threadId, task.root, id, true, input.query))
       : null;
-  });
+  }, Effect.mapError(failure));
   const source = Effect.fn("Cartographer.source")(function* (input: CartographerSourceInput) {
     const task = yield* context(input.threadId);
     return yield* attempt(() =>
       store.source(input.threadId, task.root, input.id, input.file, input.side),
     );
-  });
+  }, Effect.mapError(failure));
   const dependencies = Effect.fn("Cartographer.dependencies")(function* (
     input: CartographerDependenciesInput,
   ) {
@@ -261,13 +262,8 @@ export const make = Effect.gen(function* () {
       change: "unchanged" as const,
     });
     return { ...result, incoming: result.incoming.map(edge), outgoing: result.outgoing.map(edge) };
-  });
-  return CartographerService.of({
-    analyze: (input) => analyze(input).pipe(Effect.mapError(failure)),
-    get: (input) => get(input).pipe(Effect.mapError(failure)),
-    source: (input) => source(input).pipe(Effect.mapError(failure)),
-    dependencies: (input) => dependencies(input).pipe(Effect.mapError(failure)),
-  });
+  }, Effect.mapError(failure));
+  return CartographerService.of({ analyze, get, source, dependencies });
 });
 export const layer = Layer.effect(CartographerService, make).pipe(
   Layer.provide(ProcessRunner.layer),

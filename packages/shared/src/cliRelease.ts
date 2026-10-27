@@ -10,8 +10,7 @@ export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "T3CODE_RELEASE_BASE_URL";
 
 // keep local archives compatible with the upstream release assets consumed by installers
-// no darwin-x64: Node single-executables are unsupported on x64 macOS (the
-// SEA docs list macOS as arm64 only) and the binary segfaults on start.
+// node single-executables do not support darwin-x64 and segfault at startup
 const CLI_ARCHIVE_PLATFORM_KEYS = [
   "darwin-arm64",
   "linux-arm64",
@@ -29,11 +28,7 @@ export function cliArchivePlatformKey(
   return CLI_ARCHIVE_PLATFORM_KEYS.find((candidate) => candidate === key);
 }
 
-/**
- * Windows ships bsdtar in System32, which reads both formats; a Git-for-Windows
- * GNU tar earlier on PATH cannot open the zip, so the system copy is named by
- * absolute path.
- */
+/** Use System32 bsdtar on Windows; Git-for-Windows GNU tar cannot open zip archives. */
 export function cliArchiveTarCommand(
   platform: NodeJS.Platform,
   env: Readonly<Record<string, string | undefined>>,
@@ -79,17 +74,12 @@ export function cliReleaseChannelOf(version: string): CliReleaseChannel {
   return channel === "nightly" || channel === "preview" ? channel : "stable";
 }
 
-/**
- * Callers walk pages until a channel match turns up; a busy nightly train can push the newest
- * preview or stable release past any single page.
- */
+/** Page until the channel matches; nightlies can push preview/stable releases past the first page. */
 export function cliReleaseIndexPageUrl(page: number): string {
   return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
 }
 
-/**
- * Drafts are skipped because their assets are not downloadable.
- */
+/** Draft assets are not downloadable. */
 export function newestCliReleaseVersion(
   releases: ReadonlyArray<{
     readonly tag_name: string;

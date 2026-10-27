@@ -21,12 +21,19 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const desktopAppUpdate = yield* DesktopAppUpdate;
     return ServerSelfUpdate.of({
-      update: (_input, reportProgress = () => Effect.void) =>
-        desktopAppUpdate.available ? desktopAppUpdate.run(reportProgress) : disabled(),
-      commitDesktopUpdate: (requestId, onHandoffAccepted) =>
-        desktopAppUpdate.available
-          ? desktopAppUpdate.commit(requestId, onHandoffAccepted)
-          : disabled(),
+      update: Effect.fn("ServerSelfUpdate.update")(function (
+        _input,
+        reportProgress = () => Effect.void,
+      ) {
+        return desktopAppUpdate.available ? desktopAppUpdate.run(reportProgress) : disabled();
+      }),
+      commitDesktopUpdate: Effect.fn("ServerSelfUpdate.commitDesktopUpdate")(
+        function (requestId, onHandoffAccepted) {
+          return desktopAppUpdate.available
+            ? desktopAppUpdate.commit(requestId, onHandoffAccepted)
+            : disabled();
+        },
+      ),
     });
   }),
 );

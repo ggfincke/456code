@@ -2,12 +2,11 @@
 // touch controls for the plan mode chip, reasoning, and low usage
 
 import type { ProviderInteractionMode } from "@t3tools/contracts";
-import { Pressable, View } from "react-native";
+import { Pressable } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { ComposerToolbarRow, ComposerToolbarScroller } from "../components/ComposerToolbar";
 import { AppText as Text } from "../components/ui/AppText";
 import { SymbolView } from "../components/ui/AppSymbol";
-import { cn } from "../lib/cn";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 
 function UsageRing({ remaining }: { readonly remaining: number }) {
