@@ -187,7 +187,9 @@ function ThreadListV2Section(props: {
   const working = props.tone === "working";
   const sidebarPane = props.pane === "sidebar";
   const className = cn(
-    "mb-1.5 mt-4 flex-row items-center gap-2.5",
+    // fincke: the Active heading follows a row's own bottom padding, so it needs less above it
+    props.large && !props.disclosure ? "mt-1.5" : "mt-4",
+    "mb-1.5 flex-row items-center gap-2.5",
     props.pane === "sidebar" ? "px-3" : "px-5",
   );
   const content = (
@@ -242,12 +244,12 @@ function ThreadListV2Section(props: {
         disabled: props.disclosure.disabled,
         expanded: props.disclosure.expanded,
       }}
-      className={className}
       disabled={props.disclosure.disabled}
       onPress={props.disclosure.onToggle}
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
-      {content}
+      {/* fincke: layout lives on an inner View so shelf headers line up with the rows */}
+      <View className={className}>{content}</View>
     </Pressable>
   ) : (
     <View className={className}>{content}</View>
