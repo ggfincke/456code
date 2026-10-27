@@ -83,6 +83,8 @@ interface FakeProviderScenario {
   failWith?: string;
   failCause?: unknown;
   failAfterCalls?: number;
+  /** Fail only this operation, leaving the rest of the host working. */
+  failOperation?: string;
   /** Check out the pull request head from its pull ref: fast-forward only unless forced. */
   syncCheckoutWithPullHead?: boolean;
   /**
@@ -355,7 +357,9 @@ function createFakeSourceControlProvider(scenario: FakeProviderScenario = {}): {
   const record = (cwd: string, call: FakeProviderCall) =>
     Effect.suspend(() => {
       calls.push(call);
-      return scenario.failWith && calls.length > (scenario.failAfterCalls ?? 0)
+      return scenario.failWith &&
+        calls.length > (scenario.failAfterCalls ?? 0) &&
+        (scenario.failOperation === undefined || scenario.failOperation === call.operation)
         ? Effect.fail(
             new SourceControlProviderFailure({
               provider: kind,
@@ -2929,6 +2933,40 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           (call) => call.baseRefName === "master" && call.headSelector === "feature/master-default",
         ),
       ).toBe(true);
+    }),
+  );
+
+  it.effect("create_pr opens the PR another client opened while it was generating", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/raced-pr"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/raced-pr"]);
+
+      const { manager } = yield* makeManager({
+        providerScenario: {
+          failWith: "A pull request already exists for owner:feature/raced-pr.",
+          failOperation: "createChangeRequest",
+          prListSequence: [
+            [],
+            [
+              {
+                number: 77,
+                title: "Raced PR",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/77",
+                baseRefName: "main",
+                headRefName: "feature/raced-pr",
+              },
+            ],
+          ],
+        },
+      });
+      const result = yield* runStackedAction(manager, { cwd: repoDir, action: "create_pr" });
+
+      expect(result.pr.status).toBe("opened_existing");
+      expect(result.pr.number).toBe(77);
     }),
   );
 
