@@ -12,6 +12,7 @@ import {
   MessageId,
   ModelSelection,
   OrchestrationMessageContext,
+  PlanId,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -58,6 +59,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   dispatchMode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  sourceProposedPlan: Schema.optional(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
   creation: Schema.optional(QueuedThreadCreationSchema),
   createdAt: IsoDateTime,
 });
@@ -89,6 +91,8 @@ export interface QueuedThreadMessage {
   readonly interactionMode?: ProviderInteractionModeType;
   /** Captured at enqueue because draining may occur long after the tap. */
   readonly dispatchMode?: ComposerDispatchMode;
+  /** Set by the fork's Implement button so the server marks that plan implemented. */
+  readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly creation?: QueuedThreadCreation;
   readonly createdAt: string;
 }

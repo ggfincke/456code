@@ -71,6 +71,8 @@ export function SidebarDragBoundary(props: {
   label: string;
   visible: boolean;
   isDropTarget: boolean;
+  /** Outside a drag, draw a hairline in the row gap, e.g. where the Working shelf meets active. */
+  rule?: boolean;
 }) {
   return (
     <SortableSidebarMarker
@@ -78,6 +80,10 @@ export function SidebarDragBoundary(props: {
       data-testid={`sidebar-${props.marker}`}
       className="pointer-events-none relative mx-0.5 -mb-px h-0"
     >
+      {!props.visible && props.rule ? (
+        // reuses the shelf header rule; h-0 keeps the drop preview's geometry unchanged
+        <div aria-hidden className="absolute inset-x-2 -top-px h-px bg-sidebar-border/50" />
+      ) : null}
       {props.visible ? (
         <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
           <span

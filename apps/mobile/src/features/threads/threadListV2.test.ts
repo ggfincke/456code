@@ -716,7 +716,6 @@ describe("buildThreadListV2ListItems", () => {
           projectId: ProjectId.make("project-1"),
           projectTitle: undefined,
           projectCwd: undefined,
-          branch: null,
           title: "unsent",
           createdAt: NOW,
           draftKey: "new-task:unsent",
@@ -1586,7 +1585,9 @@ describe("Working section beta", () => {
       "finished-early",
     ]);
     expect(layout.workingCount).toBe(1);
-    expect(layout.workingShelfHeaderIndex).toBe(4);
+    // the collapsed shelf sits right after pinned and lists no rows
+    expect(layout.workingShelfHeaderIndex).toBe(1);
+    expect(layout.workingShelfEndIndex).toBe(1);
 
     const off = build({ workingShelfEnabled: false });
     expect(ids(off)).toContain("working");
@@ -1629,10 +1630,15 @@ describe("Working section beta", () => {
     expect(ids(layout).slice(1)).toEqual(["finished-early", "finished-late", "asks-approval"]);
   });
 
-  it("places the shelf after queued tasks and before snoozed and settled threads", () => {
+  it("places the shelf after queued tasks and pinned threads, above active", () => {
     const layout = buildThreadListV2Items({
       threads: [
         makeThread({ id: ThreadId.make("active"), title: "active" }),
+        makeThread({
+          id: ThreadId.make("pinned"),
+          title: "pinned",
+          pinnedAt: "2026-06-01T00:00:00.000Z",
+        }),
         makeThread({ id: ThreadId.make("working"), title: "working", runtime: running }),
         makeThread({
           id: ThreadId.make("snoozed"),
@@ -1661,6 +1667,7 @@ describe("Working section beta", () => {
       workingCount: layout.workingCount,
       workingShelfExpanded: true,
       workingShelfHeaderIndex: layout.workingShelfHeaderIndex,
+      workingShelfEndIndex: layout.workingShelfEndIndex,
       snoozedCount: layout.snoozedCount,
       snoozedShelfExpanded: true,
       snoozedShelfHeaderIndex: layout.snoozedShelfHeaderIndex,
@@ -1677,9 +1684,10 @@ describe("Working section beta", () => {
       ),
     ).toEqual([
       "queued",
-      "active",
+      "pinned",
       "v2-working-shelf",
       "working",
+      "active",
       "v2-snoozed-shelf",
       "snoozed",
       "v2-settled-shelf",

@@ -1,5 +1,5 @@
 /* apps/web/src/fincke/backgroundWorkBanner.css */
-/* fincke ocean's composer banners: sidebar-dark strips, and kind icons on background work */
+/* fincke ocean's composer banners & background work line: sidebar-dark strips, kind icons */
 
 [data-fincke-work-icon],
 [data-fincke-work-stop-icon] {
@@ -7,27 +7,26 @@
 }
 
 /* every attached notice shares the strip surface, so restyling one banner never strands the others */
-html[data-theme-id="fincke-ocean"]
-  :is([data-composer-banner-surface], [data-slot="composer-banner-peek"]) {
+html[data-theme-id="fincke-ocean"] [data-composer-banner-surface] {
   --chat-composer-attached-surface: var(--sidebar);
 }
 
+/* the kind icon replaces upstream's dot inside the timeline line's icon box */
 html[data-theme-id="fincke-ocean"]
-  [data-slot="composer-banner-icon"]:has(> [data-fincke-work-icon])
+  [data-thread-now-line]
+  :has(> [data-fincke-work-icon])
   > :not([data-fincke-work-icon]) {
   display: none;
 }
 
-html[data-theme-id="fincke-ocean"] [data-slot="composer-banner-icon"] > [data-fincke-work-icon] {
+html[data-theme-id="fincke-ocean"] [data-thread-now-line] [data-fincke-work-icon] {
   display: block;
   width: 14px;
   height: 14px;
   color: var(--fincke-teal);
 }
 
-html[data-theme-id="fincke-ocean"]
-  [data-slot="composer-banner-icon"]
-  > [data-fincke-work-icon="waiting"] {
+html[data-theme-id="fincke-ocean"] [data-thread-now-line] [data-fincke-work-icon="waiting"] {
   color: var(--fincke-yellow);
 }
 
@@ -39,28 +38,27 @@ html[data-theme-id="fincke-ocean"] [data-fincke-work-tag] {
   color: var(--fincke-muted);
 }
 
+/* subagent links stay teal; Stop is the inline button carrying the square icon */
 html[data-theme-id="fincke-ocean"]
-  [data-composer-banner-row]:has([data-fincke-work-icon])
-  [data-slot="inline-button"] {
+  [data-thread-now-line]:has([data-fincke-work-icon])
+  [data-slot="inline-button"]:not(:has([data-fincke-work-stop-icon])) {
   color: var(--fincke-teal);
 }
 
 html[data-theme-id="fincke-ocean"]
-  [data-composer-banner-row]:has([data-fincke-work-icon])
-  [data-slot="composer-banner-actions"]
-  [data-slot="button"] {
+  [data-thread-now-line]
+  [data-slot="inline-button"]:has([data-fincke-work-stop-icon]) {
+  gap: 4px;
   color: var(--fincke-muted);
 }
 
 html[data-theme-id="fincke-ocean"]
-  [data-composer-banner-row]:has([data-fincke-work-icon])
-  [data-slot="composer-banner-actions"]
-  [data-slot="button"]:hover {
-  background: color-mix(in srgb, var(--fincke-red) 13%, transparent);
+  [data-thread-now-line]
+  [data-slot="inline-button"]:has([data-fincke-work-stop-icon]):hover {
   color: var(--fincke-red);
 }
 
-html[data-theme-id="fincke-ocean"] [data-fincke-work-stop-icon] {
+html[data-theme-id="fincke-ocean"] [data-thread-now-line] [data-fincke-work-stop-icon] {
   display: block;
   width: 9px;
   height: 9px;

@@ -114,6 +114,10 @@ function button(label: string) {
   return found!;
 }
 const click = (label: string) => act(async () => button(label).click());
+const radio = (label: string) =>
+  [...document.querySelectorAll<HTMLElement>('[role="radio"]')].find(
+    (element) => element.textContent?.trim() === label,
+  );
 const input = (selector: string) => {
   const found = document.querySelector<HTMLInputElement>(selector);
   expect(found, selector).not.toBeNull();
@@ -166,11 +170,48 @@ describe("AddProviderInstanceDialog environment routing", () => {
     });
   });
 
+  it("keeps fx and the ACP Registry under Show more", async () => {
+    setup();
+    await using _screen = await render(dialog());
+    expect(radio("Codex")).toBeDefined();
+    expect(radio("fx")).toBeUndefined();
+    expect(document.body.textContent).not.toContain("Use Kilo Code");
+
+    await click("Show more");
+    button("Use Kilo Code");
+    await act(async () => radio("fx")!.click());
+    await click("Next");
+    await click("Next");
+    await click("Add instance");
+    expect(settingsHooks.mutate).toHaveBeenCalledWith({
+      operation: "create",
+      instanceId: "fx",
+      instance: { driver: "fx", enabled: true, displayName: "fx" },
+    });
+  });
+
+  it("keeps the priority providers above the fold, with Copilot opening the registry", async () => {
+    setup();
+    await using _screen = await render(dialog());
+    const featured = [...document.querySelectorAll('[role="radio"]')].map(
+      (element) => element.textContent,
+    );
+    for (const name of ["Coral", "Codex", "Claude", "Antigravity"]) {
+      expect(featured).toContainEqual(expect.stringContaining(name));
+    }
+    expect(document.body.textContent).not.toContain("Use Kilo Code");
+
+    // the registry list has not loaded, so the tile falls back to the registry search
+    await click("GitHub Copilot");
+    button("Use Kilo Code");
+  });
+
   it("awaits an atomic create before closing and retains prepared ACP metadata", async () => {
     setup();
     const mutation = deferred<{ readonly _tag: "Success"; readonly value: unknown }>();
     settingsHooks.mutate.mockReturnValueOnce(mutation.promise);
     await using _screen = await render(dialog());
+    await click("Show more");
     await click("Use Kilo Code");
 
     expect(document.body.textContent).toContain("v4.2.0 · binary");
@@ -202,6 +243,7 @@ describe("AddProviderInstanceDialog environment routing", () => {
   it("creates a local command in the selected environment without a sign-in step", async () => {
     setup();
     await using _screen = await render(dialog());
+    await click("Show more");
     await click("Use local command");
     await click("Next");
     expect(document.body.textContent).toContain("Executable is required.");

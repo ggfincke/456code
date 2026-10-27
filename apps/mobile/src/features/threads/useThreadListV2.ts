@@ -150,6 +150,7 @@ export function useThreadListV2(input: {
     workingCount: layout.workingCount,
     workingShelfExpanded: input.workingShelfExpanded,
     workingShelfHeaderIndex: layout.workingShelfHeaderIndex,
+    workingShelfEndIndex: layout.workingShelfEndIndex,
     snoozedCount: layout.snoozedCount,
     snoozedShelfExpanded: input.snoozedShelfExpanded,
     snoozedShelfHeaderIndex: layout.snoozedShelfHeaderIndex,

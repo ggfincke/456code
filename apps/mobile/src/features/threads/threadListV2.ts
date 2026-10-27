@@ -269,6 +269,8 @@ export interface ThreadListV2Layout {
   readonly listedSettledThreads: ReadonlyArray<EnvironmentThreadShell>;
   readonly workingCount: number;
   readonly workingShelfHeaderIndex: number | null;
+  /** fincke: Working sits between pinned and active, so active rows start here. */
+  readonly workingShelfEndIndex: number | null;
   readonly snoozedCount: number;
   readonly snoozedShelfHeaderIndex: number | null;
   readonly settledCount: number;
@@ -287,6 +289,8 @@ export interface ThreadListV2ThreadListItem {
   readonly timeLabel: string;
   readonly snoozePresetMinute: string | undefined;
   readonly showTrailingDivider: boolean;
+  /** fincke: The first active row draws the hairline that closes the Working shelf above it. */
+  readonly showWorkingEndDivider: boolean;
   /** Include queued state in item equality; outbox writes do not update thread shells. */
   readonly hasQueuedMessages: boolean;
   readonly canMoveUp: boolean;
@@ -364,6 +368,7 @@ export function threadListV2ListItemsAreEqual(
         previous.timeLabel === item.timeLabel &&
         previous.snoozePresetMinute === item.snoozePresetMinute &&
         previous.showTrailingDivider === item.showTrailingDivider &&
+        previous.showWorkingEndDivider === item.showWorkingEndDivider &&
         previous.hasQueuedMessages === item.hasQueuedMessages &&
         previous.canMoveUp === item.canMoveUp &&
         previous.canMoveDown === item.canMoveDown
@@ -428,6 +433,7 @@ export function buildThreadListV2ListItems(input: {
   readonly workingCount?: number;
   readonly workingShelfExpanded?: boolean;
   readonly workingShelfHeaderIndex?: number | null;
+  readonly workingShelfEndIndex?: number | null;
   readonly snoozedCount?: number;
   readonly snoozedShelfExpanded?: boolean;
   readonly snoozedShelfHeaderIndex?: number | null;
@@ -472,6 +478,7 @@ export function buildThreadListV2ListItems(input: {
       ),
       snoozePresetMinute,
       showTrailingDivider: false,
+      showWorkingEndDivider: false,
       hasQueuedMessages:
         queuedThreadKeys?.has(`${item.thread.environmentId}:${item.thread.id}`) === true,
       canMoveUp: move?.canMoveUp === true,
@@ -492,10 +499,14 @@ export function buildThreadListV2ListItems(input: {
   const settledCount = input.settledCount ?? 0;
   const settledShelfHeaderIndex = input.settledShelfHeaderIndex ?? null;
   const snoozedEnd = settledShelfHeaderIndex ?? threadItems.length;
-  const workingEnd = snoozedShelfHeaderIndex ?? snoozedEnd;
-  const activeEnd = workingShelfHeaderIndex ?? workingEnd;
-  const result: ThreadListV2ListItem[] = [...pendingItems, ...threadItems.slice(0, activeEnd)];
+  const activeEnd = snoozedShelfHeaderIndex ?? snoozedEnd;
+  // fincke: order is pinned, Working shelf, active; w/o a shelf pinned & active are contiguous
+  const pinnedEnd = workingShelfHeaderIndex ?? 0;
+  const activeStart =
+    workingShelfHeaderIndex === null ? 0 : (input.workingShelfEndIndex ?? workingShelfHeaderIndex);
+  const result: ThreadListV2ListItem[] = [...pendingItems, ...threadItems.slice(0, pinnedEnd)];
   const shelfDisabled = input.shelfPreferencesLoading === true;
+  let workingEndResultIndex = -1;
   if (workingShelfHeaderIndex !== null && workingCount > 0) {
     result.push({
       type: "v2-working-shelf",
@@ -504,8 +515,10 @@ export function buildThreadListV2ListItems(input: {
       expanded: input.workingShelfExpanded === true,
       disabled: shelfDisabled,
     });
-    result.push(...threadItems.slice(workingShelfHeaderIndex, workingEnd));
+    result.push(...threadItems.slice(workingShelfHeaderIndex, activeStart));
+    if (activeStart < activeEnd) workingEndResultIndex = result.length;
   }
+  result.push(...threadItems.slice(activeStart, activeEnd));
   if (snoozedShelfHeaderIndex !== null && snoozedCount > 0) {
     result.push({
       type: "v2-snoozed-shelf",
@@ -529,11 +542,20 @@ export function buildThreadListV2ListItems(input: {
   return result.map((entry, index) => {
     if (entry.type !== "v2-thread" && entry.type !== "v2-pending") return entry;
     const next = result[index + 1];
+    // the Working end hairline replaces the last working row's divider, so lines never double
     const showTrailingDivider =
-      next?.type === "v2-thread" || (next?.type === "v2-pending" && !next.showPendingDivider);
-    return showTrailingDivider === entry.showTrailingDivider
+      index + 1 !== workingEndResultIndex &&
+      (next?.type === "v2-thread" || (next?.type === "v2-pending" && !next.showPendingDivider));
+    if (entry.type === "v2-pending") {
+      return showTrailingDivider === entry.showTrailingDivider
+        ? entry
+        : { ...entry, showTrailingDivider };
+    }
+    const showWorkingEndDivider = index === workingEndResultIndex;
+    return showTrailingDivider === entry.showTrailingDivider &&
+      showWorkingEndDivider === entry.showWorkingEndDivider
       ? entry
-      : { ...entry, showTrailingDivider };
+      : { ...entry, showTrailingDivider, showWorkingEndDivider };
   });
 }
 
@@ -700,6 +722,7 @@ export function buildThreadListV2Items(input: {
       listedSettledThreads: [],
       workingCount: 0,
       workingShelfHeaderIndex: null,
+      workingShelfEndIndex: null,
       snoozedCount: 0,
       snoozedShelfHeaderIndex: null,
       settledCount: 0,
@@ -769,7 +792,9 @@ export function buildThreadListV2Items(input: {
       isLast: false,
     });
   }
-  for (const thread of orderedActive) {
+  // fincke: the Working shelf sits below pinned threads and above the active list
+  const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
+  for (const thread of visibleWorking) {
     items.push({
       thread,
       variant: "card",
@@ -779,8 +804,8 @@ export function buildThreadListV2Items(input: {
       isLast: false,
     });
   }
-  const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
-  for (const thread of visibleWorking) {
+  const workingShelfEndIndex = workingShelfHeaderIndex === null ? null : items.length;
+  for (const thread of orderedActive) {
     items.push({
       thread,
       variant: "card",
@@ -822,6 +847,7 @@ export function buildThreadListV2Items(input: {
     listedSettledThreads: listedSettled,
     workingCount: orderedWorking.length,
     workingShelfHeaderIndex,
+    workingShelfEndIndex,
     snoozedCount: orderedSnoozed.length,
     snoozedShelfHeaderIndex,
     settledCount: settledTotal,

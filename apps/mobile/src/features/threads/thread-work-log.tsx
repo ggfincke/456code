@@ -521,6 +521,7 @@ export function ThreadWorkLog(props: ThreadWorkLogProps) {
         environmentId={props.environmentId}
         workspaceRoot={props.workspaceRoot}
         markdown={plan.markdown}
+        planId={plan.planId}
         renderMarkdown={props.renderReasoning}
       />
     );

@@ -10,6 +10,7 @@ import {
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
+  ListTodoIcon,
   MessageCircleIcon,
   SearchIcon,
   SmartphoneIcon,
@@ -36,6 +37,7 @@ export type WorkEntryIconName =
   | "brain"
   | "browser"
   | "check"
+  | "list-todo"
   | "circle-alert"
   | "computer"
   | "code"
@@ -245,6 +247,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <img src="/favicon-32x32.png" alt="" className={className} />;
     case "check":
       return <CheckIcon className={className} aria-hidden />;
+    case "list-todo":
+      return <ListTodoIcon className={className} aria-hidden />;
     case "circle-alert":
       return <CircleAlertIcon className={className} aria-hidden />;
     case "eye":
