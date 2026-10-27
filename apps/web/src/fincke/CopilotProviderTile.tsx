@@ -61,6 +61,11 @@ export function CopilotProviderTile({
       className={TILE_CLASS_NAME}
       disabled={alreadyAdded || registry.preparingId !== null}
       onClick={() => void handleClick()}
+      // the tile sits inside the provider RadioGroup; keep its arrow-key roving from picking a
+      // radio while this plain button has focus
+      onKeyDown={(event) => {
+        if (event.key.startsWith("Arrow")) event.stopPropagation();
+      }}
     >
       <ProviderInstanceIcon
         driverKind={ACP_REGISTRY_DRIVER_KIND}
