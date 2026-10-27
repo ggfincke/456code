@@ -118,32 +118,16 @@ export function ImplementPlanButton(props: { readonly planId: PlanId }) {
     inFlight.current = true;
     setImplementing(true);
     clearThreadComposerError(threadKey);
-    try {
-      await enqueueThreadOutboxMessage({
-        environmentId: thread.environmentId,
-        threadId: thread.id,
-        messageId: MessageId.make(metadata.messageId),
-        commandId: CommandId.make(metadata.commandId),
-        text: buildPlanImplementationPrompt(plan.planMarkdown),
-        attachments: [],
-        modelSelection: thread.modelSelection,
-        runtimeMode: thread.runtimeMode,
-        interactionMode: "default",
-        sourceProposedPlan: { threadId: thread.id, planId: plan.id },
-        createdAt: metadata.createdAt,
-      });
+    const failure = await queueImplementation(thread, plan, metadata);
+    if (failure === null) {
       // leaving plan mode clears the composer's Plan chip, as web does after Implement
       input.onUpdateInteractionMode?.("default");
       input.onSent();
-    } catch (error) {
-      setThreadComposerError(
-        threadKey,
-        error instanceof Error ? error.message : "Failed to save the queued message.",
-      );
-    } finally {
-      inFlight.current = false;
-      setImplementing(false);
+    } else {
+      setThreadComposerError(threadKey, failure);
     }
+    inFlight.current = false;
+    setImplementing(false);
   };
 
   return (
@@ -154,4 +138,31 @@ export function ImplementPlanButton(props: { readonly planId: PlanId }) {
       onPress={() => void implement()}
     />
   );
+}
+
+// the try/catch lives outside the component: the React Compiler can't lower conditionals or
+// finally clauses inside one. resolves to an error message, or null once the message is queued
+async function queueImplementation(
+  thread: EnvironmentThreadShell,
+  plan: { readonly id: PlanId; readonly planMarkdown: string },
+  metadata: ReturnType<typeof makeQueuedMessageMetadata>,
+): Promise<string | null> {
+  try {
+    await enqueueThreadOutboxMessage({
+      environmentId: thread.environmentId,
+      threadId: thread.id,
+      messageId: MessageId.make(metadata.messageId),
+      commandId: CommandId.make(metadata.commandId),
+      text: buildPlanImplementationPrompt(plan.planMarkdown),
+      attachments: [],
+      modelSelection: thread.modelSelection,
+      runtimeMode: thread.runtimeMode,
+      interactionMode: "default",
+      sourceProposedPlan: { threadId: thread.id, planId: plan.id },
+      createdAt: metadata.createdAt,
+    });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "Failed to save the queued message.";
+  }
 }
