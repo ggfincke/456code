@@ -191,12 +191,9 @@ export async function captureTree(
   return first;
 }
 
-// stat-only fingerprint of the working tree: no file content is read, so a freshness check
-// costs one git listing plus one lstat per file instead of re-reading up to 64 MiB twice.
-// the store takes it before captureTree, so an edit racing the capture reads as stale rather
-// than silently current. HEAD is part of it because the capture identity moves with HEAD even
-// when no file does. ctime rides along because cp -p and rsync -t style writes replace
-// content while keeping mtime.
+// stat-only fingerprint: one git listing plus one lstat per file, no content reads. taken
+// before captureTree so a racing edit reads as stale; HEAD is included because the capture
+// identity moves with it, and ctime because cp -p / rsync -t keep mtime on new content
 export async function fingerprintTree(
   root: string,
   exclude: readonly string[] = [],

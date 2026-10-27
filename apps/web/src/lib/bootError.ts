@@ -1,6 +1,8 @@
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
 
-import { APP_BASE_NAME } from "../branding";
+// the boot screen builds without the app's modules (see bundledDev.test.ts), so the
+// name is spelled out instead of imported from ../branding
+const APP_BASE_NAME = "456code";
 
 const FALLBACK_TRIAGE_COMMAND = "npx t3 triage";
 const ISSUE_URL = "https://github.com/ggfincke/456code/issues/new";

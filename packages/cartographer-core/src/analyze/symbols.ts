@@ -190,7 +190,7 @@ function collectFromStatement(
     const def = clampText(statement.expression.getText(sourceFile), MAX_DEF_LENGTH);
     const detail: ExportDetail = {
       kind: "default",
-      ...(leadingComments(statement, sourceFile) ?? {}),
+      ...leadingComments(statement, sourceFile),
     };
     if (def !== undefined) {
       detail.def = def;
@@ -506,7 +506,7 @@ function declarationDetail(
   const def = clampText(statement.getText(sourceFile), MAX_DEF_LENGTH);
   const detail: ExportDetail = {
     kind,
-    ...(leadingComments(statement, sourceFile) ?? {}),
+    ...leadingComments(statement, sourceFile),
   };
   if (signature !== undefined) {
     detail.signature = signature;
