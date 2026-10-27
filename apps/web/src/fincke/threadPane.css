@@ -104,6 +104,8 @@ html[data-theme-id="fincke-ocean"] [data-slot="fincke-plan-chip"] svg {
 html[data-theme-id="fincke-ocean"] {
   --fincke-send-base: var(--fincke-teal);
   --fincke-send-wave: color-mix(in srgb, #ffffff 55%, var(--fincke-teal));
+  --fincke-send-back: #508f8a;
+  --fincke-send-highlight: #edf9f6;
 }
 
 html[data-theme-id="fincke-ocean"]

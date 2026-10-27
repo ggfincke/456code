@@ -1,13 +1,13 @@
 // apps/mobile/src/fincke/FinckeWaveArt.tsx
 // renders the shared fincke ribbons in native svg
 
-import { useId } from "react";
-import Svg, { Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
+import Svg, { Path, Rect } from "react-native-svg";
 import {
   FINCKE_WAVE_BACK,
   FINCKE_WAVE_BUTTON_FIELD,
   FINCKE_WAVE_FIELD,
   FINCKE_WAVE_FRONT,
+  FINCKE_WAVE_HIGHLIGHT_OFFSET,
   waveViewBox,
 } from "@t3tools/shared/fincke-wave";
 
@@ -23,8 +23,6 @@ export function FinckeWaveArt({
   readonly compact?: boolean;
   readonly slice?: boolean;
 }) {
-  const id = useId().replaceAll(":", "");
-  const back = `${id}-back`;
   const field = compact ? FINCKE_WAVE_BUTTON_FIELD : FINCKE_WAVE_FIELD;
   const base = compact ? "#80cbc4" : FINCKE_WAVE_FIELD_COLOR;
   const wave = compact ? "#c6e8e4" : "#80cbc4";
@@ -39,22 +37,14 @@ export function FinckeWaveArt({
       preserveAspectRatio={slice ? "xMinYMid slice" : "none"}
       viewBox={waveViewBox(field)}
     >
-      <Defs>
-        <LinearGradient
-          id={back}
-          x1="721.524"
-          y1="0.0119269"
-          x2="716.661"
-          y2="310.697"
-          gradientUnits="userSpaceOnUse"
-        >
-          <Stop offset="0.1" stopColor={wave} />
-          <Stop offset="0.9" stopColor={base} stopOpacity={0.15} />
-        </LinearGradient>
-      </Defs>
       <Rect {...field} fill={base} />
-      <Path d={FINCKE_WAVE_BACK} fill={`url(#${back})`} />
+      <Path d={FINCKE_WAVE_BACK} fill="#508f8a" />
       <Path d={FINCKE_WAVE_FRONT} fill={wave} />
+      <Path
+        d={FINCKE_WAVE_FRONT}
+        transform={`translate(0 ${FINCKE_WAVE_HIGHLIGHT_OFFSET})`}
+        fill={compact ? "#edf9f6" : "#b7e4dd"}
+      />
     </Svg>
   );
 }

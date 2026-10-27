@@ -1,28 +1,20 @@
 /* apps/web/src/fincke/waveBackdrop.css */
-/* keeps the fincke wave a solid band in the sidebar header instead of a grey haze */
+/* keeps all three fincke ribbons solid across the sidebar header */
 
-/* the wave is a solid band on fincke.dev. the default stage fade starts at 28% and
-   desaturates it, so the band stays full color across the header and blends only below
-   the front ribbon's lowest point (restored from the pre thin-fork sidebar) */
 .fincke-wave-backdrop {
   height: calc(var(--workspace-topbar-height) + 1.25rem);
-  mask-image: linear-gradient(to bottom, black 0%, black 90%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, black 0%, black 90%, transparent 100%);
+  mask-image: none;
+  -webkit-mask-image: none;
 }
 
 .fincke-wave-backdrop::after {
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 84%,
-    color-mix(in srgb, var(--stage-fade) 40%, transparent) 92%,
-    color-mix(in srgb, var(--stage-fade) 80%, transparent) 96%,
-    var(--stage-fade) 100%
-  );
+  background: none;
 }
 
 /* fincke.dev's --bg and --accent */
 html[data-theme-id="fincke-ocean"] {
   --fincke-wave-field: #0f111a;
   --fincke-wave-accent: #80cbc4;
+  --fincke-wave-back: #508f8a;
+  --fincke-wave-highlight: #b7e4dd;
 }
