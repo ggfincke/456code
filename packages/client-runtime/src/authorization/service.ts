@@ -547,11 +547,9 @@ export const make = Effect.gen(function* () {
     authorizeDpop: Effect.fn("environment.authorization")(function (input) {
       return authorizeDpop(input);
     }),
-    authorizeDpopHttp: (input) =>
-      getDpopToken(input).pipe(
-        Effect.map(({ token }) => httpAuthorization(token)),
-        Effect.withSpan("environment.authorization.http"),
-      ),
+    authorizeDpopHttp: Effect.fn("environment.authorization.http")(function (input) {
+      return getDpopToken(input).pipe(Effect.map(({ token }) => httpAuthorization(token)));
+    }),
   });
 });
 

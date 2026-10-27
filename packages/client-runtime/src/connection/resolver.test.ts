@@ -223,7 +223,7 @@ describe("ConnectionResolver", () => {
         Effect.provideService(
           ClientCapabilities.CloudSession,
           ClientCapabilities.CloudSession.of({
-            identity: Effect.succeed(Option.some({ accountId: "user_connect" })),
+            identity: Effect.succeedSome({ accountId: "user_connect" }),
             clerkToken: Effect.succeed("clerk-token"),
           }),
         ),

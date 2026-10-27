@@ -1,4 +1,4 @@
-// apps/web/src/components/chat/useComposerCommandKey.ts
+// apps/web/src/components/chat/composerCommandKey.ts
 // routes composer editor keys to send, menu, and history actions
 import type { ChatComposerProps } from "./ChatComposer";
 import { type ComposerCommandItem } from "./ComposerCommandMenu";

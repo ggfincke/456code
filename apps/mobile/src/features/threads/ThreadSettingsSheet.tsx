@@ -349,12 +349,14 @@ function ThreadSettingsSessionProvider(
   const parentNavigation =
     useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
   const optionEditsActive = useRef(true);
+  // oxlint-disable-next-line t3code/react-effect-budget -- option edits stop once the sheet unmounts; mount lifetime lives only in an effect.
   useLayoutEffect(() => {
     optionEditsActive.current = true;
     return () => {
       optionEditsActive.current = false;
     };
   }, []);
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to the parent navigator's close transition, an external event source.
   useEffect(
     () =>
       parentNavigation.addListener("transitionStart", (event) => {
@@ -1151,6 +1153,7 @@ function ThreadEffortSlider(props: {
       readLive,
     ),
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- native slider events read the latest props from a ref, which render must not write.
   useLayoutEffect(() => {
     live.current = {
       identity: props.identity,
@@ -1158,6 +1161,7 @@ function ThreadEffortSlider(props: {
       onCommit: props.onCommit,
     };
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- the preview session owns native slider state and must be disposed with the row.
   useLayoutEffect(() => {
     // strict mode replays mount effects while retaining this preview session.
     selection.activate();

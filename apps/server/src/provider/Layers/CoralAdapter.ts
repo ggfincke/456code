@@ -123,7 +123,7 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
   });
   return ProviderAdapter.ProviderAdapterV2.of({
     ...adapter,
-    openSession: (input) =>
+    openSession: Effect.fn("CoralAdapterV2.openSession")((input) =>
       validatePolicy(input.runtimePolicy).pipe(
         Effect.andThen(
           adapter.openSession({
@@ -179,5 +179,6 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
             ),
         })),
       ),
+    ),
   });
 });

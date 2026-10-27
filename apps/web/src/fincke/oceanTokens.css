@@ -32,6 +32,27 @@ html[data-theme-id="fincke-ocean"]
   color: var(--fincke-teal);
 }
 
-html[data-theme-id="fincke-ocean"] [data-slot="composer-shell"]:focus-within {
+/* the new design keeps the composer outline neutral on focus, so the teal edge is classic-only */
+html[data-theme-id="fincke-ocean"]:not([data-redesign]) [data-slot="composer-shell"]:focus-within {
   --chat-composer-outline: color-mix(in srgb, var(--fincke-teal) 33%, transparent);
+}
+
+/* new design: action & state color (switches, checks, sliders, merge, NEW) is t3 blue by default;
+   ocean's own action color is its teal, not the dark message-action surface. the non-empty
+   marker outranks index.css's theme role mapping regardless of stylesheet order */
+html[data-redesign][data-theme-id="fincke-ocean"]:not([data-theme-id=""]) {
+  --primary: var(--fincke-teal);
+  --primary-foreground: var(--background);
+}
+
+/* new design diff marks: modified is a dimmed material blue & added is material green,
+   unless the user picked the blue/orange scheme */
+html[data-redesign][data-theme-id="fincke-ocean"]:not([data-diff-color-scheme="blue-orange"]) {
+  --diff-modified-icon: color-mix(in srgb, var(--fincke-blue) 65%, transparent);
+  --diff-added-icon: var(--fincke-green);
+}
+
+/* new design sidebar metadata steps down to a neutral gray; ocean keeps its blue-gray label */
+html[data-redesign][data-theme-id="fincke-ocean"] [data-app-sidebar] {
+  --secondary-label: var(--app-theme-secondary-label);
 }

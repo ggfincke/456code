@@ -311,6 +311,7 @@ function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
   ) : null;
 
   const list = (
+    // oxlint-disable-next-line t3code/require-registered-list-scroll -- also renders in sheets and inside a horizontal ScrollView when lines do not wrap; matches upstream's unregistered line list.
     <LegendList
       key={`${props.path}:${targetIndex}`}
       className="flex-1"
