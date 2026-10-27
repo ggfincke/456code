@@ -289,6 +289,8 @@ export interface ThreadListV2ThreadListItem {
   readonly timeLabel: string;
   readonly snoozePresetMinute: string | undefined;
   readonly showTrailingDivider: boolean;
+  /** fincke: The first active row draws the hairline that closes the Working shelf above it. */
+  readonly showWorkingEndDivider: boolean;
   /** Include queued state in item equality; outbox writes do not update thread shells. */
   readonly hasQueuedMessages: boolean;
   readonly canMoveUp: boolean;
@@ -366,6 +368,7 @@ export function threadListV2ListItemsAreEqual(
         previous.timeLabel === item.timeLabel &&
         previous.snoozePresetMinute === item.snoozePresetMinute &&
         previous.showTrailingDivider === item.showTrailingDivider &&
+        previous.showWorkingEndDivider === item.showWorkingEndDivider &&
         previous.hasQueuedMessages === item.hasQueuedMessages &&
         previous.canMoveUp === item.canMoveUp &&
         previous.canMoveDown === item.canMoveDown
@@ -475,6 +478,7 @@ export function buildThreadListV2ListItems(input: {
       ),
       snoozePresetMinute,
       showTrailingDivider: false,
+      showWorkingEndDivider: false,
       hasQueuedMessages:
         queuedThreadKeys?.has(`${item.thread.environmentId}:${item.thread.id}`) === true,
       canMoveUp: move?.canMoveUp === true,
@@ -502,6 +506,7 @@ export function buildThreadListV2ListItems(input: {
     workingShelfHeaderIndex === null ? 0 : (input.workingShelfEndIndex ?? workingShelfHeaderIndex);
   const result: ThreadListV2ListItem[] = [...pendingItems, ...threadItems.slice(0, pinnedEnd)];
   const shelfDisabled = input.shelfPreferencesLoading === true;
+  let workingEndResultIndex = -1;
   if (workingShelfHeaderIndex !== null && workingCount > 0) {
     result.push({
       type: "v2-working-shelf",
@@ -511,6 +516,7 @@ export function buildThreadListV2ListItems(input: {
       disabled: shelfDisabled,
     });
     result.push(...threadItems.slice(workingShelfHeaderIndex, activeStart));
+    if (activeStart < activeEnd) workingEndResultIndex = result.length;
   }
   result.push(...threadItems.slice(activeStart, activeEnd));
   if (snoozedShelfHeaderIndex !== null && snoozedCount > 0) {
@@ -536,11 +542,20 @@ export function buildThreadListV2ListItems(input: {
   return result.map((entry, index) => {
     if (entry.type !== "v2-thread" && entry.type !== "v2-pending") return entry;
     const next = result[index + 1];
+    // the Working end hairline replaces the last working row's divider, so lines never double
     const showTrailingDivider =
-      next?.type === "v2-thread" || (next?.type === "v2-pending" && !next.showPendingDivider);
-    return showTrailingDivider === entry.showTrailingDivider
+      index + 1 !== workingEndResultIndex &&
+      (next?.type === "v2-thread" || (next?.type === "v2-pending" && !next.showPendingDivider));
+    if (entry.type === "v2-pending") {
+      return showTrailingDivider === entry.showTrailingDivider
+        ? entry
+        : { ...entry, showTrailingDivider };
+    }
+    const showWorkingEndDivider = index === workingEndResultIndex;
+    return showTrailingDivider === entry.showTrailingDivider &&
+      showWorkingEndDivider === entry.showWorkingEndDivider
       ? entry
-      : { ...entry, showTrailingDivider };
+      : { ...entry, showTrailingDivider, showWorkingEndDivider };
   });
 }
 

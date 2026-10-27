@@ -3056,6 +3056,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 label="Active"
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
+                                rule={workingThreads.length > 0 && activeThreads.length > 0}
                               />,
                             );
                             break;

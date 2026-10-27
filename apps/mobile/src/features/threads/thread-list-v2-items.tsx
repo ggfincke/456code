@@ -609,6 +609,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly pane?: "screen" | "sidebar";
   readonly sidebarLayout?: SidebarRowLayout;
   readonly showTrailingDivider?: boolean;
+  // fincke: hairline above the first active row, closing the Working shelf
+  readonly showWorkingEndDivider?: boolean;
   readonly selected?: boolean;
   readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
@@ -1517,11 +1519,22 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </RowPressable>
     );
 
+  // same inset & color as the shelf header rule; sits outside the swipeable so it stays put
+  const workingEndDivider = props.showWorkingEndDivider ? (
+    <View className={cn("h-px", sidebarPane ? "mx-3 bg-drawer-border" : "mx-5 bg-border")} />
+  ) : null;
+
   if (!canOperateThread)
-    return <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>;
+    return (
+      <>
+        {workingEndDivider}
+        <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>
+      </>
+    );
 
   return (
     <View collapsable={false}>
+      {workingEndDivider}
       {customSnoozeOpen && (
         <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
       )}
