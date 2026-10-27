@@ -9,7 +9,7 @@ import { useAppearancePreferences } from "../features/settings/appearance/Appear
 import { FINCKE_WAVE_FIELD_COLOR, FinckeWaveArt } from "./FinckeWaveArt";
 
 // the band below the native title row, close to desktop's h-20 sidebar header
-const BAND_HEIGHT = 72;
+export const BAND_HEIGHT = 72;
 // field color above the band, so pulling the list past its top keeps revealing the wave's field
 const OVERSCROLL_FIELD = 600;
 // like desktop's stage fade, the band stays solid and only its last stretch blends into the list

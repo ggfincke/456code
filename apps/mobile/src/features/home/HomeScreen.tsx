@@ -16,6 +16,11 @@ import {
 import { FinckeProjectHeaderRow, FinckeProjectMoreRow } from "../../fincke/ProjectSidebarRows";
 import { SidebarViewToggle } from "../../fincke/SidebarViewToggle";
 import { useSidebarView } from "../../fincke/use-sidebar-view";
+import {
+  FinckeWaveClearedContext,
+  useFinckeWaveCleared,
+  withFinckeWaveCleared,
+} from "../../fincke/wave-header-edge";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   type EnvironmentProject,
@@ -226,10 +231,12 @@ function HomeTopContentSpacer() {
 function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
   const primaryColumn = use(NativePrimaryColumnContext);
   const { themeId } = useAppearancePreferences();
+  const waveCleared = use(FinckeWaveClearedContext);
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
   // fincke: the ocean wave sits behind the list's header in every layout (compact, Duo
-  // panes, sidebar), so UIKit's edge dimming would cut a hard line through it
-  const waveBehindHeader = themeId === "fincke-ocean";
+  // panes, sidebar), so UIKit's edge dimming would cut a hard line through it. once the
+  // wave scrolls away the effect returns as the backing rows need under the title
+  const waveBehindHeader = themeId === "fincke-ocean" && !waveCleared;
 
   // Register the scroll view explicitly; layout and header siblings hide it from UIKit.
   return (
@@ -262,6 +269,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const workspace = useWorkspaceTabs();
   const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
+  const waveCleared = useFinckeWaveCleared(initialScrollOffset);
   const primaryColumn = use(NativePrimaryColumnContext);
   const contentBackground = primaryColumn ? "bg-drawer" : "bg-screen";
   const containerClassName = cn(
@@ -356,6 +364,7 @@ export function HomeScreen(props: HomeScreenProps) {
   useEffect(() => () => clearTimeout(activationTimerRef.current), []);
   const handleListScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     onFabScroll?.(event);
+    waveCleared.track(event.nativeEvent.contentOffset.y + (Platform.OS === "ios" ? insets.top : 0));
     if (workspace)
       workspace.recordScrollOffset(
         "threads",
@@ -873,7 +882,8 @@ export function HomeScreen(props: HomeScreenProps) {
     );
   }
 
-  return (
+  return withFinckeWaveCleared(
+    waveCleared.cleared,
     <View className={containerClassName}>
       <View
         className={
@@ -955,6 +965,6 @@ export function HomeScreen(props: HomeScreenProps) {
           </GestureDetector>
         </SwipeableScrollGateProvider>
       </View>
-    </View>
+    </View>,
   );
 }
