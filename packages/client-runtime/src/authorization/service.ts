@@ -218,30 +218,25 @@ export const make = Effect.gen(function* () {
       timeoutMs?: number,
       endpoint: { readonly httpBaseUrl: string; readonly wsBaseUrl: string } = token.endpoint,
     ) {
-      const ticketProof = yield* signer
-        .createProof({
-          method: "POST",
-          url: environmentEndpointUrl(endpoint.httpBaseUrl, "/api/auth/websocket-ticket"),
-          accessToken: token.accessToken,
-        })
-        .pipe(
-          Effect.mapError(
-            () =>
-              new ConnectionBlockedError({
-                reason: "configuration",
-                detail: "Could not create the websocket authorization proof.",
-              }),
-          ),
-        );
       return yield* resolveRemoteDpopWebSocketConnectionUrl({
         wsBaseUrl: endpoint.wsBaseUrl,
         httpBaseUrl: endpoint.httpBaseUrl,
         accessToken: token.accessToken,
-        dpopProof: ticketProof,
+        createProof: (proof) =>
+          signer.createProof(proof).pipe(
+            Effect.mapError(
+              () =>
+                new ConnectionBlockedError({
+                  reason: "configuration",
+                  detail: "Could not create the websocket authorization proof.",
+                }),
+            ),
+          ),
         clientMetadata: presentation.metadata,
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+      });
     },
+    Effect.provideService(HttpClient.HttpClient, httpClient),
   );
 
   const sessionChanged = () =>
@@ -549,13 +544,12 @@ export const make = Effect.gen(function* () {
 
   return RemoteEnvironmentAuthorization.of({
     authorizeBearer,
-    authorizeDpop: (input) =>
-      authorizeDpop(input).pipe(Effect.withSpan("environment.authorization")),
-    authorizeDpopHttp: (input) =>
-      getDpopToken(input).pipe(
-        Effect.map(({ token }) => httpAuthorization(token)),
-        Effect.withSpan("environment.authorization.http"),
-      ),
+    authorizeDpop: Effect.fn("environment.authorization")(function (input) {
+      return authorizeDpop(input);
+    }),
+    authorizeDpopHttp: Effect.fn("environment.authorization.http")(function (input) {
+      return getDpopToken(input).pipe(Effect.map(({ token }) => httpAuthorization(token)));
+    }),
   });
 });
 

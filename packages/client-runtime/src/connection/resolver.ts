@@ -28,9 +28,9 @@ import {
   profileMissingError,
 } from "./errors.ts";
 import {
-  GitHubRoutingPermissions,
-  gitHubRoutingConnectionKey,
-} from "./githubRoutingPermissions.ts";
+  PullRequestRoutingPermissions,
+  pullRequestRoutingConnectionKey,
+} from "./pullRequestRoutingPermissions.ts";
 import type {
   BearerConnectionTarget,
   ConnectionTarget,
@@ -242,10 +242,10 @@ const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(funct
       target: prepared.bootstrap.target,
     });
     if (
-      gitHubRoutingConnectionKey(entry) !==
-      gitHubRoutingConnectionKey({ ...entry, profile: Option.some(preparedProfile) })
+      pullRequestRoutingConnectionKey(entry) !==
+      pullRequestRoutingConnectionKey({ ...entry, profile: Option.some(preparedProfile) })
     ) {
-      const permissions = yield* GitHubRoutingPermissions;
+      const permissions = yield* PullRequestRoutingPermissions;
       yield* permissions.forget(target.environmentId);
     }
     yield* profiles.put(preparedProfile);
@@ -267,7 +267,7 @@ const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(funct
   });
 });
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const primary = yield* makePrimaryBroker();
   const bearer = yield* makeBearerBroker();

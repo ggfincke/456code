@@ -4,6 +4,4 @@ import type { ActiveTurnComposerAction } from "@t3tools/client-runtime/state/com
 
 export type FollowUpBehavior = Extract<ActiveTurnComposerAction, "queue" | "steer">;
 
-// fincke: steer by default; an explicit Settings -> Follow-ups choice still wins, and
-// agents that can't steer still queue
 export const DEFAULT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = "steer";

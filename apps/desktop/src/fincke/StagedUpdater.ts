@@ -39,6 +39,11 @@ const INSTALL_SCRIPT = {
 
 type Listener = (...args: Array<unknown>) => void;
 
+// the feed is fixed to the staged folder, so feed & channel settings have nothing to change
+const ignoreFeedSetting = Effect.fn("StagedUpdater.ignoreFeedSetting")(function () {
+  return Effect.void;
+});
+
 const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -75,16 +80,15 @@ const make = Effect.gen(function* () {
   };
 
   return ElectronUpdater.of({
-    // the feed is fixed to the staged folder, so feed & channel settings have nothing to change
-    setFeedURL: () => Effect.void,
-    setAutoDownload: () => Effect.void,
-    setAutoInstallOnAppQuit: () => Effect.void,
-    setChannel: () => Effect.void,
-    setAllowPrerelease: () => Effect.void,
+    setFeedURL: ignoreFeedSetting,
+    setAutoDownload: ignoreFeedSetting,
+    setAutoInstallOnAppQuit: ignoreFeedSetting,
+    setChannel: ignoreFeedSetting,
+    setAllowPrerelease: ignoreFeedSetting,
     allowDowngrade: Effect.succeed(false),
-    setAllowDowngrade: () => Effect.void,
-    setFullChangelog: () => Effect.void,
-    setDisableDifferentialDownload: () => Effect.void,
+    setAllowDowngrade: ignoreFeedSetting,
+    setFullChangelog: ignoreFeedSetting,
+    setDisableDifferentialDownload: ignoreFeedSetting,
     checkForUpdates: Effect.gen(function* () {
       emit("checking-for-update");
       offered = yield* readNewerStagedBuild;
@@ -139,7 +143,7 @@ const make = Effect.gen(function* () {
           }),
       });
     }),
-    on: (eventName, listener) => {
+    on: Effect.fn("StagedUpdater.on")(function (eventName, listener) {
       const untypedListener = listener as unknown as Listener;
       return Effect.acquireRelease(
         Effect.sync(() => {
@@ -152,7 +156,7 @@ const make = Effect.gen(function* () {
             listeners.get(eventName)?.delete(untypedListener);
           }),
       ).pipe(Effect.asVoid);
-    },
+    }),
   });
 });
 

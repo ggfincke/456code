@@ -2,7 +2,6 @@
 // verifies remote authorization without analytics identity sharing
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
@@ -212,6 +211,104 @@ describe("remote environment authorization", () => {
     }),
   );
 
+  it.effect("binds a DPoP client's rpc ticket to its key and proves the upgrade", () =>
+    Effect.gen(function* () {
+      const fetch = recordedFetch(
+        Response.json({ ticket: "ws-ticket", expiresAt: "2026-05-01T12:05:00.000Z" }),
+      );
+      const proofs: Array<{ method: string; url: string; accessToken: string }> = [];
+
+      const url = yield* resolveRemoteDpopWebSocketConnectionUrl({
+        wsBaseUrl: "wss://remote.example.com/",
+        httpBaseUrl: "https://remote.example.com/",
+        accessToken: "dpop-access-token",
+        createProof: (input) => {
+          proofs.push(input);
+          return Effect.succeed(`proof-${proofs.length}`);
+        },
+      }).pipe(provideRemoteHttp(fetch.fetchFn));
+
+      expectFetchCall(fetch.calls, 1, {
+        url: "https://remote.example.com/api/auth/websocket-ticket/rpc",
+        method: "POST",
+        headers: { authorization: "DPoP dpop-access-token", dpop: "proof-1" },
+      });
+      expect(proofs).toEqual([
+        {
+          method: "POST",
+          url: "https://remote.example.com/api/auth/websocket-ticket/rpc",
+          accessToken: "dpop-access-token",
+        },
+        { method: "GET", url: "https://remote.example.com/ws", accessToken: "ws-ticket" },
+      ]);
+      expect(url).toBe("wss://remote.example.com/ws?wsTicket=ws-ticket&dpop=proof-2");
+    }),
+  );
+
+  it.effect("requests the audience route even without a fallback proof", () =>
+    Effect.gen(function* () {
+      const fetch = recordedFetch(
+        Response.json({ ticket: "media-ticket", expiresAt: "2026-05-01T12:05:00.000Z" }),
+      );
+      yield* issueRemoteDpopWebSocketTicket({
+        httpBaseUrl: "https://remote.example.com/",
+        accessToken: "dpop-access-token",
+        dpopProof: "media-proof",
+        use: "media",
+      }).pipe(provideRemoteHttp(fetch.fetchFn));
+      expectFetchCall(fetch.calls, 1, {
+        url: "https://remote.example.com/api/auth/websocket-ticket/media",
+        method: "POST",
+        headers: { dpop: "media-proof" },
+      });
+    }),
+  );
+
+  it.effect("falls back to the bare ticket path on a server without the audience route", () =>
+    Effect.gen(function* () {
+      const fetch = recordedFetch(
+        Response.json({ message: "Not Found" }, { status: 404 }),
+        Response.json({ ticket: "old-ticket", expiresAt: "2026-05-01T12:05:00.000Z" }),
+      );
+      const proofs: Array<{ method: string; url: string; accessToken: string }> = [];
+
+      const url = yield* resolveRemoteDpopWebSocketConnectionUrl({
+        wsBaseUrl: "wss://remote.example.com/",
+        httpBaseUrl: "https://remote.example.com/",
+        accessToken: "dpop-access-token",
+        createProof: (input) => {
+          proofs.push(input);
+          return Effect.succeed(`proof-${proofs.length}`);
+        },
+      }).pipe(provideRemoteHttp(fetch.fetchFn));
+
+      expect(fetch.calls.map(([target]) => String(target))).toEqual([
+        "https://remote.example.com/api/auth/websocket-ticket/rpc",
+        "https://remote.example.com/api/auth/websocket-ticket",
+      ]);
+      expect(proofs).toEqual([
+        {
+          method: "POST",
+          url: "https://remote.example.com/api/auth/websocket-ticket/rpc",
+          accessToken: "dpop-access-token",
+        },
+        {
+          method: "POST",
+          url: "https://remote.example.com/api/auth/websocket-ticket",
+          accessToken: "dpop-access-token",
+        },
+        { method: "GET", url: "https://remote.example.com/ws", accessToken: "old-ticket" },
+      ]);
+      expectFetchCall(fetch.calls, 2, {
+        url: "https://remote.example.com/api/auth/websocket-ticket",
+        method: "POST",
+        headers: { dpop: "proof-2" },
+      });
+      expect(new URL(url).searchParams.get("wsTicket")).toBe("old-ticket");
+      expect(new URL(url).searchParams.get("dpop")).toBe("proof-3");
+    }),
+  );
+
   it.effect.each(["bearer", "dpop"] as const)(
     "omits analytics identity from %s websocket URLs",
     (authentication) =>
@@ -238,7 +335,7 @@ describe("remote environment authorization", () => {
                   wsBaseUrl: "wss://remote.example.com/",
                   httpBaseUrl: "https://remote.example.com/",
                   accessToken: "dpop-token",
-                  dpopProof: "ticket-proof",
+                  createProof: () => Effect.succeed("upgrade-proof"),
                   clientMetadata: {
                     surface: "mobile",
                     appVersion: "1.2.3",
@@ -251,7 +348,7 @@ describe("remote environment authorization", () => {
             Effect.provideService(
               ClientCapabilities.CloudSession,
               ClientCapabilities.CloudSession.of({
-                identity: Effect.succeed(Option.some({ accountId: "user_connect" })),
+                identity: Effect.succeedSome({ accountId: "user_connect" }),
                 clerkToken: Effect.succeed("clerk-token"),
               }),
             ),
@@ -260,6 +357,7 @@ describe("remote environment authorization", () => {
 
         expect([...url.searchParams.entries()]).toEqual([
           ["wsTicket", "ws-ticket"],
+          ...(authentication === "dpop" ? [["dpop", "upgrade-proof"]] : []),
           ["clientSurface", "mobile"],
           ["clientAppVersion", "1.2.3"],
         ]);

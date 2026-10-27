@@ -13,13 +13,13 @@
       "entry": [".coderabbit.config.ts"],
     },
     "scripts": {
-      // knip loads its preprocessor through a cli option; these other helpers run directly
-      // for native checks, worktree setup, branding, and local packaging. electron-builder
-      // loads the macOS signer by path. the release helpers stay for upstream parity even
-      // though this fork drops the release workflows that call them.
+      // knip loads its preprocessor through a cli option; native checks, worktree setup, branding
+      // and local packaging helpers run directly. electron-builder loads the macOS signer and
+      // mobile-e2e.ts runs agent-device's CLI by path. release helpers stay for upstream parity
+      // even though this fork drops the release workflows that call them.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
-        "fixtures/issue-16534/*.js",
+        "fixtures/*/*.js",
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
@@ -32,9 +32,11 @@
         "resolve-nightly-release.ts",
         "verify-windows-desktop-artifact.ts",
       ],
-      "ignoreDependencies": ["esbuild"],
+      "ignoreDependencies": ["agent-device", "esbuild"],
       // The `t3` npm package's files: copied into the package, never imported.
-      "ignore": ["npm-launcher/**"],
+      // knip-schemas.test.ts writes a throwaway project to .knip-test-*, which a
+      // knip run beside it in check:changed must not report.
+      "ignore": ["npm-launcher/**", ".knip-test-*/**"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
@@ -45,7 +47,6 @@
         "scripts/cli.ts",
         "scripts/evaluate-thread-titles.ts",
         "scripts/fetch-expo-schema.ts",
-        "scripts/measure-pr-preview.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
@@ -101,6 +102,10 @@
         "src/components/LegacySidebar.tsx",
         "src/components/sidebar/SidebarThreadRow.tsx",
         "src/components/sidebar/SidebarDraftBlock.tsx",
+        // vite.config.ts aliases lucide-react and lucide to these generated shims
+        "src/fincke/icons/lucide-react.ts",
+        "src/fincke/icons/lucide.ts",
+        "scripts/generate-hugeicons-shims.ts",
       ],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
@@ -124,6 +129,7 @@
       // Fonts are configured as asset paths; Expo autolinks the native packages.
       "ignoreDependencies": [
         "@expo-google-fonts/dm-sans",
+        "@t3tools/mobile-highlights-native",
         "@t3tools/mobile-review-diff-native",
         "@t3tools/mobile-terminal-native",
       ],
@@ -152,7 +158,7 @@
     },
     "packages/source-control-github": {
       // graphqlgen reads its config; the generated operations export every selection's class.
-      "entry": ["graphql.config.ts"],
+      "entry": ["graphql.config.ts", "scripts/measure-pr-preview.ts"],
       "ignoreIssues": { "**/*.graphql.ts": ["exports", "types", "namespaceMembers"] },
     },
   },

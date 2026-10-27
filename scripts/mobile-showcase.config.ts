@@ -35,6 +35,7 @@ export interface ShowcaseIosDevice {
   readonly appearance: ShowcaseAppearance;
   readonly theme: ShowcaseTheme;
   readonly orientation?: "portrait" | "landscape";
+  readonly fold?: "closed" | "open";
   readonly scenes: ReadonlyArray<ShowcaseScene>;
   readonly storeAsset: ShowcaseStoreAssetSpec;
 }
@@ -80,8 +81,7 @@ export function resolveShowcaseAndroidAbi(
 
 const config: ShowcaseConfig = {
   outputDirectory: "artifacts/app-store/screenshots",
-  // Dedicated port so the harness cannot attach to a normal mobile dev server
-  // (or a second worktree) and capture the wrong bundle.
+  // A dedicated port prevents captures from attaching to another dev server's bundle.
   metroPort: 8199,
   settleDelayMs: 2_500,
   devices: [
@@ -119,6 +119,26 @@ const config: ShowcaseConfig = {
         maximumUploadCount: 10,
       },
     },
+    ...(["closed", "open"] as const).map((fold): ShowcaseIosDevice => ({
+      id: `iphone-duo-${fold}`,
+      platform: "ios",
+      simulator: `T3 Showcase iPhone Duo ${fold}`,
+      simulatorDeviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+      appearance: "dark",
+      theme: DEFAULT_SHOWCASE_THEME,
+      orientation: fold === "closed" ? "portrait" : "landscape",
+      fold,
+      // Both poses share one ten-image App Store slot.
+      scenes: ["thread", "terminal", "review", "threads", "environments"],
+      storeAsset: {
+        store: "apple",
+        directory: `apple/iphone-duo-${fold}`,
+        width: fold === "closed" ? 1398 : 2853,
+        height: fold === "closed" ? 2034 : 2007,
+        minimumUploadCount: 1,
+        maximumUploadCount: 5,
+      },
+    })),
     {
       id: "ipad-13",
       platform: "ios",
@@ -127,8 +147,7 @@ const config: ShowcaseConfig = {
       appearance: "dark",
       theme: DEFAULT_SHOWCASE_THEME,
       orientation: "landscape",
-      // The lock screen does not follow the app's self-rotation, so a
-      // headless landscape capture of it would come out sideways.
+      // Lock screens ignore app rotation; headless landscape captures would be sideways.
       scenes: ["thread", "terminal", "review", "threads", "environments"],
       storeAsset: {
         store: "apple",

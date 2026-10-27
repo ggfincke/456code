@@ -12,6 +12,8 @@ import {
 } from "@t3tools/contracts";
 import { codexCallbackUrl } from "@t3tools/shared/codexAuthHandoff";
 import * as Clock from "effect/Clock";
+import * as Crypto from "effect/Crypto";
+import * as Hex from "effect/encoding/Hex";
 import * as Exit from "effect/Exit";
 import { codexAuthCallbackPage, codexAuthReturnUrl } from "./CodexAuthCallbackPage.ts";
 import * as Effect from "effect/Effect";
@@ -102,6 +104,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
   readonly resource?: string;
   readonly defaultReturnUrl?: string;
   readonly reconnectProfile?: ChatGptReconnectProfile | null;
+  readonly expectedProfileKey?: string;
 }) {
   const http = yield* HttpClient.HttpClient;
   const store = yield* ProviderCredentialStore.make("codex-chatgpt", options.instanceId);
@@ -110,6 +113,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     options.instanceId,
   );
   const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const crypto = yield* Crypto.Crypto;
   const environmentLocks = sessionLocks.get(secrets) ?? new Map<string, Semaphore.Semaphore>();
   sessionLocks.set(secrets, environmentLocks);
   const lock = environmentLocks.get(store.binding.key) ?? (yield* Semaphore.make(1));
@@ -348,8 +352,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     const savedRegistration = changingAccount
       ? undefined
       : registrations.profiles.find((profile) => profile.clientId === selectedClientId);
-    // Older development registrations used localhost, which cannot be changed on reauth.
-    // Register a 127.0.0.1 connection instead, preserving the verified account.
+    // Legacy localhost registrations cannot change on reauth; register 127.0.0.1 while preserving the verified account.
     const legacyCallback = savedRegistration?.redirectUri?.includes("//localhost:") === true;
     const registeredClientId = legacyCallback ? undefined : savedRegistration?.clientId;
     const selectedTokens = (yield* readSessions).sessions.find(
@@ -528,8 +531,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
       const expectedSubject =
         savedRegistration?.subject ??
         (previous?.clientId === registeredClientId ? previous?.subject : undefined);
-      // Subjects are checked within the same registration. Legacy callback migration
-      // registers a new client, whose subject cannot be compared with the old client.
+      // Compare subjects only within a registration; legacy callback migration creates a new client.
       if (registeredClientId && expectedSubject && identity.subject !== expectedSubject)
         return yield* failure(
           "verify",
@@ -616,6 +618,17 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
       ),
     );
   });
+  // ID tokens survive renewal but change on sign-in. Bind active children to the
+  // launch profile without putting an identity token or subject in their argv.
+  const profileKey = (record: CodexChatGptCredentials) =>
+    crypto
+      .digest(
+        "SHA-256",
+        new TextEncoder().encode(
+          JSON.stringify([record.clientId, record.subject, record.idToken ?? null]),
+        ),
+      )
+      .pipe(Effect.map(Hex.encode), Effect.orDie);
   const access = lock.withPermit(
     withSessionLock(
       Effect.uninterruptible(
@@ -624,6 +637,11 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
           if (Option.isNone(saved))
             return yield* failure("access", "Sign in with ChatGPT to use managed Codex.");
           let record = saved.value;
+          if (
+            options.expectedProfileKey !== undefined &&
+            (yield* profileKey(record)) !== options.expectedProfileKey
+          )
+            return yield* failure("access", "The ChatGPT connection changed. Start a new session.");
           if (!record.scopes.includes(REQUIRED_SCOPE))
             return yield* failure(
               "sharing",
@@ -856,6 +874,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     controller: { ...controller, reconnectProfile, importProfile },
     read,
     access,
+    profileKey,
     exportProfile,
     revoke: lock.withPermit(withSessionLock(remove)),
   };

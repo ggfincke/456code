@@ -23,6 +23,7 @@ import type {
   ProviderOptionSelection,
   RuntimeMode,
   ServerSettings,
+  ThreadId,
 } from "@t3tools/contracts";
 import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
@@ -85,6 +86,19 @@ import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { ChatGptSharingStatus } from "./ChatGptSharingStatus";
 import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentQuery } from "../../state/query";
+import { scopedThreadKey } from "../../lib/scopedEntities";
+import { useThreadReportedModelSelection } from "../../state/entities";
+import {
+  setComposerDraftText,
+  updateComposerDraftSettings,
+  useComposerDraft,
+  useComposerDraftSettings,
+} from "../../state/use-composer-drafts";
+import { useQuietThreadStructure } from "../../state/use-thread-detail";
+import { activeComposerDraftKey, useQueuedRunEdit } from "../../state/queued-run-edit";
+import { updateThreadDraftModelSelection } from "../../state/use-thread-composer-state";
+import { useThreadSelection } from "../../state/use-thread-selection";
+import { threadAllowsProviderSwitch } from "../../state/thread-provider-switching";
 import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
 import { ProviderLimitsLine } from "../../fincke/ProviderLimitsLine";
 import { mobilePreferencesAtom } from "../../state/preferences";
@@ -125,10 +139,7 @@ const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set([
   "codex",
   "antigravity",
 ]);
-/**
- * Keep measured row changes stable, but let catalog mutations use the list's
- * native bounds so a filtered catalog that underflows returns to the top.
- */
+/** Keep measured size changes stable; let catalog mutations return underflowing filtered lists to the top. */
 const THREAD_SETTINGS_MAINTAIN_VISIBLE_CONTENT_POSITION = {
   data: false,
   size: true,
@@ -282,45 +293,15 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
 };
 
-export type ExistingThreadSettingsRouteSession = ThreadSettingsSessionProps & {
-  readonly ownerId: string;
+/** The composer draft the sheet edits: the thread's own, or a queued message being edited. */
+export type ExistingThreadSettingsRouteParams = {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly draftKey: string;
+  // fincke: the composer's effort chip opens onto its picker; a locked composer opens read-only
+  readonly initialDescriptorId?: string | undefined;
+  readonly optionsDisabled?: boolean;
 };
-
-type ExistingThreadSettingsRouteContextValue = {
-  readonly session: ExistingThreadSettingsRouteSession | null;
-  readonly present: (session: ExistingThreadSettingsRouteSession) => void;
-  readonly clear: (ownerId: string) => void;
-};
-
-const ExistingThreadSettingsRouteContext =
-  createContext<ExistingThreadSettingsRouteContextValue | null>(null);
-
-export function ExistingThreadSettingsRouteProvider(props: { readonly children: ReactNode }) {
-  const [session, setSession] = useState<ExistingThreadSettingsRouteSession | null>(null);
-  const present = (nextSession: ExistingThreadSettingsRouteSession) => {
-    setSession(nextSession);
-  };
-  const clear = (ownerId: string) => {
-    setSession((current) => (current?.ownerId === ownerId ? null : current));
-  };
-  const value = { session, present, clear };
-
-  return (
-    <ExistingThreadSettingsRouteContext.Provider value={value}>
-      {props.children}
-    </ExistingThreadSettingsRouteContext.Provider>
-  );
-}
-
-export function useExistingThreadSettingsRoutePresentation() {
-  const value = use(ExistingThreadSettingsRouteContext);
-  if (!value) {
-    throw new Error(
-      "useExistingThreadSettingsRoutePresentation must be used inside ExistingThreadSettingsRouteProvider.",
-    );
-  }
-  return value;
-}
 
 type ThreadSettingsSessionValue = {
   readonly cancelOptionEdits: () => void;
@@ -368,12 +349,14 @@ function ThreadSettingsSessionProvider(
   const parentNavigation =
     useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
   const optionEditsActive = useRef(true);
+  // oxlint-disable-next-line t3code/react-effect-budget -- option edits stop once the sheet unmounts; mount lifetime lives only in an effect.
   useLayoutEffect(() => {
     optionEditsActive.current = true;
     return () => {
       optionEditsActive.current = false;
     };
   }, []);
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to the parent navigator's close transition, an external event source.
   useEffect(
     () =>
       parentNavigation.addListener("transitionStart", (event) => {
@@ -1068,6 +1051,7 @@ function ThreadSettingsMainContent(props: {
   };
 
   return (
+    // oxlint-disable-next-line t3code/require-registered-list-scroll -- Sheet content; sheets sit outside workspace columns and keep their own header handling.
     <AnimatedLegendList
       alwaysBounceVertical
       automaticallyAdjustsScrollIndicatorInsets
@@ -1169,6 +1153,7 @@ function ThreadEffortSlider(props: {
       readLive,
     ),
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- native slider events read the latest props from a ref, which render must not write.
   useLayoutEffect(() => {
     live.current = {
       identity: props.identity,
@@ -1176,6 +1161,7 @@ function ThreadEffortSlider(props: {
       onCommit: props.onCommit,
     };
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- the preview session owns native slider state and must be disposed with the row.
   useLayoutEffect(() => {
     // strict mode replays mount effects while retaining this preview session.
     selection.activate();
@@ -1741,32 +1727,81 @@ export function ThreadSettingsPickerScreen(
   );
 }
 
-export function ExistingThreadSettingsRouteScreen() {
+export function ExistingThreadSettingsRouteScreen({
+  route,
+}: StaticScreenProps<ExistingThreadSettingsRouteParams>) {
   const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
-  const presentation = useExistingThreadSettingsRoutePresentation();
-  const session = presentation.session;
+  // Reads the same environmentId/threadId params as the Thread route beneath it.
+  const { selectedThread, selectedThreadDetailRef, selectedEnvironmentRuntime } =
+    useThreadSelection();
+  // Streamed text would otherwise re-render the whole model picker on every delta.
+  const structure = useQuietThreadStructure(selectedThreadDetailRef);
+  const reportedModelSelection = useThreadReportedModelSelection(selectedThreadDetailRef);
+  const threadKey = scopedThreadKey(route.params.environmentId, route.params.threadId);
+  const draftSettings = useComposerDraftSettings(threadKey);
+  const queuedRunEdit = useQueuedRunEdit(threadKey);
+  // A queued edit can end while the sheet is open; the prompt then belongs to the thread's draft.
+  const draftKey = activeComposerDraftKey(threadKey, route.params.draftKey, queuedRunEdit);
+  const prompt = useComposerDraft(draftKey).text;
 
-  useEffect(() => {
-    if (session) {
-      return;
-    }
-
-    navigation.goBack();
-  }, [navigation, session]);
-
-  if (!session) {
+  if (!selectedThread) {
     return <View className="flex-1 bg-sheet" />;
   }
 
-  const { ownerId: _ownerId, ...settings } = session;
+  const serverConfig = selectedEnvironmentRuntime?.serverConfig ?? null;
+  const modelSelection = draftSettings.modelSelection ?? selectedThread.modelSelection;
+  const lockedProviderInstanceId = threadAllowsProviderSwitch({
+    thread: selectedThread,
+    projection: structure?.projection,
+  })
+    ? undefined
+    : modelSelection.instanceId;
+  const modelOptions = buildModelOptions(
+    serverConfig,
+    modelSelection,
+    lockedProviderInstanceId,
+    selectedThread.projectId,
+  );
+  const currentModelOption =
+    modelOptions.find(
+      (option) =>
+        option.selection.instanceId === modelSelection.instanceId &&
+        option.selection.model === modelSelection.model,
+    ) ?? null;
+  const updateModelSelection = (selection: ModelSelection) =>
+    updateThreadDraftModelSelection(threadKey, selection, serverConfig?.providers ?? []);
 
-  return <ThreadSettingsPickerScreen {...settings} onClose={() => navigation.goBack()} />;
+  return (
+    <ThreadSettingsPickerScreen
+      initialDescriptorId={route.params.initialDescriptorId}
+      optionsDisabled={route.params.optionsDisabled}
+      environmentId={selectedThread.environmentId}
+      projectId={selectedThread.projectId}
+      providerInstanceId={modelSelection.instanceId}
+      {...(lockedProviderInstanceId ? { lockedProviderInstanceId } : {})}
+      providerGroups={groupByProvider(modelOptions)}
+      selectedModel={modelSelection}
+      prompt={prompt}
+      onPromptChange={(text) => setComposerDraftText(draftKey, text)}
+      reportedModelSelection={reportedModelSelection}
+      onSelectModel={(option) => updateModelSelection(withRememberedModelOptions(option.selection))}
+      restoreSelection={withRememberedModelOptions}
+      optionDescriptors={resolveProviderOptionDescriptors({
+        capabilities: currentModelOption?.capabilities,
+        selections: modelSelection.options,
+      })}
+      onUpdateOptionSelections={(options) => {
+        rememberModelOptions(modelSelection.instanceId, modelSelection.model, options ?? []);
+        updateModelSelection({ ...modelSelection, options });
+      }}
+      runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
+      onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
+      onClose={() => navigation.goBack()}
+    />
+  );
 }
 
-/**
- * Keeping the sheet presentation in RNS gives UIKit ownership of nested dismissal, while
- * Reasoning and Runtime remain regular pushes inside this navigator.
- */
+/** RNS owns nested sheet dismissal; Reasoning and Runtime remain ordinary pushes. */
 export function NewTaskThreadSettingsRouteScreen({
   route,
 }: StaticScreenProps<
