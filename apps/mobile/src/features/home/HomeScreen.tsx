@@ -227,9 +227,9 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
   const primaryColumn = use(NativePrimaryColumnContext);
   const { themeId } = useAppearancePreferences();
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
-  // fincke: the ocean wave sits behind the sidebar's header, so UIKit's edge dimming would
-  // cut a hard line through it
-  const waveBehindHeader = primaryColumn !== null && themeId === "fincke-ocean";
+  // fincke: the ocean wave sits behind the list's header in every layout (compact, Duo
+  // panes, sidebar), so UIKit's edge dimming would cut a hard line through it
+  const waveBehindHeader = themeId === "fincke-ocean";
 
   // Register the scroll view explicitly; layout and header siblings hide it from UIKit.
   return (
@@ -799,6 +799,7 @@ export function HomeScreen(props: HomeScreenProps) {
       {listHeader}
       <FinckeListHeader
         pullUp={Platform.OS === "ios" ? insets.top : 0}
+        surface={primaryColumn ? "drawer" : "screen"}
         bleedLeft={listPaddingLeft}
         bleedRight={listPaddingRight}
       >
@@ -926,6 +927,10 @@ export function HomeScreen(props: HomeScreenProps) {
               // the list in the same frame as the bar.
               contentInsetAdjustmentBehavior="automatic"
               contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
+              // fincke: RN's scrollTo clamps to the raw inset, so the resting scroll to -inset
+              // never lands when the header inset arrives after mount (Duo), leaving the list
+              // under the bar and the wave cut short. ThreadFeed does the same
+              scrollToOverflowEnabled
               initialScrollOffset={
                 initialScrollOffset > 0
                   ? initialScrollOffset - (Platform.OS === "ios" ? insets.top : 0)
