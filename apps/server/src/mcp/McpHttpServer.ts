@@ -25,6 +25,7 @@ import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
@@ -440,7 +441,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
     tool: new McpSchema.Tool({
       name: tool.name,
       description: Tool.getDescription(tool),
-      inputSchema: Tool.getJsonSchema(tool),
+      inputSchema: advertisedJsonSchema(tool),
       annotations: {
         ...Context.getOption(tool.annotations, Tool.Title).pipe(
           Option.map((title) => ({ title })),
@@ -624,7 +625,7 @@ const registerImageTool = Effect.fn("McpHttpServer.registerImageTool")(function*
     tool: new McpSchema.Tool({
       name: tool.name,
       description: Tool.getDescription(tool),
-      inputSchema: Tool.getJsonSchema(tool),
+      inputSchema: advertisedJsonSchema(tool),
       annotations: {
         ...Context.getOption(tool.annotations, Tool.Title).pipe(
           Option.map((title) => ({ title })),

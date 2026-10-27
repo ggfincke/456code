@@ -1,4 +1,6 @@
 import { installPermissionUpdateNotice } from "./features/connection/permissionUpdateNotice";
+import { installComposerAttachmentUploads } from "./state/composer-attachment-uploads";
+import { installThreadOutboxDelivery } from "./state/threadOutboxDelivery";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
@@ -7,10 +9,10 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import {
-  createNavigationContainerRef,
   createStaticNavigation,
   getActionFromState,
   getStateFromPath,
+  type NavigationState,
 } from "@react-navigation/native";
 
 import { RegistryContext } from "@effect/atom-react";
@@ -38,8 +40,9 @@ import {
   type FoundationHotModule,
 } from "./lib/foundation-fast-refresh";
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
-import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
+import { installUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
+import { installSubscriptionUsageRefresh } from "./widgets/useSubscriptionUsage";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
 import { restoreSettingsLinkState } from "./features/settings/settings-navigation";
 import {
@@ -50,6 +53,8 @@ import {
 } from "./features/workspace/workspace-selection-store";
 import { workspaceDetailLinkAction } from "./features/workspace/workspace-detail-selection";
 import { NativeLayoutMetricsProvider } from "./native/native-layout-metrics";
+import { attachRootNavigation, rootNavigationRef } from "./lib/rootNavigation";
+import { pruneNewTaskBranchCheckouts } from "./features/threads/NewTaskDraftRouteScreen";
 
 import "../global.css";
 
@@ -82,15 +87,34 @@ const appLinking = {
 };
 
 const Navigation = createStaticNavigation(RootStack);
-const navigationRef = createNavigationContainerRef();
+
+function handleNavigationStateChange(state: NavigationState | undefined): void {
+  recordWorkspaceSelections(state);
+  if (state) pruneNewTaskBranchCheckouts(state);
+}
+
+function handleNavigationReady(): void {
+  handleNavigationStateChange(rootNavigationRef.getRootState());
+}
 
 declare const module: { readonly hot?: FoundationHotModule } | undefined;
 
-const disposePermissionUpdateNotice = installPermissionUpdateNotice();
-disposeOnFoundationReplace(
-  typeof module === "undefined" ? undefined : module.hot,
-  disposePermissionUpdateNotice,
-);
+const appServiceDisposers = [
+  installUiRuntimeMemoryWarningGc(),
+  subscribeComposerDraftModelReconciliation({
+    registry: appAtomRegistry,
+    threadShellAtom: environmentThreadShells.threadShellAtom,
+    threadRefsAtom: environmentThreadShells.threadRefsAtom,
+    shellStateAtom: environmentShell.stateAtom,
+  }),
+  installSubscriptionUsageRefresh(),
+  installPermissionUpdateNotice(),
+  installThreadOutboxDelivery(),
+  installComposerAttachmentUploads(),
+];
+disposeOnFoundationReplace(typeof module === "undefined" ? undefined : module.hot, () => {
+  for (const dispose of appServiceDisposers) dispose();
+});
 
 function SplashScreenCoordinator() {
   const { isReady } = useAppearancePreferences();
@@ -103,18 +127,6 @@ function SplashScreenCoordinator() {
 }
 
 export default function App() {
-  useUiRuntimeMemoryWarningGc();
-  useEffect(
-    () =>
-      subscribeComposerDraftModelReconciliation({
-        registry: appAtomRegistry,
-        threadShellAtom: environmentThreadShells.threadShellAtom,
-        threadRefsAtom: environmentThreadShells.threadRefsAtom,
-        shellStateAtom: environmentShell.stateAtom,
-      }),
-    [],
-  );
-
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
       <CloudAuthProvider>
@@ -143,11 +155,11 @@ function AppContent() {
               <NativeLayoutMetricsProvider>
                 <IncomingShareProvider>
                   <Navigation
-                    ref={navigationRef}
+                    ref={attachRootNavigation}
                     linking={appLinking}
-                    onReady={() => recordWorkspaceSelections(navigationRef.getRootState())}
+                    onReady={handleNavigationReady}
                     theme={navigationTheme}
-                    onStateChange={recordWorkspaceSelections}
+                    onStateChange={handleNavigationStateChange}
                   />
                 </IncomingShareProvider>
                 <Dialog.Host />
