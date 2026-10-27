@@ -77,6 +77,8 @@ export function QueuedRunsControl({
     Pick<ChatMessage, "id" | "inputIntent" | "text" | "attachments">
   >;
   readonly editingRunId: RunId | null;
+  /** Set while something else holds the composer, such as an open question. */
+  readonly editBlockedReason: string | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
   readonly onCancelEdit: () => void;
 }) {
@@ -94,13 +96,10 @@ export function QueuedRunsControl({
     readonly runId: RunId;
     readonly insertIndex: number | null;
   } | null>(null);
-  // Drags must start from the grip, not from an accidental text-drag on the
-  // row. The grip arms its run id on pointerdown; dragstart verifies it.
+  // Arm from the grip to prevent accidental text drags from reordering queued runs.
   const dragArmedRunIdRef = useRef<RunId | null>(null);
   const steerInFlightRef = useRef(false);
-  // Once the projection holds the message the optimistic copy is stale no
-  // matter what happened to its run — keying on still-queued runs alone would
-  // resurrect a phantom "pending" row after the run is cancelled or started.
+  // Run-only acknowledgements can resurrect pending rows after cancellation or startup.
   const acknowledgedMessageIds = new Set((projection?.messages ?? []).map((message) => message.id));
   const queuedImageAttachmentResources = queuedImageResources(projection);
   const queuedImageAttachmentUrls = useAssetUrls(
@@ -125,12 +124,15 @@ export function QueuedRunsControl({
     (message) => message.inputIntent === "queued_turn" && !acknowledgedMessageIds.has(message.id),
   );
   const items = [
-    ...queued.map(({ run, text, attachments }, serverIndex) => ({
+    ...queued.map(({ run, text, attachments, context }, serverIndex) => ({
       key: run.id,
       runId: run.id,
       messageId: run.userMessageId,
       serverIndex,
       text,
+      // A guest's message keeps the guest's words; the owner can cancel it, not rewrite it.
+      editable: context?.guest === undefined,
+      guestName: context?.guest?.name,
       attachments,
       thumbnails: attachments
         .filter((attachment) => attachment.type === "image")
@@ -147,6 +149,8 @@ export function QueuedRunsControl({
       messageId: null,
       serverIndex: null,
       text: message.text,
+      editable: true,
+      guestName: undefined,
       attachments: [] as ReadonlyArray<ContractChatAttachment>,
       thumbnails: (message.attachments ?? [])
         .filter(isImageAttachment)
@@ -204,11 +208,18 @@ export function QueuedRunsControl({
       if (!repeat && busyRunId === null) void sendQueuedMessage(next.run.id);
       return true;
     },
-    // Declines while a queued message is already being edited so the key keeps
-    // moving the caret inside that draft.
+    // Leave the key to caret navigation while editing.
     editLatest(repeat) {
       const latest = queued.at(-1);
-      if (!latest || props.editingRunId !== null || busyRunId !== null) return false;
+      if (
+        !latest ||
+        latest.context?.guest !== undefined ||
+        props.editingRunId !== null ||
+        props.editBlockedReason !== null ||
+        busyRunId !== null
+      ) {
+        return false;
+      }
       if (!repeat) {
         setExpanded(true);
         props.onEditQueuedRun({
@@ -386,6 +397,9 @@ export function QueuedRunsControl({
                         ))}
                       </span>
                     ) : null}
+                    {item.guestName === undefined ? null : (
+                      <span className="shrink-0 text-guest-foreground">{item.guestName}</span>
+                    )}
                     <Tooltip>
                       <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
                         {previewText}
@@ -408,30 +422,35 @@ export function QueuedRunsControl({
                     ) : (
                       <>
                         <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                aria-label="Edit queued message"
-                                disabled={item.runId === null || busyRunId !== null}
-                                onClick={() => {
-                                  if (item.runId !== null && item.messageId !== null) {
-                                    props.onEditQueuedRun({
-                                      runId: item.runId,
-                                      messageId: item.messageId,
-                                      text: item.text,
-                                      attachments: item.attachments,
-                                    });
-                                  }
-                                }}
-                              />
-                            }
-                          >
-                            <PencilIcon />
+                          {/* The span keeps the tooltip, and its reason, on a disabled button. */}
+                          <TooltipTrigger render={<span className="flex shrink-0" />}>
+                            <Button
+                              size="icon-xs"
+                              variant="ghost-muted"
+                              aria-label="Edit queued message"
+                              disabled={
+                                item.runId === null ||
+                                !item.editable ||
+                                busyRunId !== null ||
+                                props.editBlockedReason !== null
+                              }
+                              onClick={() => {
+                                if (item.runId !== null && item.messageId !== null) {
+                                  props.onEditQueuedRun({
+                                    runId: item.runId,
+                                    messageId: item.messageId,
+                                    text: item.text,
+                                    attachments: item.attachments,
+                                  });
+                                }
+                              }}
+                            >
+                              <PencilIcon />
+                            </Button>
                           </TooltipTrigger>
                           <TooltipPopup>
-                            {`Edit in the composer${item.serverIndex === queued.length - 1 && props.editShortcutLabel ? ` (${props.editShortcutLabel})` : ""}`}
+                            {props.editBlockedReason ??
+                              `Edit in the composer${item.serverIndex === queued.length - 1 && props.editShortcutLabel ? ` (${props.editShortcutLabel})` : ""}`}
                           </TooltipPopup>
                         </Tooltip>
                         <Tooltip>

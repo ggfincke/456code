@@ -9,7 +9,7 @@ import {
   tint,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { View } from "react-native";
 
 import { AppText } from "./AppText";
@@ -22,11 +22,9 @@ export type { SliderRowProps } from "./SliderRow.types";
 
 export function SliderRow(props: SliderRowProps) {
   const { colors } = useControlTheme();
-  const draft = useRef(props.value);
+  // The value of the drag in progress; null until the drag moves.
+  const draft = useRef<number | null>(null);
   const editing = useRef(false);
-  useEffect(() => {
-    if (!editing.current) draft.current = props.value;
-  }, [props.value]);
   const commit = (value: number) => {
     if (props.disabled) return;
     const next = Math.min(
@@ -64,14 +62,16 @@ export function SliderRow(props: SliderRowProps) {
             ]}
             onValueChange={(value) => {
               if (props.disabled) return;
-              draft.current = value;
               props.onPreview?.(value);
               // Accessibility adjustments do not begin a touch editing session.
-              if (!editing.current) commit(value);
+              if (editing.current) draft.current = value;
+              else commit(value);
             }}
             onEditingChanged={(isEditing) => {
               editing.current = isEditing;
-              if (!isEditing) commit(draft.current);
+              const value = draft.current;
+              draft.current = null;
+              if (!isEditing && value !== null) commit(value);
             }}
           />
         </NativeThemeHost>
