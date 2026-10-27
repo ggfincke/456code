@@ -2066,6 +2066,8 @@
       --color-adaptive-emerald-500-a12-a16: oklch(69.6% 0.17 162.48 / 16%);
       --color-adaptive-emerald-600-400: oklch(76.5% 0.177 163.223);
       --color-adaptive-emerald-700-300: oklch(84.5% 0.143 164.978);
+      --color-adaptive-fuchsia-500-a50-300-a40: oklch(83.3% 0.145 321.434 / 40%);
+      --color-adaptive-fuchsia-600-300: oklch(83.3% 0.145 321.434);
       --color-adaptive-indigo-500-a12-a16: oklch(58.5% 0.233 277.117 / 16%);
       --color-adaptive-indigo-600-300: oklch(78.5% 0.115 274.713);
       --color-adaptive-indigo-700-300: oklch(78.5% 0.115 274.713);
