@@ -3,7 +3,6 @@
 
 import { useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
-import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { FINCKE_WAVE_FIELD_COLOR, FinckeWaveArt } from "./FinckeWaveArt";
@@ -12,8 +11,6 @@ import { FINCKE_WAVE_FIELD_COLOR, FinckeWaveArt } from "./FinckeWaveArt";
 export const BAND_HEIGHT = 72;
 // field color above the band, so pulling the list past its top keeps revealing the wave's field
 const OVERSCROLL_FIELD = 600;
-// like desktop's stage fade, the band stays solid and only its last stretch blends into the list
-const FADE_HEIGHT = 24;
 
 export function FinckeListHeader(props: {
   // how far the band reaches up behind the native header (the list's top inset)
@@ -21,16 +18,13 @@ export function FinckeListHeader(props: {
   // the list's horizontal content padding, cancelled so the band spans the column
   readonly bleedLeft?: number;
   readonly bleedRight?: number;
-  // the list surface the band fades into
-  readonly surface?: "drawer" | "screen";
   readonly children?: ReactNode;
 }) {
-  const { themeId, themeVariables } = useAppearancePreferences();
+  const { themeId } = useAppearancePreferences();
   const [size, setSize] = useState<{ readonly width: number; readonly height: number } | null>(
     null,
   );
   const pullUp = props.pullUp ?? 0;
-  const fadeTo = themeVariables[props.surface === "screen" ? "--color-screen" : "--color-drawer"];
   const band =
     themeId === "fincke-ocean" ? (
       <View
@@ -58,26 +52,6 @@ export function FinckeListHeader(props: {
         {size ? (
           <View key={`${size.width}x${size.height}`} style={StyleSheet.absoluteFill}>
             <FinckeWaveArt slice />
-            {/* RN has no mask-image, so an overlay does desktop's stage fade */}
-            <Svg
-              style={{ position: "absolute", left: 0, bottom: 0 }}
-              width={size.width}
-              height={FADE_HEIGHT}
-            >
-              <Defs>
-                <LinearGradient id="fincke-band-fade" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={fadeTo} stopOpacity={0} />
-                  <Stop offset="1" stopColor={fadeTo} stopOpacity={1} />
-                </LinearGradient>
-              </Defs>
-              <Rect
-                x="0"
-                y="0"
-                width={size.width}
-                height={FADE_HEIGHT}
-                fill="url(#fincke-band-fade)"
-              />
-            </Svg>
           </View>
         ) : null}
       </View>

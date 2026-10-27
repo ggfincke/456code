@@ -809,7 +809,6 @@ export function HomeScreen(props: HomeScreenProps) {
       {listHeader}
       <FinckeListHeader
         pullUp={Platform.OS === "ios" ? insets.top : 0}
-        surface={primaryColumn ? "drawer" : "screen"}
         bleedLeft={listPaddingLeft}
         bleedRight={listPaddingRight}
       >
