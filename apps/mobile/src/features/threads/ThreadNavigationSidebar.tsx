@@ -649,7 +649,7 @@ function ThreadNavigationSidebarPane(
             }
             searchQuery={threadSearch.query}
             pane="sidebar"
-            showWorkingEndDivider={item.showWorkingEndDivider}
+            showActiveHeading={item.showActiveHeading}
             selected={
               !activeNewTask &&
               scopedThreadKey(thread.environmentId, thread.id) === props.selectedThreadKey

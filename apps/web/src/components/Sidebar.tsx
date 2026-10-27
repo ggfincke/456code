@@ -3056,7 +3056,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 label="Active"
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
-                                rule={workingThreads.length > 0 && activeThreads.length > 0}
+                                heading={workingThreads.length > 0 ? "Active" : undefined}
                               />,
                             );
                             break;
@@ -3085,6 +3085,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 marker="working-header"
                                 label="Working"
                                 count={workingThreads.length}
+                                prominent
                                 toggle={{
                                   expanded: workingShelfExpanded,
                                   onToggle: toggleWorkingShelf,
