@@ -15,7 +15,15 @@ import {
   type ScopedThreadRef,
   type ServerConfig,
 } from "@t3tools/contracts";
-import { createContext, use, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import { Button } from "../components/ui/Button";
 import * as Dialog from "../components/ui/Dialog";
@@ -30,23 +38,9 @@ import { clearThreadComposerError, setThreadComposerError } from "../state/threa
 import { enqueueThreadOutboxMessage } from "../state/thread-outbox";
 import { useQuietThreadStructure } from "../state/use-thread-detail";
 
-interface ImplementPlanAction {
-  readonly planId: PlanId;
-  readonly implementing: boolean;
-  readonly disabled: boolean;
-  readonly implement: () => void;
-}
-
-export const ImplementPlanContext = createContext<ImplementPlanAction | null>(null);
-
-// wraps a screen's returned tree as a call so the hook doesn't re-indent upstream's JSX
-export function withImplementPlan(action: ImplementPlanAction | null, children: ReactNode) {
-  return <ImplementPlanContext value={action}>{children}</ImplementPlanContext>;
-}
-
-// mirrors web's plan follow-up rule (shouldShowPlanFollowUpPrompt): the thread's latest
-// active proposed plan, the composer in plan mode & no question waiting for an answer
-export function useImplementPlanAction(input: {
+// what the thread screen knows about sending; the plan card derives the plan itself so only
+// plan cards subscribe to the thread structure, not the whole screen during a run
+interface ImplementPlanInput {
   // the shell w/ the composer's draft model, runtime & interaction mode applied
   readonly thread: EnvironmentThreadShell;
   readonly detailRef: ScopedThreadRef | null;
@@ -56,17 +50,43 @@ export function useImplementPlanAction(input: {
   readonly busy: boolean;
   readonly awaitingUserInput: boolean;
   readonly onUpdateInteractionMode: ((mode: ProviderInteractionMode) => void) | undefined;
+  // the feed follows the new turn once it's queued
+  readonly feedRef: RefObject<{ resetEndFollow(): void } | null>;
   readonly onSent: () => void;
-}): ImplementPlanAction | null {
-  const structure = useQuietThreadStructure(input.detailRef);
+}
+
+const ImplementPlanContext = createContext<ImplementPlanInput | null>(null);
+
+// folds the feed's follow reset into onSent here, so the screen never reads its ref in render
+export function useImplementPlanInput(input: ImplementPlanInput): ImplementPlanInput {
+  const { feedRef, onSent } = input;
+  const handleSent = useCallback(() => {
+    onSent();
+    feedRef.current?.resetEndFollow();
+  }, [feedRef, onSent]);
+  return { ...input, onSent: handleSent };
+}
+
+// wraps a screen's returned tree as a call so the hook doesn't re-indent upstream's JSX
+export function withImplementPlan(input: ImplementPlanInput, children: ReactNode) {
+  return <ImplementPlanContext value={input}>{children}</ImplementPlanContext>;
+}
+
+// mirrors web's plan follow-up rule (shouldShowPlanFollowUpPrompt): the thread's latest
+// active proposed plan, the composer in plan mode & no question waiting for an answer
+export function ImplementPlanButton(props: { readonly planId: PlanId }) {
+  const input = use(ImplementPlanContext);
+  const structure = useQuietThreadStructure(input?.detailRef ?? null);
   const inFlight = useRef(false);
   const [implementing, setImplementing] = useState(false);
+  if (input === null) return null;
   const plan = findLatestProposedPlan(
     structure?.projection ?? null,
     input.thread.latestRun?.runId ?? null,
   );
   if (
     plan === null ||
+    plan.id !== props.planId ||
     !hasActionableProposedPlan(plan) ||
     !input.canOperate ||
     input.awaitingUserInput ||
@@ -74,7 +94,6 @@ export function useImplementPlanAction(input: {
   ) {
     return null;
   }
-
   const implement = async () => {
     const { thread, serverConfig } = input;
     if (
@@ -127,23 +146,12 @@ export function useImplementPlanAction(input: {
     }
   };
 
-  return {
-    planId: plan.id,
-    implementing,
-    disabled: input.busy || implementing,
-    implement: () => void implement(),
-  };
-}
-
-export function ImplementPlanButton(props: { readonly planId: PlanId }) {
-  const action = use(ImplementPlanContext);
-  if (action === null || action.planId !== props.planId) return null;
   return (
     <Button
-      label={action.implementing ? "Implementing..." : "Implement"}
+      label={implementing ? "Implementing..." : "Implement"}
       tone="primary"
-      disabled={action.disabled}
-      onPress={action.implement}
+      disabled={input.busy || implementing}
+      onPress={() => void implement()}
     />
   );
 }

@@ -198,7 +198,7 @@ import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
-import { useImplementPlanAction, withImplementPlan } from "../../fincke/implement-plan";
+import { useImplementPlanInput, withImplementPlan } from "../../fincke/implement-plan";
 
 export interface ThreadDetailScreenProps {
   readonly header?: React.ReactNode;
@@ -826,7 +826,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     setUsageLimitsPanel((current) =>
       current !== null && current.threadKey === threadKey ? null : current,
     );
-  const implementPlan = useImplementPlanAction({
+  const implementPlan = useImplementPlanInput({
     thread: props.selectedThread,
     detailRef: props.selectedThreadDetailRef,
     serverConfig: props.serverConfig,
@@ -835,10 +835,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     busy: props.activeThreadBusy || props.queuedMessages.length > 0 || props.creationState !== null,
     awaitingUserInput: props.activePendingUserInput !== null,
     onUpdateInteractionMode: props.onUpdateThreadInteractionMode,
-    onSent: () => {
-      clearUsageLimitsFor(selectedThreadKey);
-      feedRef.current?.resetEndFollow();
-    },
+    feedRef,
+    onSent: () => clearUsageLimitsFor(selectedThreadKey),
   });
   const userInputToggled =
     userInputToggle !== null && userInputToggle.requestId === activeUserInputRequestId;
