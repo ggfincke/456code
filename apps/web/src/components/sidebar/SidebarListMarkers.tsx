@@ -71,18 +71,20 @@ export function SidebarDragBoundary(props: {
   label: string;
   visible: boolean;
   isDropTarget: boolean;
-  /** Outside a drag, draw a hairline in the row gap, e.g. where the Working shelf meets active. */
-  rule?: boolean;
+  /** Outside a drag, title the section below, e.g. Active under the Working shelf. */
+  heading?: string | undefined;
 }) {
   return (
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className="pointer-events-none relative mx-0.5 -mb-px h-0"
+      // the heading keeps its height during a drag so starting one doesn't shift the list
+      className={cn("pointer-events-none relative mx-0.5", props.heading ? "h-8" : "-mb-px h-0")}
     >
-      {!props.visible && props.rule ? (
-        // a step stronger than the shelf header rule; h-0 keeps the drop preview's geometry unchanged
-        <div aria-hidden className="absolute inset-x-2 -top-px h-px bg-sidebar-foreground/25" />
+      {!props.visible && props.heading ? (
+        <div className="flex h-8 items-center px-2 text-sm font-medium text-sidebar-muted-foreground">
+          {props.heading}
+        </div>
       ) : null}
       {props.visible ? (
         <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
@@ -118,6 +120,8 @@ export function SidebarSectionHeader(props: {
   toggle: { expanded: boolean; onToggle: () => void };
   /** The first shelf at the bottom of the list hosts the undo notice just above itself. */
   hostsUndoNotice?: boolean;
+  /** Teal & larger, for the Working shelf that sits above the active list. */
+  prominent?: boolean;
 }) {
   const shelf =
     props.marker === "working-header"
@@ -140,11 +144,22 @@ export function SidebarSectionHeader(props: {
       <CollapsibleSectionHeader
         onClick={props.toggle.onToggle}
         expanded={props.toggle.expanded}
-        tone={props.isDropTarget ? "accent" : props.dragging ? "emphasized" : "muted"}
+        tone={
+          props.isDropTarget || props.prominent ? "accent" : props.dragging ? "emphasized" : "muted"
+        }
+        size={props.prominent ? "lg" : "default"}
         data-testid={`sidebar-${shelf}-shelf-toggle`}
         accessory={
           redesign && count !== null ? (
-            <span className="font-normal tabular-nums">{count}</span>
+            <span
+              className={cn(
+                "font-normal tabular-nums",
+                props.prominent &&
+                  "rounded-full bg-(--fincke-sidebar-accent-wash) px-1.5 text-xs leading-4",
+              )}
+            >
+              {count}
+            </span>
           ) : null
         }
       >

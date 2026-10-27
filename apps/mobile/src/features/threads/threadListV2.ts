@@ -289,8 +289,8 @@ export interface ThreadListV2ThreadListItem {
   readonly timeLabel: string;
   readonly snoozePresetMinute: string | undefined;
   readonly showTrailingDivider: boolean;
-  /** fincke: The first active row draws the hairline that closes the Working shelf above it. */
-  readonly showWorkingEndDivider: boolean;
+  /** fincke: The first active row below the Working shelf carries an Active heading. */
+  readonly showActiveHeading: boolean;
   /** Include queued state in item equality; outbox writes do not update thread shells. */
   readonly hasQueuedMessages: boolean;
   readonly canMoveUp: boolean;
@@ -368,7 +368,7 @@ export function threadListV2ListItemsAreEqual(
         previous.timeLabel === item.timeLabel &&
         previous.snoozePresetMinute === item.snoozePresetMinute &&
         previous.showTrailingDivider === item.showTrailingDivider &&
-        previous.showWorkingEndDivider === item.showWorkingEndDivider &&
+        previous.showActiveHeading === item.showActiveHeading &&
         previous.hasQueuedMessages === item.hasQueuedMessages &&
         previous.canMoveUp === item.canMoveUp &&
         previous.canMoveDown === item.canMoveDown
@@ -478,7 +478,7 @@ export function buildThreadListV2ListItems(input: {
       ),
       snoozePresetMinute,
       showTrailingDivider: false,
-      showWorkingEndDivider: false,
+      showActiveHeading: false,
       hasQueuedMessages:
         queuedThreadKeys?.has(`${item.thread.environmentId}:${item.thread.id}`) === true,
       canMoveUp: move?.canMoveUp === true,
@@ -542,7 +542,7 @@ export function buildThreadListV2ListItems(input: {
   return result.map((entry, index) => {
     if (entry.type !== "v2-thread" && entry.type !== "v2-pending") return entry;
     const next = result[index + 1];
-    // the Working end hairline replaces the last working row's divider, so lines never double
+    // the Active heading closes the Working shelf, so its last row drops the divider
     const showTrailingDivider =
       index + 1 !== workingEndResultIndex &&
       (next?.type === "v2-thread" || (next?.type === "v2-pending" && !next.showPendingDivider));
@@ -551,11 +551,11 @@ export function buildThreadListV2ListItems(input: {
         ? entry
         : { ...entry, showTrailingDivider };
     }
-    const showWorkingEndDivider = index === workingEndResultIndex;
+    const showActiveHeading = index === workingEndResultIndex;
     return showTrailingDivider === entry.showTrailingDivider &&
-      showWorkingEndDivider === entry.showWorkingEndDivider
+      showActiveHeading === entry.showActiveHeading
       ? entry
-      : { ...entry, showTrailingDivider, showWorkingEndDivider };
+      : { ...entry, showTrailingDivider, showActiveHeading };
   });
 }
 

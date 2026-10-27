@@ -172,7 +172,9 @@ const LEGACY_MENU_ACTIONS: MenuAction[] = [
 function ThreadListV2Section(props: {
   readonly label: string;
   readonly pane?: "screen" | "sidebar";
-  readonly tone?: "default" | "snoozed";
+  // fincke: "working" is teal, & large labels mark the Working shelf and the Active list below it
+  readonly tone?: "default" | "snoozed" | "working";
+  readonly large?: boolean;
   readonly disclosure?: {
     readonly expanded: boolean;
     readonly disabled?: boolean;
@@ -182,6 +184,7 @@ function ThreadListV2Section(props: {
   };
 }) {
   const snoozed = props.tone === "snoozed";
+  const working = props.tone === "working";
   const sidebarPane = props.pane === "sidebar";
   const className = cn(
     "mb-1.5 mt-4 flex-row items-center gap-2.5",
@@ -191,12 +194,15 @@ function ThreadListV2Section(props: {
     <>
       <Text
         className={cn(
-          "text-xs font-t3-medium",
-          sidebarPane
-            ? "text-drawer-foreground-muted"
-            : snoozed
-              ? "text-foreground-secondary"
-              : "text-foreground-tertiary",
+          props.large ? "text-sm" : "text-xs",
+          "font-t3-medium",
+          working
+            ? "text-primary-text"
+            : sidebarPane
+              ? "text-drawer-foreground-muted"
+              : snoozed
+                ? "text-foreground-secondary"
+                : "text-foreground-tertiary",
         )}
       >
         {props.label}
@@ -204,7 +210,7 @@ function ThreadListV2Section(props: {
       <View
         className={cn(
           "h-px flex-1",
-          snoozed ? "bg-primary/20" : sidebarPane ? "bg-drawer-border" : "bg-border",
+          snoozed || working ? "bg-primary/20" : sidebarPane ? "bg-drawer-border" : "bg-border",
         )}
       />
       {props.disclosure ? (
@@ -212,11 +218,13 @@ function ThreadListV2Section(props: {
           name="chevron.down"
           size={10}
           tintColorClassName={
-            sidebarPane
-              ? "accent-drawer-foreground-muted"
-              : snoozed
-                ? "accent-icon-muted"
-                : "accent-foreground-muted"
+            working
+              ? "accent-primary-text"
+              : sidebarPane
+                ? "accent-drawer-foreground-muted"
+                : snoozed
+                  ? "accent-icon-muted"
+                  : "accent-foreground-muted"
           }
           type="monochrome"
           style={{ transform: [{ rotate: props.disclosure.expanded ? "180deg" : "0deg" }] }}
@@ -271,7 +279,8 @@ function ThreadListV2ShelfHeader(
     <ThreadListV2Section
       label={props.expanded ? label : `${label} (${props.count})`}
       pane={props.pane}
-      tone={props.kind === "snoozed" ? "snoozed" : "default"}
+      tone={props.kind === "settled" ? "default" : props.kind}
+      large={props.kind === "working"}
       disclosure={{
         expanded: props.expanded,
         disabled: props.disabled,
@@ -609,8 +618,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly pane?: "screen" | "sidebar";
   readonly sidebarLayout?: SidebarRowLayout;
   readonly showTrailingDivider?: boolean;
-  // fincke: hairline above the first active row, closing the Working shelf
-  readonly showWorkingEndDivider?: boolean;
+  // fincke: Active heading above the first active row, closing the Working shelf
+  readonly showActiveHeading?: boolean;
   readonly selected?: boolean;
   readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
@@ -1519,28 +1528,22 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </RowPressable>
     );
 
-  // a step stronger than the shelf header rule so the Working section's end reads at a glance;
   // sits outside the swipeable so it stays put
-  const workingEndDivider = props.showWorkingEndDivider ? (
-    <View
-      className={cn(
-        "my-1.5 h-0.5 rounded-full bg-foreground-muted/30",
-        sidebarPane ? "mx-3" : "mx-5",
-      )}
-    />
+  const activeHeading = props.showActiveHeading ? (
+    <ThreadListV2Section label="Active" pane={props.pane} large />
   ) : null;
 
   if (!canOperateThread)
     return (
       <>
-        {workingEndDivider}
+        {activeHeading}
         <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>
       </>
     );
 
   return (
     <View collapsable={false}>
-      {workingEndDivider}
+      {activeHeading}
       {customSnoozeOpen && (
         <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
       )}
