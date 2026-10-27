@@ -84,4 +84,23 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/dev.fincke.456code-sta
 tail -f ~/Library/Logs/456code-stage-update.log
 ```
 
+### iPhone
+
+The stager also exports the iOS JavaScript bundle for the same commit and stages it under
+`~/.456code-thin/updates/ios/`. The server serves it as an Expo Updates endpoint at
+`/api/fincke/ios-update/manifest`, unauthenticated because `expo-updates` cannot carry a
+session. The app's `updates.url` points at furnace over the tailnet, and upstream's updater
+checks on launch and on foreground, then installs in the background. Five taps on the version
+in About checks right away; an installed bundle shows its `0.1.<count>` build beside the
+version.
+
+A bundle only reaches a binary whose native fingerprint matches its `runtimeVersion`, so a
+commit that changes native code (Swift modules, config plugins, native dependencies or the app
+config) needs a native install from the Mac. Build it from a clean `origin/main` checkout so
+the binary's fingerprint matches what the stager computes:
+
+```bash
+cd apps/mobile && vp run ios:release
+```
+
 Do not migrate or modify profile data as part of an update.
