@@ -6,8 +6,6 @@ import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthEnvironmentMaintainScope,
-  AuthRelayReadScope,
-  AuthRelayWriteScope,
   type AuthClientSession,
   type AuthPairingLink,
   type AuthPairingCredentialResult,
@@ -127,11 +125,7 @@ import {
   NetworkAccessDescription,
   PairingClientsList,
 } from "./AuthorizedClientsSettings";
-import {
-  CloudLinkRow,
-  CloudRemoteEnvironmentRows,
-  SavedBackendListRow,
-} from "./SavedEnvironmentRows";
+import { CloudRemoteEnvironmentRows, SavedBackendListRow } from "./SavedEnvironmentRows";
 import { AddEnvironmentDialog } from "./AddEnvironmentDialog";
 import { APP_BASE_NAME } from "~/branding";
 
@@ -283,9 +277,7 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
   );
   const canReadAccess = useEnvironmentScope(primaryEnvironmentId, AuthAccessReadScope);
   const canWriteAccess = useEnvironmentScope(primaryEnvironmentId, AuthAccessWriteScope);
-  const canReadRelay = useEnvironmentScope(primaryEnvironmentId, AuthRelayReadScope);
   const canMaintain = useEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope);
-  const canManageRelay = useEnvironmentScope(primaryEnvironmentId, AuthRelayWriteScope);
   const canManageLocalBackend = !isLocalEnvironmentDisabled() && canMaintain;
   const showsAccess = view === "access";
   const authAccessChanges = useEnvironmentQuery(
@@ -1118,23 +1110,16 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
                 }
               />
             ) : null}
+            {/* fork: T3 Connect rows are hidden (principles §4) */}
             {canManageLocalBackend && desktopBridge ? (
               <>
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
                 {renderTailscaleRow()}
                 {renderWslRow()}
-                {canReadRelay || canManageRelay ? (
-                  <CloudLinkRow canReadRelay={canReadRelay} canManageRelay={canManageRelay} />
-                ) : null}
               </>
             ) : canManageLocalBackend ? (
-              <>
-                {renderDisabledNetworkAccessRow()}
-                {canReadRelay || canManageRelay ? (
-                  <CloudLinkRow canReadRelay={canReadRelay} canManageRelay={canManageRelay} />
-                ) : null}
-              </>
+              renderDisabledNetworkAccessRow()
             ) : null}
             {primaryEnvironment ? (
               <details className="group px-3 sm:px-4">
@@ -1468,9 +1453,6 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
             title="No environment selected"
             description="Connect an environment to view its settings and access."
           />
-          {canReadRelay || canManageRelay ? (
-            <CloudLinkRow canReadRelay={canReadRelay} canManageRelay={canManageRelay} />
-          ) : null}
         </SettingsSection>
       )}
     </>
