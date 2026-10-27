@@ -2,7 +2,7 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { ProviderClientDefinition } from "@t3tools/provider-core/client";
 import {
@@ -53,6 +53,7 @@ import { AcpRegistrySearchStep, useAcpRegistrySearch } from "./AcpRegistrySearch
 import { ProviderWizardAuthenticationStep } from "./ProviderWizardAuthenticationStep";
 import { resolveOfficialAcpRegistryIconUrl } from "./AcpRegistryIcon";
 import { AddManagedCodexAccountDialog } from "./CodexSetupSection";
+import { CopilotProviderTile } from "../../fincke/CopilotProviderTile";
 import { MultipleAccountsNote } from "./MultipleAccountsNote";
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 
@@ -96,6 +97,7 @@ function ProviderOptionGrid({
   value,
   disabled,
   onValueChange,
+  children,
   ...labelProps
 }: {
   readonly options: ReadonlyArray<ProviderClientDefinition>;
@@ -104,6 +106,7 @@ function ProviderOptionGrid({
   readonly onValueChange: (value: string) => void;
   readonly "aria-label"?: string;
   readonly "aria-labelledby"?: string;
+  readonly children?: ReactNode;
 }) {
   return (
     <RadioGroup
@@ -140,6 +143,7 @@ function ProviderOptionGrid({
           ) : null}
         </RadioPrimitive.Root>
       ))}
+      {children}
     </RadioGroup>
   );
 }
@@ -470,7 +474,14 @@ export function AddProviderInstanceDialog({
                   disabled={isPreparingRegistryAgent}
                   onValueChange={selectDriver}
                   aria-labelledby="add-instance-driver-label"
-                />
+                >
+                  <CopilotProviderTile
+                    registry={registry}
+                    providerInstances={settings.providerInstances}
+                    onPrepared={handleAcpPrepared}
+                    onShowRegistry={() => setShowMoreProviders(true)}
+                  />
+                </ProviderOptionGrid>
                 <MultipleAccountsNote environmentId={environmentId} driver={driver} />
               </div>
 

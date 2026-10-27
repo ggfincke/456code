@@ -190,6 +190,22 @@ describe("AddProviderInstanceDialog environment routing", () => {
     });
   });
 
+  it("keeps the priority providers above the fold, with Copilot opening the registry", async () => {
+    setup();
+    await using _screen = await render(dialog());
+    const featured = [...document.querySelectorAll('[role="radio"]')].map(
+      (element) => element.textContent,
+    );
+    for (const name of ["Coral", "Codex", "Claude", "Antigravity"]) {
+      expect(featured).toContainEqual(expect.stringContaining(name));
+    }
+    expect(document.body.textContent).not.toContain("Use Kilo Code");
+
+    // the registry list has not loaded, so the tile falls back to the registry search
+    await click("GitHub Copilot");
+    button("Use Kilo Code");
+  });
+
   it("awaits an atomic create before closing and retains prepared ACP metadata", async () => {
     setup();
     const mutation = deferred<{ readonly _tag: "Success"; readonly value: unknown }>();
