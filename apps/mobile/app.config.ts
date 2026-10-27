@@ -34,7 +34,7 @@ if (
 
 const OCEAN_ASSETS = {
   appIcon: oceanIcon,
-  iosIcon: oceanIcon,
+  iosIcon: fromRepoRoot("assets/fincke/ocean-ios-1024.png"),
   splashIcon: oceanIcon,
   androidAdaptiveForeground: oceanIcon,
   androidAdaptiveBackgroundColor: "#0f111a",
