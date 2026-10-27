@@ -1519,9 +1519,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </RowPressable>
     );
 
-  // same inset & color as the shelf header rule; sits outside the swipeable so it stays put
+  // a step stronger than the shelf header rule so the Working section's end reads at a glance;
+  // sits outside the swipeable so it stays put
   const workingEndDivider = props.showWorkingEndDivider ? (
-    <View className={cn("h-px", sidebarPane ? "mx-3 bg-drawer-border" : "mx-5 bg-border")} />
+    <View
+      className={cn(
+        "my-1.5 h-0.5 rounded-full bg-foreground-muted/30",
+        sidebarPane ? "mx-3" : "mx-5",
+      )}
+    />
   ) : null;
 
   if (!canOperateThread)

@@ -81,8 +81,8 @@ export function SidebarDragBoundary(props: {
       className="pointer-events-none relative mx-0.5 -mb-px h-0"
     >
       {!props.visible && props.rule ? (
-        // reuses the shelf header rule; h-0 keeps the drop preview's geometry unchanged
-        <div aria-hidden className="absolute inset-x-2 -top-px h-px bg-sidebar-border/50" />
+        // a step stronger than the shelf header rule; h-0 keeps the drop preview's geometry unchanged
+        <div aria-hidden className="absolute inset-x-2 -top-px h-px bg-sidebar-foreground/25" />
       ) : null}
       {props.visible ? (
         <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
