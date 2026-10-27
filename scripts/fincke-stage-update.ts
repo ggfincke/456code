@@ -1,13 +1,15 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off - a timer runs this before any install, so only Node built-ins and globals exist.
 // scripts/fincke-stage-update.ts
-// builds the latest green origin/main desktop app & stages it for the in-app update button
+// builds the latest green origin/main desktop app & iOS bundle and stages them for the updaters
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { finckeDesktop } from "./lib/fincke-desktop.ts";
+import { exportIosUpdate } from "./lib/fincke-ios-update.ts";
 import {
+  STAGED_IOS_UPDATE_DIR,
   STAGED_UPDATE_MANIFEST,
   STAGED_UPDATES_DIR,
   parseStagedUpdateManifest,
@@ -16,7 +18,8 @@ import {
 } from "./lib/fincke-staged-update.ts";
 
 // the systemd timer (furnace) or LaunchAgent (Mac) runs this from the main checkout every
-// 15 minutes. It only stages: the running app offers the build & installs it when asked.
+// 15 minutes. It only stages: the running app offers the desktop build & installs it when
+// asked, and the server serves the iOS bundle to the iPhone app.
 const CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
 
 const repoRoot = NodePath.dirname(import.meta.dirname);
@@ -28,12 +31,9 @@ if (platform === null) {
   process.exit(0);
 }
 
-const platformDir = NodePath.join(
-  NodeOS.homedir(),
-  finckeDesktop.home,
-  STAGED_UPDATES_DIR,
-  platform,
-);
+const updatesDir = NodePath.join(NodeOS.homedir(), finckeDesktop.home, STAGED_UPDATES_DIR);
+const platformDir = NodePath.join(updatesDir, platform);
+const iosDir = NodePath.join(updatesDir, STAGED_IOS_UPDATE_DIR);
 // a fixed sibling path so a crashed run's checkout is reused instead of piling up
 const worktree = NodePath.join(NodePath.dirname(repoRoot), "456code-stage");
 const lockPath = NodePath.join(platformDir, ".stage.lock");
@@ -82,10 +82,10 @@ function acquireLock(): boolean {
   }
 }
 
-function readStagedManifest(): StagedUpdateManifest | null {
+function readStagedManifest(dir: string): StagedUpdateManifest | null {
   try {
     return parseStagedUpdateManifest(
-      NodeFS.readFileSync(NodePath.join(platformDir, STAGED_UPDATE_MANIFEST), "utf8"),
+      NodeFS.readFileSync(NodePath.join(dir, STAGED_UPDATE_MANIFEST), "utf8"),
     );
   } catch {
     return null;
@@ -161,7 +161,8 @@ function findReleaseFile(releaseDir: string, extension: string): string {
   return NodePath.join(releaseDir, match);
 }
 
-function buildAndStage(commit: string, version: string): StagedUpdateManifest {
+// checks out & installs the commit once per run; every target builds from this checkout
+function prepareWorktree(commit: string): NodeJS.ProcessEnv {
   removeWorktree();
   run("git", ["worktree", "add", "--detach", worktree, commit]);
   const nodeDir = nodeBinDir(worktree);
@@ -178,8 +179,16 @@ function buildAndStage(commit: string, version: string): StagedUpdateManifest {
     worktree,
     env,
   );
+  return env;
+}
+
+function stageDesktop(
+  commit: string,
+  version: string,
+  env: NodeJS.ProcessEnv,
+): StagedUpdateManifest {
   runStreaming(
-    NodePath.join(nodeDir, "node"),
+    NodePath.join(nodeBinDir(worktree), "node"),
     [
       "scripts/build-desktop-artifact.ts",
       "--platform",
@@ -218,18 +227,45 @@ function buildAndStage(commit: string, version: string): StagedUpdateManifest {
   return { version, commit, builtAt: new Date().toISOString(), artifact };
 }
 
-// the manifest is written last & atomically, so the app never offers a half-copied build
-function publishManifest(manifest: StagedUpdateManifest): void {
-  const manifestPath = NodePath.join(platformDir, STAGED_UPDATE_MANIFEST);
+// the export lands in a partial dir & moves into place whole, so the server never serves a
+// manifest whose assets are still being written
+function stageIos(commit: string, version: string, env: NodeJS.ProcessEnv): StagedUpdateManifest {
+  const stagedPath = NodePath.join(iosDir, version);
+  const partial = `${stagedPath}.partial`;
+  NodeFS.rmSync(partial, { recursive: true, force: true });
+  NodeFS.mkdirSync(iosDir, { recursive: true });
+  const builtAt = new Date().toISOString();
+  exportIosUpdate({
+    mobileDir: NodePath.join(worktree, "apps", "mobile"),
+    outputDir: partial,
+    commit,
+    version,
+    createdAt: builtAt,
+    env,
+  });
+  NodeFS.rmSync(stagedPath, { recursive: true, force: true });
+  NodeFS.renameSync(partial, stagedPath);
+  return { version, commit, builtAt, artifact: version };
+}
+
+// the manifest is written last & atomically, so no client is offered a half-copied build
+function publishManifest(dir: string, manifest: StagedUpdateManifest): void {
+  const manifestPath = NodePath.join(dir, STAGED_UPDATE_MANIFEST);
   NodeFS.writeFileSync(`${manifestPath}.tmp`, `${JSON.stringify(manifest, null, 2)}\n`);
   NodeFS.renameSync(`${manifestPath}.tmp`, manifestPath);
-  for (const name of NodeFS.readdirSync(platformDir)) {
+  for (const name of NodeFS.readdirSync(dir)) {
     if (name === STAGED_UPDATE_MANIFEST || name === manifest.artifact || name === ".stage.lock") {
       continue;
     }
-    NodeFS.rmSync(NodePath.join(platformDir, name), { recursive: true, force: true });
+    NodeFS.rmSync(NodePath.join(dir, name), { recursive: true, force: true });
   }
 }
+
+// each target tracks its own staged commit, so one that failed or is new retries alone
+const targets = [
+  { name: platform, dir: platformDir, stage: stageDesktop },
+  { name: "ios", dir: iosDir, stage: stageIos },
+] as const;
 
 async function main(): Promise<void> {
   if (!acquireLock()) {
@@ -239,7 +275,8 @@ async function main(): Promise<void> {
   try {
     run("git", ["fetch", "--quiet", "origin", "main"]);
     const commit = run("git", ["rev-parse", "origin/main"]);
-    if (readStagedManifest()?.commit === commit) {
+    const pending = targets.filter((target) => readStagedManifest(target.dir)?.commit !== commit);
+    if (pending.length === 0) {
       log(`origin/main ${commit.slice(0, 9)} is already staged`);
       return;
     }
@@ -250,11 +287,23 @@ async function main(): Promise<void> {
     }
     // commit count only grows on main, so each staged build is newer than the last
     const version = `0.1.${run("git", ["rev-list", "--count", commit])}`;
-    log(`staging ${version} from ${commit.slice(0, 9)}`);
+    const names = pending.map((target) => target.name).join(", ");
+    log(`staging ${version} (${names}) from ${commit.slice(0, 9)}`);
     try {
-      const manifest = buildAndStage(commit, version);
-      publishManifest(manifest);
-      log(`staged ${manifest.artifact}`);
+      const env = prepareWorktree(commit);
+      for (const target of pending) {
+        try {
+          const manifest = target.stage(commit, version, env);
+          publishManifest(target.dir, manifest);
+          log(`staged ${target.name} ${manifest.artifact}`);
+        } catch (error) {
+          // the other target still stages; the non-zero exit surfaces this in the journal
+          process.exitCode = 1;
+          log(
+            `staging ${target.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
     } finally {
       removeWorktree();
     }

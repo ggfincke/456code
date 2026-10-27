@@ -56,7 +56,9 @@ function AppSettingsSection() {
   // Match app.config.ts's production fallback to avoid mislabeling builds as development.
   const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? "production";
   const variantLabel = variant === "production" ? "" : capitalize(variant);
-  const versionLabel = variantLabel ? `${version} · ${variantLabel}` : version;
+  // fincke: only staged OTA bundles carry the build number, so the embedded bundle shows none
+  const finckeBuild = Constants.expoConfig?.extra?.finckeBuild as string | undefined;
+  const versionLabel = [version, finckeBuild, variantLabel].filter(Boolean).join(" · ");
   const updateCheckAvailable = isAppUpdateCheckAvailable();
   const busy =
     updateState === "checking" || updateState === "downloading" || updateState === "restarting";

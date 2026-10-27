@@ -48,24 +48,24 @@ const VARIANT_CONFIG = {
   development: {
     appName: "456code Dev",
     scheme: "t3code-dev",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
+    iosBundleIdentifier: "dev.fincke.456code.dev",
+    androidPackage: "dev.fincke.456code.dev",
     relyingParty: "clerk.t3.codes",
     assets: OCEAN_ASSETS,
   },
   preview: {
     appName: "456code Preview",
     scheme: "t3code-preview",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
+    iosBundleIdentifier: "dev.fincke.456code.preview",
+    androidPackage: "dev.fincke.456code.preview",
     relyingParty: "clerk.t3.codes",
     assets: OCEAN_ASSETS,
   },
   production: {
     appName: "456code",
     scheme: "t3code",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
+    iosBundleIdentifier: "dev.fincke.456code",
+    androidPackage: "dev.fincke.456code",
     relyingParty: "clerk.t3.codes",
     assets: OCEAN_ASSETS,
   },
@@ -205,7 +205,9 @@ const config: ExpoConfig = {
   userInterfaceStyle: "automatic",
   updates: {
     enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+    // fincke: furnace's server serves the bundles its stager builds from green main
+    // (scripts/fincke-stage-update.ts), reachable over the tailnet only
+    url: "https://furnace.tail8ff18b.ts.net:456/api/fincke/ios-update/manifest",
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
   },
@@ -215,7 +217,7 @@ const config: ExpoConfig = {
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
     // Avoid Personal Team fallback: it cannot sign App Groups, Apple sign-in or push entitlements.
-    appleTeamId: "ARK85ZXQ4Z",
+    appleTeamId: "3ZX5P538FH",
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
