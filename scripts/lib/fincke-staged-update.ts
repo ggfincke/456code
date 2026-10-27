@@ -1,15 +1,18 @@
 // scripts/lib/fincke-staged-update.ts
-// layout & manifest the local release stager writes and the desktop updater reads
+// layout & manifest the local release stager writes for the desktop & iOS updaters
 
 // staged builds live under the app's home, e.g. ~/.456code-thin/updates/linux/manifest.json
 export const STAGED_UPDATES_DIR = "updates";
 export const STAGED_UPDATE_MANIFEST = "manifest.json";
+// every host also stages the iOS OTA bundle, under updates/ios/
+export const STAGED_IOS_UPDATE_DIR = "ios";
 
 export type StagedUpdatePlatform = "linux" | "mac";
 
 /**
  * One staged build. `artifact` is relative to the platform directory: an AppImage file on
- * Linux, an unpacked `.app` bundle on macOS.
+ * Linux, an unpacked `.app` bundle on macOS, or the iOS export directory named after the
+ * version.
  */
 export interface StagedUpdateManifest {
   readonly version: string;
