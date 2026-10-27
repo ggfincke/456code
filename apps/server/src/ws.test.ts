@@ -691,6 +691,10 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
         current: Effect.succeed([]),
         streamChanges: Stream.make([]),
       }),
+      Layer.mock(HostAppUpdates.HostAppUpdates)({
+        available: false,
+        streamChanges: Stream.make(null),
+      }),
       Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
         resolveTargets: () => Effect.succeed([]),
       }),
@@ -740,7 +744,6 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
             method: "browser-session-cookie",
             scopes: [],
           },
-          {},
           {},
           yield* PreviewAutomationBroker.PreviewAutomationBroker,
           yield* ServerBrowser.ServerBrowser,

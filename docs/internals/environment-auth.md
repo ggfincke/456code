@@ -29,7 +29,7 @@ vocabulary gives these grants a familiar meaning.
 
 ### Guest links are not sessions
 
-A [guest link](../user/guest-links.md) gives one browser read access to one
+A guest link gives one browser read access to one
 thread and a way to propose messages. Its tokens are HMACs of the thread and
 share id under a server key ([GuestShareService](../../apps/server/src/guest/GuestShareService.ts)),
 so nothing secret is stored. The share in the thread projection is the only

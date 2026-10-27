@@ -369,13 +369,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["beta hide fold running monitoring threads inbox sidebar shelf"],
   },
   {
-    id: "guest-links",
-    title: "Guest links",
-    to: "/settings/beta",
-    scope: "environment",
-    searchTerms: ["beta share guest invite link teammate watch t3 connect tunnel"],
-  },
-  {
     id: "auto-settle-inactive-threads",
     title: "Auto-archive inactive threads",
     to: "/settings/general",
