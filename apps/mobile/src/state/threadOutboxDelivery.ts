@@ -890,6 +890,9 @@ export function createThreadOutboxDelivery(): {
         }),
         runtimeMode: sendSettings.runtimeMode,
         interactionMode: sendSettings.interactionMode,
+        ...(queuedMessage.sourceProposedPlan
+          ? { sourceProposedPlan: queuedMessage.sourceProposedPlan }
+          : {}),
         createdAt: queuedMessage.createdAt,
         dispatchMode: queuedMessage.dispatchMode ?? "start",
       },

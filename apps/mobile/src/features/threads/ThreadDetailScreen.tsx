@@ -198,6 +198,7 @@ import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
+import { useImplementPlanAction, withImplementPlan } from "../../fincke/implement-plan";
 
 export interface ThreadDetailScreenProps {
   readonly header?: React.ReactNode;
@@ -825,6 +826,20 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     setUsageLimitsPanel((current) =>
       current !== null && current.threadKey === threadKey ? null : current,
     );
+  const implementPlan = useImplementPlanAction({
+    thread: props.selectedThread,
+    detailRef: props.selectedThreadDetailRef,
+    serverConfig: props.serverConfig,
+    connected: props.connectionStateLabel === "connected",
+    canOperate: props.canOperateThread,
+    busy: props.activeThreadBusy || props.queuedMessages.length > 0 || props.creationState !== null,
+    awaitingUserInput: props.activePendingUserInput !== null,
+    onUpdateInteractionMode: props.onUpdateThreadInteractionMode,
+    onSent: () => {
+      clearUsageLimitsFor(selectedThreadKey);
+      feedRef.current?.resetEndFollow();
+    },
+  });
   const userInputToggled =
     userInputToggle !== null && userInputToggle.requestId === activeUserInputRequestId;
   const userInputCollapsed = userInputToggled && userInputToggle.collapsed;
@@ -1252,7 +1267,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     feedTouchStartRef.current = null;
   };
 
-  return (
+  return withImplementPlan(
+    implementPlan,
     <View className="flex-1" onLayout={handleScreenLayout}>
       {!usesNativeWorkspaceColumns ? <NativeLayoutObserver onChange={setScreenMetrics} /> : null}
       {props.draftMode ? (
@@ -1652,6 +1668,6 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
           </ComposerPopoverHost>
         </KeyboardStickyView>
       ) : null}
-    </View>
+    </View>,
   );
 }

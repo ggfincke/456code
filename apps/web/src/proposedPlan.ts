@@ -1,4 +1,12 @@
 import { stripDisplayedPlanMarkdown, proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+// fork: implement-plan prompt helpers are shared with mobile
+import { buildPlanImplementationPrompt } from "@t3tools/client-runtime/proposed-plan";
+
+export {
+  PLAN_IMPLEMENTATION_PROMPT_PREFIX,
+  buildPlanImplementationPrompt,
+  buildPlanImplementationThreadTitle,
+} from "@t3tools/client-runtime/proposed-plan";
 
 export function buildCollapsedProposedPlanPreviewMarkdown(
   planMarkdown: string,
@@ -51,12 +59,6 @@ function sanitizePlanFileSegment(input: string): string {
   return sanitized.length > 0 ? sanitized : "plan";
 }
 
-export const PLAN_IMPLEMENTATION_PROMPT_PREFIX = "PLEASE IMPLEMENT THIS PLAN:\n";
-
-export function buildPlanImplementationPrompt(planMarkdown: string): string {
-  return `${PLAN_IMPLEMENTATION_PROMPT_PREFIX}${planMarkdown.trim()}`;
-}
-
 export function resolvePlanFollowUpSubmission(input: { draftText: string; planMarkdown: string }): {
   text: string;
   interactionMode: "default" | "plan";
@@ -73,14 +75,6 @@ export function resolvePlanFollowUpSubmission(input: { draftText: string; planMa
     text: buildPlanImplementationPrompt(input.planMarkdown),
     interactionMode: "default",
   };
-}
-
-export function buildPlanImplementationThreadTitle(planMarkdown: string): string {
-  const title = proposedPlanTitle(planMarkdown);
-  if (!title) {
-    return "Implement plan";
-  }
-  return `Implement ${title}`;
 }
 
 export function buildProposedPlanMarkdownFilename(planMarkdown: string): string {
