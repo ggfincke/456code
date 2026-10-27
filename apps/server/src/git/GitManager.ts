@@ -2316,7 +2316,7 @@ export const make = Effect.gen(function* () {
       phase: "pr",
       label: `Creating ${terms.singular}...`,
     });
-    yield* provider
+    const racedPr = yield* provider
       .createChangeRequest({
         cwd,
         baseRefName: baseBranch,
@@ -2324,7 +2324,31 @@ export const make = Effect.gen(function* () {
         title: generated.title,
         bodyFile,
       })
-      .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.ignore)));
+      .pipe(
+        Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.ignore)),
+        Effect.as(null),
+        // an agent or another client can open this branch's PR while the content generates, and the
+        // host rejects the duplicate; open the PR that won instead of failing
+        Effect.catch((error) =>
+          findOpenPr(cwd, headContext).pipe(
+            Effect.orElseSucceed(() => null),
+            Effect.filterOrFail(
+              (existing) => existing !== null,
+              () => error,
+            ),
+          ),
+        ),
+      );
+    if (racedPr) {
+      return {
+        status: "opened_existing" as const,
+        url: racedPr.url,
+        number: racedPr.number,
+        baseBranch: racedPr.baseRefName,
+        headBranch: racedPr.headRefName,
+        title: racedPr.title,
+      };
+    }
 
     const created = yield* findOpenPr(cwd, headContext);
     if (!created) {
