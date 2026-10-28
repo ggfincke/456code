@@ -2,13 +2,14 @@
 // shares fincke ribbon geometry between web and native svg renderers
 
 // original fincke.dev ribbon geometry, cropped so the whole opening S fits the header band:
-// it enters at the top-left & leaves on the right, under the brand
-export const FINCKE_WAVE_FIELD = { x: 0, y: -6, width: 470, height: 124 } as const;
+// it enters at the top-left & leaves on the right, under the brand. the crop ends at y 136,
+// just under the dark back ribbon's lowest point (~131.8 near x 462), so it curves back up
+export const FINCKE_WAVE_FIELD = { x: 0, y: -6, width: 470, height: 142 } as const;
 
 // web's sidebar puts the brand level with the toggle at the top right, so its crop starts
 // higher to drop the wave until the pale highlight clears that row. native keeps the original
-// crop since its title & view toggle already sit clear of the ribbons there
-export const FINCKE_WAVE_SIDEBAR_FIELD = { ...FINCKE_WAVE_FIELD, y: -23 } as const;
+// top since its title & view toggle already sit clear of the ribbons there. both end at y 136
+export const FINCKE_WAVE_SIDEBAR_FIELD = { ...FINCKE_WAVE_FIELD, y: -23, height: 159 } as const;
 
 // same opening S, cropped tighter for the ~40px composer button, which has no text to clear.
 // the taller crop leaves room for the highlight ribbon above the front one

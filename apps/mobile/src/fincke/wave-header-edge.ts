@@ -3,7 +3,7 @@
 
 import { createContext, createElement, useState, type ReactNode } from "react";
 
-import { BAND_HEIGHT } from "./FinckeListHeader";
+import { BAND_HEIGHT, finckeWaveTail } from "./FinckeListHeader";
 
 // true once the wave band has fully passed under the native title, so only rows can sit there
 export const FinckeWaveClearedContext = createContext(false);
@@ -12,9 +12,10 @@ export const FinckeWaveClearedContext = createContext(false);
 // hard line through it. once the list scrolls a band's height, the next thing under the title is
 // rows, which need that effect as their backing. offsets are measured from the resting position,
 // and setting the same boolean bails out, so only a crossing re-renders
-export function useFinckeWaveCleared(initialScrollOffset: number) {
-  const [cleared, setCleared] = useState(() => initialScrollOffset >= BAND_HEIGHT);
-  const track = (scrollOffset: number) => setCleared(scrollOffset >= BAND_HEIGHT);
+export function useFinckeWaveCleared(initialScrollOffset: number, pullUp: number) {
+  const bandHeight = BAND_HEIGHT + finckeWaveTail(pullUp);
+  const [cleared, setCleared] = useState(() => initialScrollOffset >= bandHeight);
+  const track = (scrollOffset: number) => setCleared(scrollOffset >= bandHeight);
   return { cleared, track };
 }
 

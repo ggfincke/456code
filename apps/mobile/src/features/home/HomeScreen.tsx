@@ -7,7 +7,7 @@ import type { ThreadMoveDestination } from "../threads/threadOrder";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { THREAD_SIDEBAR_ROW_LAYOUT } from "../threads/threadListAnimations";
-import { FinckeListHeader } from "../../fincke/FinckeListHeader";
+import { FinckeListHeader, finckeWaveTail } from "../../fincke/FinckeListHeader";
 import {
   buildProjectSidebarItems,
   finckeSidebarItemsAreEqual,
@@ -269,7 +269,6 @@ export function HomeScreen(props: HomeScreenProps) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const workspace = useWorkspaceTabs();
   const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
-  const waveCleared = useFinckeWaveCleared(initialScrollOffset);
   const primaryColumn = use(NativePrimaryColumnContext);
   const contentBackground = primaryColumn ? "bg-drawer" : "bg-screen";
   const containerClassName = cn(
@@ -284,6 +283,10 @@ export function HomeScreen(props: HomeScreenProps) {
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const homeScrollGesture = useNativeGesture();
   const insets = useSafeAreaInsets();
+  const waveCleared = useFinckeWaveCleared(
+    initialScrollOffset,
+    Platform.OS === "ios" ? insets.top : 0,
+  );
   const { fabClearance } = useAndroidControlSizing();
   const screenMetrics = useNativeLayoutMetrics();
   const contentSideInsets = usesNativeWorkspaceColumns
@@ -807,6 +810,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const listPaddingRight =
     (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter;
 
+  const waveTail = finckeWaveTail(Platform.OS === "ios" ? insets.top : 0);
   const v2ListHeader = (
     <>
       {listHeader}
@@ -815,12 +819,13 @@ export function HomeScreen(props: HomeScreenProps) {
         bleedLeft={listPaddingLeft}
         bleedRight={listPaddingRight}
       >
-        {/* fincke: the projects/activity switch rides the wave's lower edge, clear of the
-            filter chips. Native title-row buttons would make UIKit dim the wave behind them */}
+        {/* fincke: the projects/activity switch sits at the title band's lower edge, with the
+            wave's tail running on under it and the filter chips below that. Native title-row
+            buttons would make UIKit dim the wave behind them */}
         {primaryColumn ? (
           <View
             className="flex-row justify-end pr-1"
-            style={ocean ? { marginTop: -40 } : undefined}
+            style={ocean ? { marginTop: -40 - waveTail, marginBottom: waveTail } : undefined}
           >
             <SidebarViewToggle
               projectsView={sidebarView.projectsView}
