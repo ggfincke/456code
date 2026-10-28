@@ -448,9 +448,8 @@ function useSidebarThreads(input: {
   const visibleSnoozedThreads = snoozedShelfExpanded
     ? snoozedThreads
     : routeThreadOnly(snoozedThreads, routeRowThreadKey);
-  const visibleWorkingThreads = workingShelfExpanded
-    ? workingThreads
-    : routeThreadOnly(workingThreads, routeRowThreadKey);
+  // fincke: Working sits at the top, so a collapsed shelf hides even the open thread
+  const visibleWorkingThreads = workingShelfExpanded ? workingThreads : EMPTY_THREADS;
   const orderedThreads = [
     ...pinnedThreads,
     ...visibleWorkingThreads,

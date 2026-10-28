@@ -740,12 +740,8 @@ export function buildThreadListV2Items(input: {
       parseTimestampMs(left.snoozedUntil ?? "") - parseTimestampMs(right.snoozedUntil ?? ""),
   );
   const selectedThreadKey = input.selectedThreadKey ?? null;
-  const visibleWorking =
-    input.workingShelfExpanded === true
-      ? orderedWorking
-      : orderedWorking.filter(
-          (thread) => `${thread.environmentId}:${thread.id}` === selectedThreadKey,
-        );
+  // fincke: Working sits at the top, so a collapsed shelf hides even the open thread
+  const visibleWorking = input.workingShelfExpanded === true ? orderedWorking : [];
   const visibleSnoozed =
     input.snoozedShelfExpanded === true
       ? orderedSnoozed

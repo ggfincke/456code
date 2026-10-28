@@ -187,7 +187,9 @@ function ThreadListV2Section(props: {
   const working = props.tone === "working";
   const sidebarPane = props.pane === "sidebar";
   const className = cn(
-    "mb-1.5 mt-4 flex-row items-center gap-2.5",
+    // fincke: the Active heading follows a row's own bottom padding, so it needs less above it
+    props.large && !props.disclosure ? "mt-2.5" : "mt-4",
+    "mb-1.5 flex-row items-center gap-2.5",
     props.pane === "sidebar" ? "px-3" : "px-5",
   );
   const content = (
