@@ -1,6 +1,6 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../../state/olderSettledShelf";
@@ -10,6 +10,7 @@ import {
   buildThreadListV2ListItems,
   getThreadListV2OrderedSection,
   threadListInboxReturns,
+  type ThreadListV2NeedsYouTier,
 } from "./threadListV2";
 import { computeThreadMoveAvailability } from "./threadOrder";
 
@@ -57,6 +58,11 @@ export function useThreadListV2(input: {
   readonly timeOnStatusRows?: boolean;
 }) {
   const { threads, workingShelfEnabled } = input;
+  // Opening a thread marks it read; it keeps the Needs you tier it opened with until deselected.
+  const [needsYouHold, setNeedsYouHold] = useState<{
+    readonly threadKey: string | null;
+    readonly tier: ThreadListV2NeedsYouTier | null;
+  } | null>(null);
   // A thread can stop working when the threads change, or when its exit grace expires.
   const inboxVersion = useSyncExternalStore(
     threadListInboxReturns.subscribe,
@@ -114,6 +120,8 @@ export function useThreadListV2(input: {
     snoozedShelfExpanded: input.snoozedShelfExpanded,
     settledShelfExpanded: input.settledShelfExpanded,
     selectedThreadKey: input.selectedThreadKey,
+    selectedNeedsYouHold:
+      needsYouHold?.threadKey === input.selectedThreadKey ? needsYouHold.tier : null,
     isListedSettled: olderSettledShelf.isListed,
     unloadedSettledCount: olderSettledShelf.unloadedCount(
       threads.filter(
@@ -128,6 +136,15 @@ export function useThreadListV2(input: {
     ),
   };
   const layout = buildThreadListV2Items(layoutInput);
+  // a search lists matches only, so it neither takes nor drops the hold
+  if (
+    input.searchQuery.trim().length === 0 &&
+    (needsYouHold === null ||
+      needsYouHold.threadKey !== input.selectedThreadKey ||
+      (needsYouHold.tier !== null && needsYouHold.tier !== layout.selectedNeedsYouTier))
+  ) {
+    setNeedsYouHold({ threadKey: input.selectedThreadKey, tier: layout.selectedNeedsYouTier });
+  }
   useOlderSettledShelfGrowth(olderSettledShelf, layout.listedSettledThreads);
   const contentOnlyThreadKeys = useKeySet([...layout.contentOnlyThreadKeys].sort().join("\n"));
   const scopedProjectKeys =
@@ -147,6 +164,8 @@ export function useThreadListV2(input: {
   const items = buildThreadListV2ListItems({
     items: layout.items,
     pendingTasks,
+    needsYouCount: layout.needsYouCount,
+    needsYouHeaderIndex: layout.needsYouHeaderIndex,
     workingCount: layout.workingCount,
     workingShelfExpanded: input.workingShelfExpanded,
     workingShelfHeaderIndex: layout.workingShelfHeaderIndex,

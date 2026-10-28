@@ -73,6 +73,7 @@ import {
   resolveThreadListV2SnoozeGateExpiryMs,
   resolveThreadListV2SnoozeMenuSelection,
   threadHasUnseenCompletion,
+  threadIsUnread,
   resolveThreadListV2Status,
   resolveThreadListV2ProviderDrivers,
   resolveThreadListV2SwipeActions,
@@ -166,7 +167,7 @@ const LEGACY_MENU_ACTIONS: MenuAction[] = [
 function ThreadListV2Section(props: {
   readonly label: string;
   readonly pane?: "screen" | "sidebar";
-  // fincke: "working" is teal, & large labels mark the Working shelf and the Active list below it
+  // fincke: "working" is teal, & large labels mark Needs you, the Working shelf & the Active list
   readonly tone?: "default" | "snoozed" | "working";
   readonly large?: boolean;
   readonly disclosure?: {
@@ -287,6 +288,21 @@ function ThreadListV2ShelfHeader(
     />
   );
 }
+
+// fincke: Needs you always lists its rows, so it has no disclosure and always shows its count
+export const ThreadListV2NeedsYouHeader = memo(function ThreadListV2NeedsYouHeader(props: {
+  readonly count: number;
+  readonly pane?: "screen" | "sidebar";
+}) {
+  return (
+    <ThreadListV2Section
+      label={`Needs you (${props.count})`}
+      pane={props.pane}
+      tone="working"
+      large
+    />
+  );
+});
 
 export const ThreadListV2WorkingShelfHeader = memo(function ThreadListV2WorkingShelfHeader(
   props: ThreadListV2ShelfHeaderProps,
@@ -740,6 +756,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const timeLabel = props.timeLabel;
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const markThreadUnread = useAtomCommand(threadEnvironment.markUnread, { reportFailure: false });
   const handleAcknowledgeWoke = useCallback(() => {
     if (props.wokeAt === null) return;
     void visitThread({
@@ -747,13 +764,57 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       input: { threadId: thread.id, visitedAt: props.wokeAt },
     });
   }, [props.wokeAt, thread.environmentId, thread.id, visitThread]);
+  // Older servers cannot persist read state, so their rows get no read toggle.
+  const readToggleSupported = thread.lastVisitedAt !== undefined && variant === "card";
+  const unread = threadIsUnread(thread, props.wokeAt);
+  const handleToggleRead = useCallback(() => {
+    if (!unread) {
+      void markThreadUnread({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.id },
+      });
+      return;
+    }
+    // Visit at the shell's own timestamps so client clock skew cannot leave it unread.
+    const visitedAt = [thread.latestRun?.completedAt, props.wokeAt].reduce<string>(
+      (latest, candidate) =>
+        candidate != null && Date.parse(candidate) > Date.parse(latest) ? candidate : latest,
+      thread.updatedAt,
+    );
+    void visitThread({
+      environmentId: thread.environmentId,
+      input: { threadId: thread.id, visitedAt },
+    });
+  }, [markThreadUnread, props.wokeAt, thread, unread, visitThread]);
+  const leadingAction = useMemo(
+    () =>
+      !readToggleSupported
+        ? undefined
+        : unread
+          ? {
+              accessibilityLabel: `Mark ${thread.title} read`,
+              icon: "checkmark.circle" as const,
+              label: "Read",
+              onPress: handleToggleRead,
+            }
+          : {
+              accessibilityLabel: `Mark ${thread.title} unread`,
+              icon: "circle.fill" as const,
+              label: "Unread",
+              onPress: handleToggleRead,
+            },
+    [handleToggleRead, readToggleSupported, thread.title, unread],
+  );
   // VoiceOver cannot focus buttons inside the accessible row.
   const rowAccessibilityActions = useMemo(
     () => [
       ...(prBadgeLabel ? [{ name: "openPullRequests", label: prBadgeLabel }] : []),
       ...(showsWoke ? [{ name: "dismissWoke", label: "Dismiss Woke notification" }] : []),
+      ...(leadingAction
+        ? [{ name: "toggleRead", label: unread ? "Mark read" : "Mark unread" }]
+        : []),
     ],
-    [prBadgeLabel, showsWoke],
+    [leadingAction, prBadgeLabel, showsWoke, unread],
   );
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
@@ -1424,6 +1485,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
           if (event.nativeEvent.actionName === "dismissWoke") handleAcknowledgeWoke();
+          if (event.nativeEvent.actionName === "toggleRead") handleToggleRead();
         }}
         onPress={() => {
           close();
@@ -1552,6 +1614,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         enableTrackpadSwipe
         fullSwipeAction="primary"
         fullSwipeWidth={props.fullSwipeWidth ?? windowWidth - 32}
+        leadingAction={leadingAction}
         onDelete={handleDelete}
         onSwipeableClose={props.onSwipeableClose}
         onSwipeableWillOpen={props.onSwipeableWillOpen}

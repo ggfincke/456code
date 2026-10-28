@@ -74,6 +74,7 @@ import { threadListEnvironmentsAtom } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import {
+  ThreadListV2NeedsYouHeader,
   ThreadListV2PendingRow,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
@@ -615,6 +616,14 @@ export function HomeScreen(props: HomeScreenProps) {
           onSwipeableWillOpen={handleSwipeableWillOpen}
           simultaneousSwipeGesture={homeScrollGesture}
           activationKey={item.key}
+        />
+      );
+    }
+    if (item.type === "v2-needs-you") {
+      return (
+        <ThreadListV2NeedsYouHeader
+          count={item.count}
+          pane={primaryColumn ? "sidebar" : "screen"}
         />
       );
     }

@@ -222,6 +222,8 @@ interface ThreadSwipeableProps {
   /** Omitted uses Delete only with the built-in Delete secondary action; otherwise it uses primary. */
   readonly fullSwipeAction?: "delete" | "primary";
   readonly fullSwipeWidth: number;
+  /** One action behind the leading edge, committed by a full swipe right. */
+  readonly leadingAction?: ThreadSwipeAction;
   readonly onDelete: () => void;
   readonly onSwipeableClose?: (methods: SwipeableMethods) => void;
   readonly onSwipeableWillOpen?: (methods: SwipeableMethods) => void;
@@ -240,6 +242,7 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
   const hasSecondaryAction = props.secondaryAction !== null;
   const actionsWidth = swipeActionsWidth(hasSecondaryAction);
   const fullSwipeThreshold = Math.max(actionsWidth + 44, props.fullSwipeWidth * 0.58);
+  const leadingFullSwipeThreshold = Math.max(ACTION_ITEM_WIDTH + 44, props.fullSwipeWidth * 0.58);
   const fullSwipeAction =
     props.fullSwipeAction ?? (props.secondaryAction === undefined ? "delete" : "primary");
   const close = useCallback(() => swipeableRef.current?.close(), []);
@@ -262,6 +265,7 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
   const fallbackTranslation = useSharedValue(0);
   const actionOpacity = useSharedValue(1);
   const primaryAction = props.primaryAction;
+  const leadingAction = props.leadingAction;
   const onDelete = props.onDelete;
   const onSwipeableClose = props.onSwipeableClose;
 
@@ -376,6 +380,11 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
     primaryAction.onPress();
     if (!pendingDismissRef.current) swipeableRef.current?.close();
   }, [content, primaryAction]);
+  const commitLeadingAction = useCallback(() => {
+    if (!mountedRef.current || contentRef.current !== content) return;
+    leadingAction?.onPress();
+    swipeableRef.current?.close();
+  }, [content, leadingAction]);
   // RNGH lifecycle events call the latest handler, so commit from this release.
   const commitFullSwipe = useCallback(() => {
     if (!mountedRef.current || contentRef.current !== content) return;
@@ -385,6 +394,7 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
       onDelete();
     }
   }, [commitPrimaryAction, content, fullSwipeAction, onDelete]);
+  const hasLeadingAction = leadingAction !== undefined;
   const handleRelease = useCallback(
     (translation: SharedValue<number>) => {
       "worklet";
@@ -393,9 +403,20 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
         runOnJS(commitFullSwipe)();
         return true;
       }
+      if (hasLeadingAction && translation.value >= leadingFullSwipeThreshold) {
+        runOnJS(commitLeadingAction)();
+        return true;
+      }
       return false;
     },
-    [commitFullSwipe, dismissing, fullSwipeThreshold],
+    [
+      commitFullSwipe,
+      commitLeadingAction,
+      dismissing,
+      fullSwipeThreshold,
+      hasLeadingAction,
+      leadingFullSwipeThreshold,
+    ],
   );
   const handleFullSwipeArmedChange = useCallback(
     (armed: boolean) => {
@@ -471,6 +492,21 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
     rightActions.current = { deps, element };
     return element;
   };
+  const renderLeftActions =
+    leadingAction === undefined || dormant
+      ? undefined
+      : (_progress: SharedValue<number>, translation: SharedValue<number>) => (
+          <Animated.View style={actionStyle}>
+            <ThreadLeadingSwipeAction
+              action={{ ...leadingAction, onPress: commitLeadingAction }}
+              backgroundColor={backgroundColor}
+              compact={compactActions}
+              fullSwipeThreshold={leadingFullSwipeThreshold}
+              onFullSwipeArmedChange={handleFullSwipeArmedChange}
+              translation={translation}
+            />
+          </Animated.View>
+        );
   const childrenContainerStyle = useMemo(() => ({ backgroundColor }), [backgroundColor]);
   const swipeableContainerStyle = useMemo(
     () => [{ backgroundColor }, containerStyle],
@@ -501,7 +537,10 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
           onSwipeableOpenStartDrag={handleWillOpen}
           onSwipeableWillOpen={handleWillOpen}
           overshootFriction={1}
+          overshootLeft={renderLeftActions !== undefined}
           overshootRight
+          renderLeftActions={renderLeftActions}
+          leftThreshold={ACTION_ITEM_WIDTH * 0.42}
           renderRightActions={renderRightActions}
           rightThreshold={actionsWidth * 0.42}
           simultaneousWith={props.simultaneousWith}
@@ -528,9 +567,12 @@ function SwipeActionButton(props: {
   readonly label: string;
   readonly menu?: ThreadSwipeAction["menu"];
   readonly onPress: () => void;
+  /** Leading actions sit at the left edge, so they reveal and stretch in the mirrored direction. */
+  readonly side?: "leading" | "trailing";
   readonly stretchesOnFullSwipe: boolean;
   readonly translation: SharedValue<number>;
 }) {
+  const direction = props.side === "leading" ? -1 : 1;
   const {
     actionsWidth,
     entryRange: [entryRangeStart, entryRangeEnd],
@@ -541,7 +583,7 @@ function SwipeActionButton(props: {
   const circleSize = props.compact ? COMPACT_ACTION_CIRCLE_SIZE : ACTION_CIRCLE_SIZE;
   const iconSize = props.compact ? COMPACT_ACTION_ICON_SIZE : ACTION_ICON_SIZE;
   const actionStyle = useAnimatedStyle(() => {
-    const reveal = Math.max(-translation.value, 0);
+    const reveal = Math.max(-translation.value * direction, 0);
     const entryProgress = interpolate(
       reveal,
       [entryRangeStart, entryRangeEnd],
@@ -561,23 +603,25 @@ function SwipeActionButton(props: {
       transform: [
         {
           translateX:
-            interpolate(entryProgress, [0, 1], [22, 0]) - (stretchesOnFullSwipe ? 0 : stretch),
+            direction *
+            (interpolate(entryProgress, [0, 1], [22, 0]) - (stretchesOnFullSwipe ? 0 : stretch)),
         },
         { scale: interpolate(entryProgress, [0, 1], [0.78, 1]) },
       ],
     };
   });
   const circleStyle = useAnimatedStyle(() => {
-    const reveal = Math.max(-translation.value, 0);
+    const reveal = Math.max(-translation.value * direction, 0);
     const stretch = stretchesOnFullSwipe ? Math.max(reveal - actionsWidth, 0) : 0;
 
     return {
-      transform: [{ translateX: -stretch }],
+      // a trailing circle grows leftward toward the row, a leading one rightward
+      transform: [{ translateX: direction === 1 ? -stretch : 0 }],
       width: circleSize + stretch,
     };
   });
   const iconStyle = useAnimatedStyle(() => {
-    const reveal = Math.max(-translation.value, 0);
+    const reveal = Math.max(-translation.value * direction, 0);
     const stretch = stretchesOnFullSwipe ? Math.max(reveal - actionsWidth, 0) : 0;
     const armedProgress = interpolate(
       reveal,
@@ -587,7 +631,7 @@ function SwipeActionButton(props: {
     );
 
     return {
-      transform: [{ translateX: -stretch * (0.5 + armedProgress * 0.5) }],
+      transform: [{ translateX: -direction * stretch * (0.5 + armedProgress * 0.5) }],
     };
   });
   const labelStyle = useAnimatedStyle(() => {
@@ -595,7 +639,7 @@ function SwipeActionButton(props: {
       return { opacity: 1 };
     }
 
-    const reveal = Math.max(-translation.value, 0);
+    const reveal = Math.max(-translation.value * direction, 0);
     const stretch = Math.max(reveal - actionsWidth, 0);
     return {
       opacity: interpolate(
@@ -604,7 +648,7 @@ function SwipeActionButton(props: {
         [1, 0],
         Extrapolation.CLAMP,
       ),
-      transform: [{ translateX: -stretch * 0.5 }],
+      transform: [{ translateX: -direction * stretch * 0.5 }],
     };
   });
 
@@ -708,6 +752,51 @@ function SwipeActionButton(props: {
         </Menu>
       )}
     </Animated.View>
+  );
+}
+
+function ThreadLeadingSwipeAction(props: {
+  readonly action: ThreadSwipeAction;
+  readonly backgroundColor: ColorValue;
+  readonly compact: boolean;
+  readonly fullSwipeThreshold: number;
+  readonly onFullSwipeArmedChange: (armed: boolean) => void;
+  readonly translation: SharedValue<number>;
+}) {
+  const { fullSwipeThreshold, onFullSwipeArmedChange, translation } = props;
+  useAnimatedReaction(
+    () => translation.value >= fullSwipeThreshold,
+    (armed, previous) => {
+      if (armed !== previous) {
+        runOnJS(onFullSwipeArmedChange)(armed);
+      }
+    },
+    [fullSwipeThreshold, onFullSwipeArmedChange, translation],
+  );
+
+  return (
+    <View
+      style={{
+        backgroundColor: props.backgroundColor,
+        height: "100%",
+        width: ACTION_ITEM_WIDTH,
+      }}
+    >
+      <SwipeActionButton
+        accessibilityLabel={props.action.accessibilityLabel}
+        actionsWidth={ACTION_ITEM_WIDTH}
+        tone="primary"
+        compact={props.compact}
+        entryRange={[8, ACTION_ITEM_WIDTH * 0.72]}
+        fullSwipeThreshold={fullSwipeThreshold}
+        icon={props.action.icon}
+        label={props.action.label}
+        onPress={props.action.onPress}
+        side="leading"
+        stretchesOnFullSwipe
+        translation={translation}
+      />
+    </View>
   );
 }
 
