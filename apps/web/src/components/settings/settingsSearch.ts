@@ -314,6 +314,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["wide full width column layout messages composer monitor"],
   },
   {
+    id: "code-theme",
+    title: "Code theme",
+    to: "/settings/appearance",
+    searchTerms: ["syntax highlighting colors material ocean pierre editor files diffs"],
+  },
+  {
     id: "math-rendering",
     title: "Render math",
     to: "/settings/appearance",

@@ -2,17 +2,23 @@ import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { parseDiffFromFile } from "@pierre/diffs";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 import { READABLE_LIGHT_THEME_NAME } from "./readableSyntaxTheme";
+import { MATERIAL_OCEAN_HC_THEME_NAME, usesMaterialOceanSyntax } from "../fincke/oceanSyntaxTheme";
 
 export const DIFF_THEME_NAMES = {
   light: "pierre-light",
   dark: "pierre-dark",
   readableLight: READABLE_LIGHT_THEME_NAME,
+  materialOceanHighContrast: MATERIAL_OCEAN_HC_THEME_NAME,
 } as const;
 
 export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
 
 export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
-  if (theme === "dark") return DIFF_THEME_NAMES.dark;
+  if (theme === "dark") {
+    return usesMaterialOceanSyntax()
+      ? DIFF_THEME_NAMES.materialOceanHighContrast
+      : DIFF_THEME_NAMES.dark;
+  }
   // The New design (data-redesign on <html>) keeps light syntax readable on every code surface.
   return typeof document !== "undefined" && document.documentElement.hasAttribute("data-redesign")
     ? DIFF_THEME_NAMES.readableLight

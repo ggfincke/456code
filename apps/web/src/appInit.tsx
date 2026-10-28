@@ -62,6 +62,9 @@ function startClientAppearance(): void {
     if (previous?.chatWidth !== settings.chatWidth) {
       root.dataset.chatWidth = settings.chatWidth;
     }
+    if (previous?.codeTheme !== settings.codeTheme) {
+      root.dataset.codeTheme = settings.codeTheme;
+    }
     if (previous?.redesignEnabled !== settings.redesignEnabled) {
       root.toggleAttribute("data-redesign", settings.redesignEnabled);
     }
