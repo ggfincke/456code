@@ -2974,7 +2974,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 
   if (personalBuild) {
     buildConfig.appId = finckeDesktop.appId;
-    buildConfig.productName = "456code (Alpha)";
+    buildConfig.productName = "456code (Beta)";
     buildConfig.artifactName = "456code-thin-${version}-${arch}.${ext}";
     buildConfig.publish = null;
     for (const platformName of ["mac", "linux", "win"]) {

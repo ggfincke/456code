@@ -16,7 +16,7 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-const APP_DISPLAY_NAME = isDevelopment ? "456code (Dev)" : "456code (Alpha)";
+const APP_DISPLAY_NAME = isDevelopment ? "456code (Dev)" : "456code (Beta)";
 const APP_BUNDLE_ID = isDevelopment
   ? `com.ggfincke.456code.thin.dev.${devBundleIdSuffix || "local"}`
   : "com.ggfincke.456code.thin";
