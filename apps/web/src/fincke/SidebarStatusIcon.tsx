@@ -14,7 +14,6 @@ export function sidebarStatusKindForPill(label: ThreadStatusPill["label"]): Side
       return "working";
     case "Pending Approval":
     case "Awaiting Input":
-    case "Guest Request":
       return "attention";
     case "Failed":
       return "failed";

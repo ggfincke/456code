@@ -228,7 +228,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
           No messages waiting in this queue.
         </Text>
       ) : null}
-      {queuedRuns.map(({ run, text, attachments, context }, index) => {
+      {queuedRuns.map(({ run, text, attachments }, index) => {
         const layout = dragRows?.find((row) => row.id === run.id);
         const offset =
           sourceLayout?.y !== undefined &&
@@ -245,7 +245,6 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
           editBlocked: editBlockedReason !== null,
           index,
           isEditing: editing?.runId === run.id,
-          isGuestMessage: context?.guest !== undefined,
           queuedCount: queuedRuns.length,
           text,
         });
@@ -402,11 +401,6 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                         }
                         numberOfLines={1}
                       >
-                        {context?.guest === undefined ? null : (
-                          <Text className="font-t3-medium text-adaptive-fuchsia-600-300">
-                            {`${context.guest.name}  `}
-                          </Text>
-                        )}
                         {title}
                       </Text>
                       {controls.isEditing ? (

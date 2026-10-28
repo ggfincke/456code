@@ -24,10 +24,7 @@ import { type TimestampFormat } from "@t3tools/contracts/settings";
 import type { TurnItemDetailSource } from "../../state/queries";
 import { type HandoffTimelineRun } from "./V2LifecycleRow";
 
-/**
- * Where an expanded row reads an item's detail and a command's output. The owner's rows read them
- * from the environment; the guest page reads them through its own routes.
- */
+/** Where an expanded row reads an item's detail and a command's output, other than the environment. */
 export interface TurnItemSource {
   readonly detail: TurnItemDetailSource;
   readonly commandOutput: (target: {
@@ -58,16 +55,13 @@ export interface TimelineRowSharedState {
   displayThreadKey?: string;
   /** Unset where there is no diff to open, so the timeline shows no "Open diff" button. */
   onOpenTurnDiff: ((runId: RunId, filePath?: string) => void) | undefined;
-  /**
-   * Draws a published HTML visual. Unset, the row loads it from the environment; the guest page
-   * loads it through its own route.
-   */
+  /** Draws a published HTML visual. Unset, the row loads it from the environment. */
   renderHtmlRender: ((row: Extract<TimelineRow, { kind: "html-render" }>) => ReactNode) | undefined;
   /** Unset, expanded rows read detail and command output from the environment. */
   turnItemSource: TurnItemSource | undefined;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   workflowOpening: WorkflowOpening | null;
-  /** Absent hides "Fork from this response", as in the guest view. */
+  /** Absent hides "Fork from this response". */
   onForkFromRun:
     | ((input: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => Promise<void>)
     | undefined;

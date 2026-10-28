@@ -254,14 +254,13 @@ export const COMPOSER_CONTEXT_MAX_RECORDS = 200;
 const COMPOSER_CONTEXT_MAX_SERIALIZED_CHARS = 16_000_000;
 
 /**
- * Marks a user message as a guest's, sent by the owner. The message `text` keeps the attributed
- * form the agent reads; clients show `text` here with `name` beside it. Only the server sets it.
+ * Marks a stored user message as one a guest link sent. Guest sharing is removed; this stays so
+ * those messages still decode, and their `text` already names the guest.
  */
 export const GuestMessageAttribution = Schema.Struct({
   guestMessageId: GuestMessageId,
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(GUEST_NAME_MAX_LENGTH)),
   text: Schema.String.check(Schema.isMaxLength(GUEST_MESSAGE_MAX_LENGTH)),
-  /** The link the guest used. Only that link's guest may load the message's files. */
   shareId: Schema.optional(GuestShareId),
 });
 export type GuestMessageAttribution = typeof GuestMessageAttribution.Type;

@@ -127,15 +127,12 @@ export function QueuedRunsControl({
     (message) => message.inputIntent === "queued_turn" && !acknowledgedMessageIds.has(message.id),
   );
   const items = [
-    ...queued.map(({ run, text, attachments, context }, serverIndex) => ({
+    ...queued.map(({ run, text, attachments }, serverIndex) => ({
       key: run.id,
       runId: run.id,
       messageId: run.userMessageId,
       serverIndex,
       text,
-      // A guest's message keeps the guest's words; the owner can cancel it, not rewrite it.
-      editable: context?.guest === undefined,
-      guestName: context?.guest?.name,
       attachments,
       thumbnails: attachments
         .filter((attachment) => attachment.type === "image")
@@ -152,8 +149,6 @@ export function QueuedRunsControl({
       messageId: null,
       serverIndex: null,
       text: message.text,
-      editable: true,
-      guestName: undefined,
       attachments: [] as ReadonlyArray<ContractChatAttachment>,
       thumbnails: (message.attachments ?? [])
         .filter(isImageAttachment)
@@ -216,7 +211,6 @@ export function QueuedRunsControl({
       const latest = queued.at(-1);
       if (
         !latest ||
-        latest.context?.guest !== undefined ||
         props.editingRunId !== null ||
         props.editBlockedReason !== null ||
         busyRunId !== null
@@ -366,12 +360,7 @@ export function QueuedRunsControl({
                 ) : null}
                 {/* In full, like a sent turn: a queued message is read before it is sent. */}
                 {previewText ? (
-                  <p className="whitespace-pre-wrap wrap-anywhere">
-                    {item.guestName === undefined ? null : (
-                      <span className="text-guest-foreground">{item.guestName} </span>
-                    )}
-                    {previewText}
-                  </p>
+                  <p className="whitespace-pre-wrap wrap-anywhere">{previewText}</p>
                 ) : null}
               </div>
               <div className="flex items-center gap-0.5 pe-1 text-xs text-muted-foreground">
@@ -437,7 +426,6 @@ export function QueuedRunsControl({
                           aria-label="Edit queued message"
                           disabled={
                             item.runId === null ||
-                            !item.editable ||
                             busyRunId !== null ||
                             props.editBlockedReason !== null
                           }

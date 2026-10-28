@@ -19,8 +19,6 @@ import {
 } from "../../lib/enrichedLinkPresentation";
 import { ThreadContextDivider } from "./thread-context-divider";
 import { ThreadHandoffDivider, ThreadHandoffRow } from "./thread-handoff-row";
-import { GuestBubbleTint, GuestMessageName } from "./guestMessageStyle";
-import { ThreadGuestPendingMessage, useThreadGuestShare } from "./ThreadGuestShareBar";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import {
@@ -217,10 +215,9 @@ import {
   WORK_GROUP_TOGGLE_HEIGHT,
 } from "./thread-work-log";
 import {
-  appendGuestPendingMessages,
   appendPendingThreadMessages,
   isCompactionCommandFeedEntry,
-  type ThreadFeedRow,
+  type PendingThreadFeedEntry,
 } from "./pending-thread-feed";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
@@ -723,7 +720,7 @@ function MessageAttachmentFile(props: {
   );
 }
 
-/** A message's files as its bubble shows them; a guest's waiting message uses it too. */
+/** A message's files as its bubble shows them. */
 function MessageAttachmentList(props: {
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly environmentId: EnvironmentId;
@@ -1212,7 +1209,7 @@ function compactionLabel(label: string, title: string | undefined) {
 }
 
 function renderFeedEntry(
-  info: { item: ThreadFeedRow; index: number },
+  info: { item: PendingThreadFeedEntry; index: number },
   props: Pick<
     ThreadFeedProps,
     | "environmentId"
@@ -1259,25 +1256,6 @@ function renderFeedEntry(
 ) {
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
-
-  if (entry.type === "guest-pending") {
-    return (
-      <ThreadGuestPendingMessage
-        threadRef={scopeThreadRef(props.environmentId, props.threadId)}
-        guestName={entry.guestName}
-        message={entry.message}
-        bubbleMaxWidth={props.duoColumns ? "85%" : props.userBubbleMaxWidth}
-        renderAttachments={(attachments) => (
-          <MessageAttachmentList
-            attachments={attachments}
-            environmentId={props.environmentId}
-            onPressPreview={props.onPressPreview}
-            onPlaybackStart={props.onPlaybackStart}
-          />
-        )}
-      />
-    );
-  }
 
   if (entry.type === "run-fold") {
     return (
@@ -1528,9 +1506,6 @@ function renderFeedEntry(
               Sent by 456code
             </Text>
           ) : null}
-          {presentation.guestName !== undefined ? (
-            <GuestMessageName name={presentation.guestName} />
-          ) : null}
           <View
             className="min-w-0 rounded-[20px]"
             style={{
@@ -1545,7 +1520,6 @@ function renderFeedEntry(
                     : null),
             }}
           >
-            {presentation.attribution === "guest" ? <GuestBubbleTint /> : null}
             {foldRowId !== null ? (
               <AgentMessageFoldHeader
                 environmentId={props.environmentId}
@@ -1705,7 +1679,7 @@ function renderFeedEntry(
                   accessibilityLabel="Copy message"
                   text={presentation.text}
                   onCopy={
-                    message.context && presentation.attribution !== "guest"
+                    message.context
                       ? () =>
                           writeComposerContextClipboard(message.text, {
                             version: 1,
@@ -2088,7 +2062,6 @@ export const ThreadFeed = memo(function ThreadFeed({
 }: ThreadFeedProps & { readonly ref?: Ref<ThreadFeedHandle> }) {
   const { listRef, onEndFollowEnabledChange, onHeaderMaterialVisibilityChange } = props;
   const workflowOpening = useWorkflowOpening(props.detailRef);
-  const guestShare = useThreadGuestShare(props.detailRef);
   const deviceType = useDeviceType();
   const duoColumns = useNativeWorkspaceColumnsSupported() && isDuoDevice(deviceType);
   const openPullRequest = useOpenPullRequest();
@@ -2713,10 +2686,7 @@ export const ThreadFeed = memo(function ThreadFeed({
   const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
   const { jumpToMessageId } = props;
   const jumpReady = !!jumpToMessageId && loadedListKey === `${feedThreadKey}:filled`;
-  const presentedFeed = appendGuestPendingMessages(
-    useThreadFeedPresentation(props, expandedTurnIds, expandedWorkGroups),
-    guestShare,
-  );
+  const presentedFeed = useThreadFeedPresentation(props, expandedTurnIds, expandedWorkGroups);
   const jumpRunId =
     jumpReady &&
     !presentedFeed.some((entry) => entry.type === "message" && entry.id === jumpToMessageId)
@@ -2917,7 +2887,7 @@ export const ThreadFeed = memo(function ThreadFeed({
     }
   };
 
-  const shouldRestoreVisibleContentPosition = (entry: ThreadFeedRow) => {
+  const shouldRestoreVisibleContentPosition = (entry: ThreadFeedEntry) => {
     const disclosureAnchorKey = disclosureAnchorKeyRef.current;
     return disclosureAnchorKey === null || entry.id === disclosureAnchorKey;
   };
@@ -2992,8 +2962,7 @@ export const ThreadFeed = memo(function ThreadFeed({
   // Without this, every row above the viewport is assumed to be
   // estimatedItemSize tall, and scrolling up through unmeasured content
   // corrects each row's height as it mounts — the feed visibly jumps.
-  const getFixedItemSize = (entry: ThreadFeedRow) => {
-    if (entry.type === "guest-pending") return undefined;
+  const getFixedItemSize = (entry: ThreadFeedEntry) => {
     if (entry.type === "html-render") {
       return htmlRenderRowHeight(htmlRenderFrameHeight(entry.render, contentWidth));
     }
@@ -3047,7 +3016,7 @@ export const ThreadFeed = memo(function ThreadFeed({
     }
   }, [textSizeKey, contentWidth, hasHtmlRenders, beginReflow, listRef]);
 
-  const renderItem = (info: { item: ThreadFeedRow; index: number }) => (
+  const renderItem = (info: { item: PendingThreadFeedEntry; index: number }) => (
     <Animated.View
       key={info.item.id}
       entering={disclosureToggleSettling ? THREAD_FEED_DISCLOSURE_ENTER_TRANSITION : undefined}
@@ -3309,7 +3278,7 @@ function ThreadFeedLoadEarlierControl(props: ThreadFeedHistoryControls) {
 }
 
 function MessageImageGalleryScope(props: {
-  entry: ThreadFeedRow;
+  entry: PendingThreadFeedEntry;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   workspaceRoot: string | null | undefined;

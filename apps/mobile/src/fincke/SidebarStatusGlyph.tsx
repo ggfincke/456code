@@ -20,7 +20,6 @@ const STATUS_LABEL: Record<SidebarStatusTone, string> = {
   waiting: "Waiting",
   approval: "Approval",
   input: "Input",
-  request: "Request",
   limited: "Limited",
   failed: "Failed",
   done: "Done",
@@ -30,7 +29,6 @@ const STATUS_LABEL: Record<SidebarStatusTone, string> = {
 const STATUS_PRIORITY: Record<SidebarStatusTone, number> = {
   approval: 6,
   input: 5,
-  request: 5,
   failed: 4,
   limited: 4,
   working: 3,
@@ -67,7 +65,6 @@ const OCEAN_STATUS_COLOR: Record<SidebarStatusTone, string> = {
   waiting: "#80cbc4",
   approval: "#ffcb6b",
   input: "#ffcb6b",
-  request: "#ffcb6b",
   limited: "#f78c6c",
   failed: "#f07178",
   done: "#82aaff",
@@ -86,7 +83,6 @@ export function sidebarStatusColor(
       return theme["--color-foreground-muted"];
     case "approval":
     case "input":
-    case "request":
     case "limited":
       return theme["--color-warning-foreground"];
     case "failed":
@@ -103,7 +99,6 @@ function glyphKind(tone: SidebarStatusTone): SidebarGlyphKind {
       return "working";
     case "approval":
     case "input":
-    case "request":
       return "attention";
     case "limited":
     case "failed":
