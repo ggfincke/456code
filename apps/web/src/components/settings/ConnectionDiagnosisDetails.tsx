@@ -14,7 +14,7 @@ import { useEffect, useState } from "react";
 
 import { APP_VERSION } from "~/branding";
 import { environmentCatalog } from "~/connection/catalog";
-import { type EnvironmentPresentation, useRelayEnvironmentDiscovery } from "~/state/environments";
+import type { EnvironmentPresentation } from "~/state/environments";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -31,7 +31,6 @@ export function useConnectionDiagnosis(environment: EnvironmentPresentation) {
     AsyncResult.value(useAtomValue(environmentCatalog.stateAtom(environmentId))),
     () => AVAILABLE_CONNECTION_STATE,
   );
-  const relayStatus = useRelayEnvironmentDiscovery().environments.get(environmentId)?.status;
   const routes = connectionRoutes(environment.entry);
   const relayOnly = routes.length === 1 && hasRelayRoute(environment.entry);
   const phase = environment.connection.phase;
@@ -41,8 +40,6 @@ export function useConnectionDiagnosis(environment: EnvironmentPresentation) {
           hostLabel: environment.label,
           state,
           via: relayOnly ? "relay" : "direct",
-          // With a direct route as well, the relay's health says nothing about the route in use.
-          relayStatus: relayOnly ? Option.getOrNull(relayStatus ?? Option.none()) : null,
           clientVersion: APP_VERSION,
           serverVersion: environment.serverConfig?.environment.serverVersion,
         })

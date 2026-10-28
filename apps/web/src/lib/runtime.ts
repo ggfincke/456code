@@ -12,12 +12,7 @@ import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer"
 
 import * as Dpop from "../cloud/dpop";
 import * as ManagedRelayLayer from "../cloud/managedRelayLayer";
-import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import * as ClientTracer from "../observability/clientTracer";
-
-function configuredRelayUrl(): string {
-  return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
-}
 
 const layerHttpClient = layerRemoteHttpClient((input, init) => globalThis.fetch(input, init));
 
@@ -54,7 +49,8 @@ const layerRuntime = Layer.mergeAll(
   Dpop.layer,
   Socket.layerWebSocketConstructorGlobal,
   ClientTracer.layer,
-  ManagedRelayLayer.layer(configuredRelayUrl()).pipe(
+  // the dormant DPoP authorizer still requires a relay client; an invalid origin yields a disabled one
+  ManagedRelayLayer.layer("http://relay.invalid").pipe(
     Layer.provide(Layer.mergeAll(layerHttpClient, Dpop.layer)),
   ),
 );

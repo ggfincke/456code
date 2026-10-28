@@ -328,17 +328,15 @@ export function ServerUpdateAction({
   );
 }
 
-/** Read the host descriptor's version because the host never delivers server config. */
+/** Updates a host that is too old for this client to connect to. */
 export function OutdatedServerUpdateAction({
   environmentId,
   serverLabel,
-  fromVersion,
   targetVersion,
   label = "Update",
 }: {
   readonly environmentId: EnvironmentId;
   readonly serverLabel: string;
-  readonly fromVersion: string | undefined;
   readonly targetVersion: string;
   readonly label?: string;
 }) {
@@ -349,7 +347,6 @@ export function OutdatedServerUpdateAction({
     const result = await update({
       environmentId,
       input: { targetVersion },
-      ...(fromVersion === undefined ? {} : { fromVersion }),
     });
     pendingUpdateEnvironmentIds.delete(environmentId);
     if (result._tag === "Failure") {
