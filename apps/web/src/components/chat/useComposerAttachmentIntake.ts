@@ -62,7 +62,6 @@ export function useComposerAttachmentIntake(input: {
   readonly activePendingIsResponding: boolean;
   readonly pendingUserInputs: ReadonlyArray<PendingUserInput>;
   readonly supportsQuestionAttachments: boolean;
-  readonly isLiteralPendingAnswer: boolean;
   readonly isConnecting: boolean;
   readonly projectSelectionRequired: boolean;
   readonly questionAttachmentTarget: DraftId | null;
@@ -90,7 +89,6 @@ export function useComposerAttachmentIntake(input: {
     activePendingIsResponding,
     pendingUserInputs,
     supportsQuestionAttachments,
-    isLiteralPendingAnswer,
     isConnecting,
     projectSelectionRequired,
     questionAttachmentTarget,
@@ -364,7 +362,6 @@ export function useComposerAttachmentIntake(input: {
     bypassAutoAttachment: boolean,
     selectionOverride?: { start: number; end: number },
   ): boolean => {
-    if (isLiteralPendingAnswer) return false;
     const questionCanAttach =
       pendingUserInputs.length === 0 ||
       (supportsQuestionAttachments &&
