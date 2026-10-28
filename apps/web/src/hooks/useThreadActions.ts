@@ -21,7 +21,13 @@ import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/reactivity";
 import { useRouter } from "@tanstack/react-router";
 
-import { getFallbackThreadIdAfterDelete, pinOrderKeyBetween } from "../components/Sidebar.logic";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import {
+  getFallbackThreadIdAfterDelete,
+  isSidebarThreadUnread,
+  pinOrderKeyBetween,
+  resolveThreadLastVisitedAt,
+} from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { environmentSession, readEnvironmentScope } from "../state/session";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -219,6 +225,39 @@ export function useAcknowledgeThreadWoke() {
   };
 }
 
+export function readThreadUnread(thread: EnvironmentThreadShell): boolean {
+  const localLastVisitedAt =
+    useUiStateStore.getState().threadLastVisitedAtById[
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
+    ];
+  return isSidebarThreadUnread(
+    {
+      ...thread,
+      lastVisitedAt: resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt),
+    },
+    threadWokeAt(thread, { now: new Date().toISOString() }),
+  );
+}
+
+function useMarkThreadRead() {
+  const visitThread = useAcknowledgeThreadWoke();
+  return (target: ScopedThreadRef) => {
+    const thread = readThreadShell(target);
+    if (!thread) return;
+    // Visit at the shell's own timestamps, like the open-thread visit tracker, so client
+    // clock skew cannot leave the thread unread.
+    const visitedAt = [
+      thread.latestRun?.completedAt,
+      threadWokeAt(thread, { now: new Date().toISOString() }),
+    ].reduce<string>(
+      (latest, candidate) =>
+        candidate != null && Date.parse(candidate) > Date.parse(latest) ? candidate : latest,
+      thread.updatedAt,
+    );
+    visitThread(target, visitedAt);
+  };
+}
+
 function threadOperationFailure(target: ScopedThreadRef) {
   return readEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope)
     ? null
@@ -264,6 +303,7 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const markThreadUnread = useMarkThreadUnread();
+  const markThreadRead = useMarkThreadRead();
   const stopThreadSession = useOrchestrationCommand(threadEnvironment.stopSession);
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
@@ -843,6 +883,7 @@ export function useThreadActions() {
     reorderPinnedThread,
     reorderActiveThread,
     markThreadUnread,
+    markThreadRead,
     setThreadAutoSettle,
   };
 }

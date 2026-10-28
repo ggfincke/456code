@@ -110,26 +110,52 @@ export function SidebarDragBoundary(props: {
 }
 
 export function SidebarSectionHeader(props: {
-  marker: "working-header" | "snoozed-header" | "settled-header";
+  marker: "needs-you-header" | "working-header" | "snoozed-header" | "settled-header";
   label: string;
   /** A muted trailing count; classic shows it only while the shelf is collapsed. */
   count: number;
   className?: string;
   dragging?: boolean;
   isDropTarget?: boolean;
-  toggle: { expanded: boolean; onToggle: () => void };
+  /** Without a toggle the section always shows its rows, so the count shows in both designs. */
+  toggle?: { expanded: boolean; onToggle: () => void };
   /** The first shelf at the bottom of the list hosts the undo notice just above itself. */
   hostsUndoNotice?: boolean;
-  /** Teal & larger, for the Working shelf that sits above the active list. */
+  /** Teal & larger, for the sections that sit above the active list. */
   prominent?: boolean;
 }) {
-  const shelf =
-    props.marker === "working-header"
-      ? "working"
-      : props.marker === "snoozed-header"
-        ? "snoozed"
-        : "settled";
+  const shelf = props.marker.slice(0, -"-header".length);
   const redesign = useClientSettings((s) => s.redesignEnabled);
+  const countBadge = (count: number) => (
+    <span
+      className={cn(
+        "font-normal tabular-nums",
+        props.prominent &&
+          "rounded-full bg-(--fincke-sidebar-accent-wash) px-1.5 text-xs leading-4",
+      )}
+    >
+      {count}
+    </span>
+  );
+  if (props.toggle === undefined) {
+    return (
+      <SortableSidebarMarker
+        marker={props.marker}
+        data-testid={`sidebar-${props.marker}`}
+        className={cn("relative mx-0.5 h-8", props.className)}
+      >
+        <h3
+          className={cn(
+            "flex h-8 items-center justify-between gap-2 px-2 font-medium",
+            props.prominent ? "text-sm text-primary" : "text-xs text-sidebar-muted-foreground",
+          )}
+        >
+          {props.label}
+          {countBadge(props.count)}
+        </h3>
+      </SortableSidebarMarker>
+    );
+  }
   const collapsedCount = props.toggle.expanded ? null : props.count;
   const count = redesign ? props.count : collapsedCount;
   return (
@@ -149,19 +175,7 @@ export function SidebarSectionHeader(props: {
         }
         size={props.prominent ? "lg" : "default"}
         data-testid={`sidebar-${shelf}-shelf-toggle`}
-        accessory={
-          redesign && count !== null ? (
-            <span
-              className={cn(
-                "font-normal tabular-nums",
-                props.prominent &&
-                  "rounded-full bg-(--fincke-sidebar-accent-wash) px-1.5 text-xs leading-4",
-              )}
-            >
-              {count}
-            </span>
-          ) : null
-        }
+        accessory={redesign && count !== null ? countBadge(count) : null}
       >
         {props.label}
         {!redesign && collapsedCount !== null ? ` (${collapsedCount})` : null}

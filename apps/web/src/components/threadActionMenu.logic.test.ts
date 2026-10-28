@@ -12,6 +12,7 @@ const baseState: ThreadActionMenuState = {
   isSnoozed: false,
   canSnoozeNow: true,
   isRegeneratingTitle: false,
+  isUnread: false,
   supports: {
     settlement: true,
     autoSettleOptOut: true,

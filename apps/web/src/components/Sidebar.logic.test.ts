@@ -33,6 +33,8 @@ import {
   type SidebarListMarker,
   type SidebarSection,
   resolveSidebarDropVerb,
+  resolveSidebarNeedsYouTier,
+  splitSidebarNeedsYouThreads,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
@@ -1019,6 +1021,77 @@ describe("unseen completion with background work", () => {
     ).toBe(expected.receded);
     expect(isSidebarThreadWorking(thread)).toBe(expected.receded);
     expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: expected.pill });
+  });
+});
+
+describe("Needs you", () => {
+  it("collects threads waiting on the user, requests first and newest first within a tier", () => {
+    const at = (hour: string, minute: string) => `2026-03-09T${hour}:${minute}:00.000Z`;
+    const thread = (
+      id: string,
+      hour: string,
+      seen: boolean,
+      overrides: Partial<Parameters<typeof resolveSidebarNeedsYouTier>[0]> = {},
+    ) => ({
+      id: ThreadId.make(id),
+      environmentId: localEnvironmentId,
+      createdAt: at(hour, "00"),
+      unsettledAt: null,
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      pendingSubagentRequest: null,
+      interactionMode: DEFAULT_INTERACTION_MODE,
+      runtime: null,
+      blockedOnThreadWait: false,
+      settledOverride: null,
+      latestRun: { ...makeLatestRun({ completedAt: at(hour, "05") }), requestedAt: at(hour, "00") },
+      lastVisitedAt: at(hour, seen ? "06" : "01"),
+      ...overrides,
+    });
+    const failedRun = (hour: string) => ({
+      ...makeLatestRun({ completedAt: at(hour, "05") }),
+      requestedAt: at(hour, "00"),
+      status: "failed" as const,
+    });
+    const threads = [
+      thread("approval", "08", true, { hasPendingApprovals: true }),
+      thread("subagent-approval", "09", true, { pendingSubagentRequest: "approval" }),
+      thread("failed", "07", false, { latestRun: failedRun("07") }),
+      thread("plan", "06", true, { interactionMode: "plan", hasActionableProposedPlan: true }),
+      thread("done-old", "05", false),
+      thread("done-new", "10", false),
+      thread("woke", "04", true),
+      thread("read", "11", true),
+      thread("failed-seen", "03", true, { latestRun: failedRun("03") }),
+      thread("working", "12", false, {
+        runtime: {
+          status: "running",
+          activeRunId: null,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providerName: "Codex",
+          lastError: null,
+          updatedAt: at("12", "00"),
+        },
+      }),
+    ];
+    const wokeAtById = new Map<string, string>([["woke", at("04", "30")]]);
+
+    const { needsYou, rest } = splitSidebarNeedsYouThreads(
+      sortInboxThreadsByReturn(threads),
+      (candidate) => resolveSidebarNeedsYouTier(candidate, wokeAtById.get(candidate.id) ?? null),
+    );
+
+    expect(needsYou.map((candidate) => candidate.id)).toEqual([
+      "subagent-approval",
+      "approval",
+      "failed",
+      "plan",
+      "done-new",
+      "done-old",
+      "woke",
+    ]);
+    expect(rest.map((candidate) => candidate.id)).toEqual(["working", "read", "failed-seen"]);
   });
 });
 
