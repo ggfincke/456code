@@ -53,7 +53,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       className={cn(
         "relative flex h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center gap-2 pr-3",
         // the full wave runs past the header, so the search row starts below it
-        backdropVariant && "mb-3",
+        backdropVariant && "mb-8",
         isElectron && "drag-region",
       )}
     >

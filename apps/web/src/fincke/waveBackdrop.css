@@ -2,7 +2,7 @@
 /* keeps all three fincke ribbons solid across the sidebar header */
 
 .fincke-wave-backdrop {
-  height: calc(var(--workspace-topbar-height) + 1.25rem);
+  height: calc(var(--workspace-topbar-height) + 2.5rem);
   mask-image: none;
   -webkit-mask-image: none;
 }

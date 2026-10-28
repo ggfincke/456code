@@ -3,12 +3,21 @@
 
 import { useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
+import { FINCKE_WAVE_FIELD } from "@t3tools/shared/fincke-wave";
 
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { FINCKE_WAVE_FIELD_COLOR, FinckeWaveArt } from "./FinckeWaveArt";
 
-// the band below the native title row, close to desktop's h-20 sidebar header
+// the band below the native title row, close to desktop's sidebar header
 export const BAND_HEIGHT = 72;
+// the field's top 124 units fill pullUp + BAND_HEIGHT behind the title. the rest of the field,
+// down past the back ribbon, hangs below at that same scale so the ribbons keep their thickness
+const TITLE_UNITS = 124;
+
+// how far the wave runs past BAND_HEIGHT for a band pulled up by `pullUp`
+export function finckeWaveTail(pullUp: number) {
+  return ((pullUp + BAND_HEIGHT) * (FINCKE_WAVE_FIELD.height - TITLE_UNITS)) / TITLE_UNITS;
+}
 // field color above the band, so pulling the list past its top keeps revealing the wave's field
 const OVERSCROLL_FIELD = 600;
 
@@ -38,7 +47,7 @@ export function FinckeListHeader(props: {
           );
         }}
         style={{
-          height: pullUp + BAND_HEIGHT,
+          height: pullUp + BAND_HEIGHT + finckeWaveTail(pullUp),
           marginTop: -pullUp,
           marginLeft: -(props.bleedLeft ?? 0),
           marginRight: -(props.bleedRight ?? 0),
