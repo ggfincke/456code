@@ -625,6 +625,7 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           expanded={item.expanded}
           onToggle={toggleWorkingShelf}
+          pane={primaryColumn ? "sidebar" : "screen"}
         />
       );
     }
@@ -635,6 +636,7 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           expanded={item.expanded}
           onToggle={toggleSnoozedShelf}
+          pane={primaryColumn ? "sidebar" : "screen"}
         />
       );
     }
@@ -645,6 +647,7 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           expanded={item.expanded}
           onToggle={toggleSettledShelf}
+          pane={primaryColumn ? "sidebar" : "screen"}
         />
       );
     }
