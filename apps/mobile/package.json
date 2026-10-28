@@ -50,15 +50,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/expo": "catalog:",
-    "@clerk/expo-native-components": "0.4.0",
     "@effect/atom-react": "catalog:",
     "@expo-google-fonts/dm-sans": "^0.4.2",
     "@expo/metro-runtime": "~58.0.14",
     "@expo/ui": "58.0.20",
     "@legendapp/list": "catalog:",
     "@material/material-color-utilities": "0.3.0",
-    "@noble/curves": "catalog:",
     "@pierre/diffs": "catalog:",
     "@pierre/highlights": "catalog:",
     "@react-native-ai/apple": "0.12.0",
@@ -90,7 +87,6 @@
     "expo-application": "~58.1.2",
     "expo-asset": "~58.0.16",
     "expo-audio": "58.0.9",
-    "expo-auth-session": "~58.0.13",
     "expo-blur": "58.0.4",
     "expo-build-properties": "~58.0.11",
     "expo-camera": "~58.0.10",
