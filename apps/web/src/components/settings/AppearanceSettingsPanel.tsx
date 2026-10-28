@@ -32,6 +32,7 @@ import { searchableSetting } from "./settingsSearch";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
+import { CodeThemeSetting } from "../../fincke/CodeThemeSetting";
 import { ProjectFolderTintSetting } from "../../fincke/ProjectFolderTintSetting";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
@@ -278,6 +279,7 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <CodeThemeSetting />
         <ProjectFolderTintSetting />
         <AdvancedSettings
           targetIds={[
