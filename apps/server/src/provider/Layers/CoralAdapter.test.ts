@@ -4,6 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
   CoralSettings,
+  EnvironmentId,
   MessageId,
   NodeId,
   ProjectId,
@@ -214,6 +215,36 @@ it.effect("uses multi-turn ACP, model selection, native resume, and isolated ses
     expect(log).not.toContain('"method":"auth/login"');
     expect(log.match(/"method":"session\/new"/g)).toHaveLength(1);
     expect(log).not.toContain('"method":"session/load"');
+  }).pipe(Effect.scoped, Effect.provide(testLayer), TestClock.withLive),
+);
+
+it.effect("opens and resumes without client MCP servers, which Coral rejects", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture();
+    const threadId = ThreadId.make("coral-mcp");
+    const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+    yield* mcpSessions.set({
+      environmentId: EnvironmentId.make("coral-environment"),
+      threadId,
+      providerSessionId: `session:${threadId}`,
+      providerInstanceId: instanceId,
+      endpoint: "http://127.0.0.1:1/mcp",
+      authorizationHeader: "Bearer coral-test",
+      browserToolsAvailable: false,
+    });
+    const active = yield* f.open(threadId);
+    yield* active.close;
+    yield* f.open(threadId, active.providerThread);
+    const sessionRequests = (yield* f.log)
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line))
+      .filter((request) => request.method === "session/new" || request.method === "session/resume");
+    expect(sessionRequests.map((request) => request.method)).toEqual([
+      "session/new",
+      "session/resume",
+    ]);
+    for (const request of sessionRequests) expect(request.params.mcpServers).toEqual([]);
   }).pipe(Effect.scoped, Effect.provide(testLayer), TestClock.withLive),
 );
 
