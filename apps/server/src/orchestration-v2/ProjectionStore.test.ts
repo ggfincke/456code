@@ -1,6 +1,5 @@
 import { assert, it } from "@effect/vitest";
 import {
-  EnvironmentId,
   EventId,
   CommandId,
   CheckpointId,
@@ -32,7 +31,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import * as SqlClient from "effect/sql/SqlClient";
-import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -6137,15 +6136,13 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           occurredAt: at,
           payload: { ...thread, pullRequests },
         });
-      const project = { title: "Project" };
-      const environmentId = EnvironmentId.make("environment:watched-pull-request");
-      const phase = Effect.gen(function* () {
+      const holdsCompletion = Effect.gen(function* () {
         const shell = yield* store.getThreadShell(threadId);
         const listed = (yield* store.getShellSnapshot()).threads.find(
           (candidate) => candidate.id === threadId,
         );
         assert.deepEqual(listed?.pendingBackgroundTasks, shell?.pendingBackgroundTasks);
-        return shell && projectThreadAwarenessV2({ environmentId, project, thread: shell })?.phase;
+        return backgroundWorkHoldsCompletion(shell?.pendingBackgroundTasks ?? []);
       });
 
       yield* syncPullRequests("watched", [
@@ -6172,11 +6169,11 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           awaited: true,
         },
       ]);
-      assert.equal(yield* phase, "running");
+      assert.isTrue(yield* holdsCompletion);
 
       yield* syncPullRequests("unwatched", [link]);
       assert.deepEqual((yield* store.getThreadShell(threadId))?.pendingBackgroundTasks, []);
-      assert.equal(yield* phase, "completed");
+      assert.isFalse(yield* holdsCompletion);
     }),
   );
 
@@ -6272,13 +6269,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         occurredAt: completedAt,
         payload: providerThread,
       });
-      const project = { title: "Project" };
-      const environmentId = EnvironmentId.make("environment:held-completion");
       const held = yield* store.getThreadShell(threadId);
-      assert.equal(
-        held && projectThreadAwarenessV2({ environmentId, project, thread: held })?.phase,
-        "running",
-      );
+      assert.isTrue(backgroundWorkHoldsCompletion(held?.pendingBackgroundTasks ?? []));
 
       yield* store.apply({
         id: EventId.make("event:held-completion:monitor-ended"),
@@ -6290,10 +6282,11 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         payload: { ...providerThread, pendingBackgroundTasks: [], updatedAt: releasedAt },
       });
       const released = yield* store.getThreadShell(threadId);
-      const state =
-        released && projectThreadAwarenessV2({ environmentId, project, thread: released });
-      assert.equal(state?.phase, "completed");
-      assert.equal(state?.updatedAt, DateTime.formatIso(releasedAt));
+      assert.isFalse(backgroundWorkHoldsCompletion(released?.pendingBackgroundTasks ?? []));
+      assert.equal(
+        released && DateTime.formatIso(released.updatedAt),
+        DateTime.formatIso(releasedAt),
+      );
 
       yield* store.apply({
         id: EventId.make("event:held-completion:monitor-restarted"),

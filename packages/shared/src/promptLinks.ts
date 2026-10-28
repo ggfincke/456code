@@ -1,6 +1,6 @@
 // packages/shared/src/promptLinks.ts
 // parses explicit prompt links without sending messages
-import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
+export const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
 
 const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
 

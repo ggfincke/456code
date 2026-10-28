@@ -16,7 +16,7 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
-export const DESKTOP_HOST = "app";
+const DESKTOP_HOST = "app";
 const DESKTOP_PRODUCTION_SCHEME = isFinckeDesktop ? finckeDesktop.scheme : "t3code";
 const DESKTOP_DEVELOPMENT_SCHEME = isFinckeDesktop ? `${finckeDesktop.scheme}-dev` : "t3code-dev";
 

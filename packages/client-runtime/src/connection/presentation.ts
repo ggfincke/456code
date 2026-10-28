@@ -106,7 +106,6 @@ export function presentEnvironmentConnection(
  */
 export function environmentMcpUrl(input: {
   readonly entry: ConnectionCatalogEntry;
-  readonly relayHttpBaseUrl?: string | undefined;
   readonly connectedTarget?: ConnectionTarget | null | undefined;
 }): string | null {
   const connectedRouteId = input.connectedTarget ? connectionRouteId(input.connectedTarget) : null;
@@ -116,9 +115,7 @@ export function environmentMcpUrl(input: {
   );
   for (const route of connectedRoute ? [connectedRoute, ...routes] : routes) {
     const httpBaseUrl =
-      route.target._tag === "RelayConnectionTarget"
-        ? (input.relayHttpBaseUrl ?? null)
-        : routeHttpBaseUrl(route);
+      route.target._tag === "RelayConnectionTarget" ? null : routeHttpBaseUrl(route);
     const mcpUrl = httpBaseUrl === null ? null : mcpUrlFromBase(httpBaseUrl);
     if (mcpUrl !== null) return mcpUrl;
   }

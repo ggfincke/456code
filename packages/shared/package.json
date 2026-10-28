@@ -47,10 +47,6 @@
       "types": "./src/advertisedEndpoint.ts",
       "import": "./src/advertisedEndpoint.ts"
     },
-    "./agentAwareness": {
-      "types": "./src/agentAwareness.ts",
-      "import": "./src/agentAwareness.ts"
-    },
     "./git": {
       "types": "./src/git.ts",
       "import": "./src/git.ts"
@@ -187,10 +183,6 @@
       "types": "./src/dpopCommon.ts",
       "import": "./src/dpopCommon.ts"
     },
-    "./relayAuth": {
-      "types": "./src/relayAuth.ts",
-      "import": "./src/relayAuth.ts"
-    },
     "./relayUrl": {
       "types": "./src/relayUrl.ts",
       "import": "./src/relayUrl.ts"
@@ -214,10 +206,6 @@
     "./cliArgs": {
       "types": "./src/cliArgs.ts",
       "import": "./src/cliArgs.ts"
-    },
-    "./connectAuth": {
-      "types": "./src/connectAuth.ts",
-      "import": "./src/connectAuth.ts"
     },
     "./symlink": {
       "types": "./src/symlink.ts",

@@ -75,7 +75,7 @@ describe("presentConnectionDiagnosis", () => {
     expect(diagnosis?.steps.join(" ")).not.toContain("On Mac mini");
   });
 
-  it("stops at T3 Connect when this device cannot reach the relay", () => {
+  it("stops at the relay when this device cannot reach it", () => {
     const failure = mapManagedRelayError(
       new ManagedRelayRequestFailedError({
         action: "connect relay environment",
@@ -83,7 +83,7 @@ describe("presentConnectionDiagnosis", () => {
         cause: new TypeError("Failed to fetch"),
       }),
     );
-    expect(diagnose(backoff(failure))?.headline).toBe("This device can't reach T3 Connect");
+    expect(diagnose(backoff(failure))?.headline).toBe("This device can't reach the relay");
     expect(results(backoff(failure))).toEqual([
       "device:ok",
       "relay:failed",
@@ -92,7 +92,7 @@ describe("presentConnectionDiagnosis", () => {
     ]);
   });
 
-  it("does not blame this device's network when T3 Connect answered with an error", () => {
+  it("does not blame this device's network when the relay answered with an error", () => {
     const failure = mapManagedRelayError(
       new ManagedRelayRequestFailedError({
         action: "connect relay environment",
@@ -101,7 +101,7 @@ describe("presentConnectionDiagnosis", () => {
       }),
     );
     const diagnosis = diagnose(backoff(failure));
-    expect(diagnosis?.headline).toBe("T3 Connect returned an error");
+    expect(diagnosis?.headline).toBe("The relay returned an error");
     expect(diagnosis?.steps.join(" ")).not.toContain("this device");
   });
 
@@ -109,35 +109,5 @@ describe("presentConnectionDiagnosis", () => {
     const state = { ...backoff(unavailable("tunnel_down")), network: "offline" as const };
     expect(diagnose(state)?.headline).toBe("This device is offline");
     expect(results(state)?.[0]).toBe("device:failed");
-  });
-
-  it("uses the relay health check before any connect attempt fails", () => {
-    const diagnosis = presentConnectionDiagnosis({
-      hostLabel: "Mac mini",
-      state: AVAILABLE_CONNECTION_STATE,
-      via: "relay",
-      relayStatus: { status: "offline", endpointFailure: "tunnel_down", endpointStatus: 530 },
-    });
-    expect(diagnosis?.headline).toBe("Mac mini's tunnel is offline");
-    const origin = presentConnectionDiagnosis({
-      hostLabel: "Mac mini",
-      state: AVAILABLE_CONNECTION_STATE,
-      via: "direct",
-      relayStatus: { status: "offline", endpointFailure: "origin_unreachable" },
-    });
-    expect(origin?.hops.map((hop) => hop.hop)).toEqual(["device", "relay", "tunnel", "server"]);
-  });
-
-  it("keeps the relay health status out of a failure that has its own cause", () => {
-    const failure = mapRemoteEnvironmentError(
-      new RemoteEnvironmentAuthFetchError({ message: "Failed to fetch", cause: new TypeError() }),
-    );
-    const diagnosis = presentConnectionDiagnosis({
-      hostLabel: "Mac mini",
-      state: backoff(failure),
-      via: "direct",
-      relayStatus: { status: "offline", endpointFailure: "tunnel_down", endpointStatus: 530 },
-    });
-    expect(diagnosis?.facts.map(([label]) => label)).not.toContain("HTTP status");
   });
 });

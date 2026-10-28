@@ -165,15 +165,8 @@ const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (
         Effect.as(`proof:${proofInput.url}`),
       ),
   });
-  const unexpected = () => Effect.die("Unexpected relay request");
   const relay = ManagedRelay.ManagedRelayClient.of({
     relayUrl: "https://relay.example.test",
-    listEnvironments: unexpected,
-    listDevices: unexpected,
-    createEnvironmentLinkChallenge: unexpected,
-    linkEnvironment: unexpected,
-    unlinkEnvironment: unexpected,
-    getEnvironmentStatus: unexpected,
     connectEnvironment: (request) =>
       Effect.gen(function* () {
         yield* Ref.update(bootstrapCalls, (count) => count + 1);
@@ -181,10 +174,6 @@ const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (
         yield* input.beforeBootstrap ?? Effect.void;
         return input.bootstrap ?? BOOTSTRAP;
       }),
-    registerDevice: unexpected,
-    unregisterDevice: unexpected,
-    registerLiveActivity: unexpected,
-    getAgentActivitySnapshot: unexpected,
     resetTokenCache: Effect.void,
   });
   const layer = RemoteEnvironmentAuthorization.layer.pipe(

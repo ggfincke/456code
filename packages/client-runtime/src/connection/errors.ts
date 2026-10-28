@@ -48,15 +48,6 @@ function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError
         hop: "relay",
         ...(error.dpopFailureReason === "time_window" ? { failureCause: "clock_skew" } : {}),
       });
-    case "RelayEnvironmentLinkProofExpiredError":
-    case "RelayAgentActivityPublishProofExpiredError":
-    case "RelayAgentActivityPublishProofInvalidError":
-      return new ConnectionBlockedError({
-        reason: "authentication",
-        detail,
-        traceId,
-        hop: "relay",
-      });
     case "RelayEnvironmentConnectNotAuthorizedError":
       // A host swapping in a new tunnel leaves its allocation unready until
       // the tunnel is up, and nothing on the client changes when it is.
@@ -85,9 +76,6 @@ function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError
         hop: "relay",
         ...(error.reason === "environment_link_not_found" ? { failureCause: "not_linked" } : {}),
       });
-    case "RelayEnvironmentLinkProofInvalidError":
-    case "RelayEnvironmentLinkLimitExceededError":
-      return new ConnectionBlockedError({ reason: "permission", detail, traceId, hop: "relay" });
     case "RelayEnvironmentEndpointTimedOutError":
       return new ConnectionTransientError({
         reason: "timeout",
@@ -114,14 +102,6 @@ function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError
         ...(error.endpointStatus ? { httpStatus: error.endpointStatus } : {}),
       });
     }
-    case "RelayEnvironmentLinkUnavailableError":
-      return new ConnectionTransientError({
-        reason: "endpoint-unavailable",
-        detail,
-        traceId,
-        hop: "tunnel",
-      });
-    case "RelayEnvironmentLinkFailedError":
     case "RelayInternalError":
       return new ConnectionTransientError({
         reason: "relay-unavailable",
@@ -183,7 +163,7 @@ export function mapRemoteEnvironmentError(
   connectionMethod: ClientConnectionMethod = "direct",
 ): ConnectionAttemptError {
   const networkHint = connectionMethod === "relay" ? ` ${NETWORK_BLOCKING_HINT}` : "";
-  // Over T3 Connect the relay already reached the host, so a request that never
+  // Over the relay the tunnel already reached the host, so a request that never
   // arrives was blocked between this device and the tunnel.
   const unreachableHop = connectionMethod === "relay" ? "tunnel" : "server";
   const via = connectionMethod === "relay" ? "relay" : "direct";

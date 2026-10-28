@@ -874,15 +874,8 @@ describe("EnvironmentSupervisor", () => {
         thumbprint: Effect.succeed("test-thumbprint"),
         createProof: () => Effect.succeed("test-proof"),
       });
-      const unused = () => Effect.die("Unexpected relay operation.");
       const relay = ManagedRelay.ManagedRelayClient.of({
         relayUrl: "https://relay.example.test",
-        listEnvironments: unused,
-        listDevices: unused,
-        createEnvironmentLinkChallenge: unused,
-        linkEnvironment: unused,
-        unlinkEnvironment: unused,
-        getEnvironmentStatus: unused,
         connectEnvironment: Effect.fn("TestConnectionHttp.connectEnvironment")(function* () {
           yield* Ref.update(bootstrapCalls, (count) => count + 1);
           if (yield* Ref.get(bootstrapFails)) {
@@ -899,10 +892,6 @@ describe("EnvironmentSupervisor", () => {
             expiresAt: "2026-09-04T01:00:00.000Z",
           };
         }),
-        registerDevice: unused,
-        unregisterDevice: unused,
-        registerLiveActivity: unused,
-        getAgentActivitySnapshot: unused,
         resetTokenCache: Effect.void,
       });
       const layerHttp = RpcHttp.layerRemoteHttpClient(fetchFn);

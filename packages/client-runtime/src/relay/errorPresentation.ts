@@ -1,5 +1,5 @@
 import type { DpopFailureReason } from "@t3tools/contracts";
-import type { RelayEnvironmentStatusResponse, RelayProtectedError } from "@t3tools/contracts/relay";
+import type { RelayProtectedError } from "@t3tools/contracts/relay";
 
 export const DPOP_CLOCK_HINT =
   "Hint: Check that automatic date and time is enabled on both devices, then try again.";
@@ -27,27 +27,23 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
       switch (error.reason) {
         case "missing_bearer":
         case "invalid_bearer":
-          return "Relay rejected the cloud session token.";
+          return "Relay rejected the account session token.";
         case "invalid_dpop":
           return dpopFailureMessage("Relay rejected the DPoP proof.", error.dpopFailureReason);
         case "not_authorized":
           return "Relay rejected the authenticated request.";
       }
-    case "RelayEnvironmentLinkProofExpiredError":
-      return "Relay rejected an expired environment link proof.";
-    case "RelayEnvironmentLinkProofInvalidError":
-      return `Relay rejected the environment link proof (${error.reason}).`;
     case "RelayEnvironmentConnectNotAuthorizedError":
       // "Not authorized" covers non-auth causes too; surface the reason so a
       // missing link does not read as a credential problem.
       if (error.reason === "environment_link_not_found") {
-        return "Relay has no active link for this environment. If it was deregistered from T3 Connect, link it again on that machine.";
+        return "Relay has no active link for this environment.";
       }
       if (error.reason === "managed_endpoint_allocation_not_ready") {
-        return "The environment's T3 Connect tunnel is still being set up.";
+        return "The environment's relay tunnel is still being set up.";
       }
       if (error.reason === "endpoint_provider_not_managed") {
-        return "This environment is linked only to publish agent activity, so it cannot accept connections. On that computer, open Settings > Sharing & access and turn T3 Connect on.";
+        return "This environment's relay link cannot accept connections.";
       }
       return error.reason
         ? `Relay rejected the environment connection request (${error.reason}).`
@@ -56,18 +52,6 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
       return `Relay could not reach the environment endpoint (${error.reason}).`;
     case "RelayEnvironmentEndpointTimedOutError":
       return "Relay timed out while contacting the environment endpoint.";
-    case "RelayEnvironmentLinkFailedError":
-      return `Relay could not link the environment (${error.reason}).`;
-    case "RelayEnvironmentLinkUnavailableError":
-      return `Relay cannot provision the managed endpoint (${error.reason}).${
-        error.provisioningStage ? ` Failed stage: ${error.provisioningStage}.` : ""
-      }`;
-    case "RelayEnvironmentLinkLimitExceededError":
-      return `Relay refused the link: this account already has its maximum of ${error.maxTunnels} managed tunnels. Unlink an environment to free one up.`;
-    case "RelayAgentActivityPublishProofExpiredError":
-      return "Relay rejected an expired agent activity publish proof.";
-    case "RelayAgentActivityPublishProofInvalidError":
-      return `Relay rejected the agent activity publish proof (${error.reason}).`;
     case "RelayInternalError":
       return `Relay encountered an internal error (${error.reason}).`;
   }
@@ -86,18 +70,4 @@ export function relayRequestFailureDetail(error: {
   if (error.status === 504) return RELAY_GATEWAY_TIMEOUT_MESSAGE;
   if (error.status !== undefined) return `Relay returned an unexpected HTTP ${error.status}.`;
   return null;
-}
-
-const RELAY_TUNNEL_RELEASED_MESSAGE =
-  "Offline for a while, so its T3 Connect tunnel was removed. Start T3 Code on that computer and update it to the latest version to reconnect.";
-
-export function relayOfflineReasonMessage(
-  status: Pick<RelayEnvironmentStatusResponse, "offlineReason">,
-): string | null {
-  switch (status.offlineReason) {
-    case "tunnel_released":
-      return RELAY_TUNNEL_RELEASED_MESSAGE;
-    case undefined:
-      return null;
-  }
 }

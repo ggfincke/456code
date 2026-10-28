@@ -1,11 +1,7 @@
 import { EnvironmentId } from "@t3tools/contracts";
-import {
-  RelayEnvironmentConnectScope,
-  RelayEnvironmentStatusScope,
-} from "@t3tools/contracts/relay";
+import { RelayEnvironmentConnectScope } from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 
 import { RELAY_GATEWAY_TIMEOUT_MESSAGE, relayRequestFailureDetail } from "./errorPresentation.ts";
@@ -50,7 +46,11 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const error = yield* relayClient
-        .listEnvironments({ clerkToken: "clerk-token" })
+        .connectEnvironment({
+          clerkToken: "clerk-token",
+          scopes: [RelayEnvironmentConnectScope],
+          environmentId: EnvironmentId.make("env-1"),
+        })
         .pipe(Effect.flip);
 
       expect(error).toMatchObject({
@@ -60,102 +60,6 @@ describe("ManagedRelayClient", () => {
       });
       expect(requestCount).toBe(0);
     }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, "http://relay.example.test")));
-  });
-
-  it.effect("uses a cached token while another scope waits for an exchange", () => {
-    const exchangeStarted = Promise.withResolvers<void>();
-    const releaseExchange = Promise.withResolvers<void>();
-    let tokenExchangeCount = 0;
-    const statusTokens: Array<string | null> = [];
-    let persistedTokens: ReadonlyArray<ManagedRelay.ManagedRelayAccessTokenCacheEntry> = [
-      {
-        accountId: "user-1",
-        clientId: "t3-mobile",
-        relayUrl: "https://relay.example.test",
-        thumbprint: "client-thumbprint",
-        scopes: [RelayEnvironmentStatusScope],
-        accessToken: "cached-status-token",
-        expiresAtMillis: Number.MAX_SAFE_INTEGER,
-      },
-    ];
-    const accessTokenStore: ManagedRelay.ManagedRelayAccessTokenStore = {
-      load: Effect.sync(() => persistedTokens),
-      save: (entries) =>
-        Effect.sync(() => {
-          persistedTokens = entries;
-        }),
-      clear: Effect.sync(() => {
-        persistedTokens = [];
-      }),
-    };
-    const fetchFn = ((input, init) => {
-      if (String(input).endsWith("/v1/client/dpop-token")) {
-        tokenExchangeCount += 1;
-        exchangeStarted.resolve();
-        return releaseExchange.promise.then(() =>
-          Response.json({
-            access_token: "expanded-scope-token",
-            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-            token_type: "DPoP",
-            expires_in: 1_800,
-            scope: `${RelayEnvironmentStatusScope} ${RelayEnvironmentConnectScope}`,
-          }),
-        );
-      }
-      statusTokens.push(new Headers(init?.headers).get("authorization"));
-      return Promise.resolve(
-        Response.json({
-          environmentId: "env-1",
-          endpoint: {
-            httpBaseUrl: "https://desktop.example.test/",
-            wsBaseUrl: "wss://desktop.example.test/ws",
-            providerKind: "cloudflare_tunnel",
-          },
-          status: "online",
-          checkedAt: "2026-09-04T00:00:00.000Z",
-        }),
-      );
-    }) satisfies typeof globalThis.fetch;
-
-    return Effect.gen(function* () {
-      const relayClient = yield* ManagedRelay.ManagedRelayClient;
-      const statusInput = {
-        clerkToken: clerkToken("user-1", "session-1"),
-        scopes: [RelayEnvironmentStatusScope],
-        environmentId: EnvironmentId.make("env-1"),
-      } as const;
-      const expandedScopeInput = {
-        ...statusInput,
-        scopes: [RelayEnvironmentStatusScope, RelayEnvironmentConnectScope],
-      } as const;
-      const firstMiss = yield* relayClient
-        .getEnvironmentStatus(expandedScopeInput)
-        .pipe(Effect.forkChild);
-      yield* Effect.promise(() => exchangeStarted.promise);
-      const secondMiss = yield* relayClient
-        .getEnvironmentStatus(expandedScopeInput)
-        .pipe(Effect.forkChild);
-
-      const status = yield* relayClient.getEnvironmentStatus(statusInput);
-      expect(status.status).toBe("online");
-      expect(statusTokens).toEqual(["DPoP cached-status-token"]);
-
-      releaseExchange.resolve();
-      yield* Fiber.join(firstMiss);
-      yield* Fiber.join(secondMiss);
-      expect(tokenExchangeCount).toBe(1);
-      expect(persistedTokens.map((token) => token.accessToken)).toEqual([
-        "cached-status-token",
-        "expanded-scope-token",
-      ]);
-      yield* relayClient.resetTokenCache;
-      expect(persistedTokens).toEqual([]);
-      yield* relayClient.getEnvironmentStatus(expandedScopeInput);
-      expect(tokenExchangeCount).toBe(2);
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => releaseExchange.resolve())),
-      Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)),
-    );
   });
 
   it.effect("reuses a persisted token across runtimes and Clerk session token rotation", () => {
@@ -181,7 +85,7 @@ describe("ManagedRelayClient", () => {
             issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
             token_type: "DPoP",
             expires_in: 1_800,
-            scope: RelayEnvironmentStatusScope,
+            scope: RelayEnvironmentConnectScope,
           }),
         );
       }
@@ -193,29 +97,22 @@ describe("ManagedRelayClient", () => {
             wsBaseUrl: "wss://desktop.example.test/ws",
             providerKind: "cloudflare_tunnel",
           },
-          status: "online",
-          checkedAt: "2026-06-05T20:00:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
+          credential: "environment-credential",
+          expiresAt: "2026-06-05T20:05:00.000Z",
         }),
       );
     }) satisfies typeof globalThis.fetch;
-    const statusInput = (token: string) =>
+    const connectInput = (token: string) =>
       ({
         clerkToken: token,
-        scopes: [RelayEnvironmentStatusScope],
+        scopes: [RelayEnvironmentConnectScope],
         environmentId: EnvironmentId.make("env-1"),
       }) as const;
 
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const relayClient = yield* ManagedRelay.ManagedRelayClient;
-        yield* relayClient.getEnvironmentStatus(statusInput(clerkToken("user-1", "session-1")));
+        yield* relayClient.connectEnvironment(connectInput(clerkToken("user-1", "session-1")));
       }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
 
       expect(tokenExchangeCount).toBe(1);
@@ -223,7 +120,7 @@ describe("ManagedRelayClient", () => {
 
       yield* Effect.gen(function* () {
         const relayClient = yield* ManagedRelay.ManagedRelayClient;
-        yield* relayClient.getEnvironmentStatus(statusInput(clerkToken("user-1", "session-2")));
+        yield* relayClient.connectEnvironment(connectInput(clerkToken("user-1", "session-2")));
       }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
 
       expect(tokenExchangeCount).toBe(1);
@@ -232,14 +129,14 @@ describe("ManagedRelayClient", () => {
 
   it.effect("refreshes a persisted DPoP token once when the relay rejects it", () => {
     let tokenExchangeCount = 0;
-    const statusTokens: Array<string | null> = [];
+    const connectTokens: Array<string | null> = [];
     let persistedTokens: ReadonlyArray<ManagedRelay.ManagedRelayAccessTokenCacheEntry> = [
       {
         accountId: "user-1",
         clientId: "t3-mobile",
         relayUrl: "https://relay.example.test",
         thumbprint: "client-thumbprint",
-        scopes: [RelayEnvironmentStatusScope],
+        scopes: [RelayEnvironmentConnectScope],
         accessToken: "stale-relay-token",
         expiresAtMillis: Number.MAX_SAFE_INTEGER,
       },
@@ -264,13 +161,13 @@ describe("ManagedRelayClient", () => {
             issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
             token_type: "DPoP",
             expires_in: 1_800,
-            scope: RelayEnvironmentStatusScope,
+            scope: RelayEnvironmentConnectScope,
           }),
         );
       }
 
       const authorization = new Headers(init?.headers).get("authorization");
-      statusTokens.push(authorization);
+      connectTokens.push(authorization);
       if (authorization === "DPoP stale-relay-token") {
         return Promise.resolve(
           Response.json(
@@ -292,29 +189,22 @@ describe("ManagedRelayClient", () => {
             wsBaseUrl: "wss://desktop.example.test/ws",
             providerKind: "cloudflare_tunnel",
           },
-          status: "online",
-          checkedAt: "2026-06-05T20:00:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
+          credential: "environment-credential",
+          expiresAt: "2026-06-05T20:05:00.000Z",
         }),
       );
     }) satisfies typeof globalThis.fetch;
 
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
-      const result = yield* relayClient.getEnvironmentStatus({
+      const result = yield* relayClient.connectEnvironment({
         clerkToken: clerkToken("user-1", "session-1"),
-        scopes: [RelayEnvironmentStatusScope],
+        scopes: [RelayEnvironmentConnectScope],
         environmentId: EnvironmentId.make("env-1"),
       });
 
-      expect(result.status).toBe("online");
-      expect(statusTokens).toEqual(["DPoP stale-relay-token", "DPoP fresh-relay-token"]);
+      expect(result.credential).toBe("environment-credential");
+      expect(connectTokens).toEqual(["DPoP stale-relay-token", "DPoP fresh-relay-token"]);
       expect(tokenExchangeCount).toBe(1);
       expect(persistedTokens).toMatchObject([
         {
@@ -343,7 +233,7 @@ describe("ManagedRelayClient", () => {
             issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
             token_type: "DPoP",
             expires_in: 1_800,
-            scope: RelayEnvironmentStatusScope,
+            scope: RelayEnvironmentConnectScope,
           }),
         );
       }
@@ -355,24 +245,17 @@ describe("ManagedRelayClient", () => {
             wsBaseUrl: "wss://desktop.example.test/ws",
             providerKind: "cloudflare_tunnel",
           },
-          status: "online",
-          checkedAt: "2026-06-05T20:00:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
+          credential: "environment-credential",
+          expiresAt: "2026-06-05T20:05:00.000Z",
         }),
       );
     }) satisfies typeof globalThis.fetch;
 
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
-      yield* relayClient.getEnvironmentStatus({
+      yield* relayClient.connectEnvironment({
         clerkToken: "not-a-jwt",
-        scopes: [RelayEnvironmentStatusScope],
+        scopes: [RelayEnvironmentConnectScope],
         environmentId: EnvironmentId.make("env-1"),
       });
 
@@ -380,7 +263,7 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
   });
 
-  it.effect("explains a relay deadline 504 on link and keeps its trace ID", () => {
+  it.effect("explains a relay deadline 504 and keeps its trace ID", () => {
     const fetchFn = (() =>
       Promise.resolve(
         Response.json(
@@ -397,14 +280,10 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const error = yield* relayClient
-        .linkEnvironment({
+        .connectEnvironment({
           clerkToken: "clerk-token",
-          payload: {
-            proof: "link-proof",
-            notificationsEnabled: true,
-            liveActivitiesEnabled: true,
-            managedTunnelsEnabled: true,
-          },
+          scopes: [RelayEnvironmentConnectScope],
+          environmentId: EnvironmentId.make("env-1"),
         })
         .pipe(Effect.flip);
 
@@ -436,7 +315,11 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const error = yield* relayClient
-        .listEnvironments({ clerkToken: "clerk-token" })
+        .connectEnvironment({
+          clerkToken: "clerk-token",
+          scopes: [RelayEnvironmentConnectScope],
+          environmentId: EnvironmentId.make("env-1"),
+        })
         .pipe(Effect.flip);
 
       expect(error).toMatchObject({
