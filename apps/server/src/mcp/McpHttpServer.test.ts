@@ -351,7 +351,7 @@ it.effect("refuses preview tools to a client outside a thread before they run", 
       );
     expect(click.isError).toBe(true);
     expect(click.content).toEqual([
-      { type: "text", text: expect.stringContaining("needs an agent running inside T3 Code") },
+      { type: "text", text: expect.stringContaining("needs an agent running inside 456code") },
     ]);
   }).pipe(Effect.provide(layerTest)),
 );
