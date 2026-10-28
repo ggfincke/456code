@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  buildNewThreadLink,
   parseNewThreadLink,
   parseThreadLinkPrompt,
   promptLinkAppPath,
@@ -89,22 +88,7 @@ describe("thread links", () => {
   });
 });
 
-describe("link round trips", () => {
-  it("builds a link that parses back to the same prompt", () => {
-    const link = buildNewThreadLink({
-      prompt: "Swear count & rating?",
-      repository: { owner: "pingdotgg", name: "t3code" },
-      provider: "claudeAgent",
-      model: "opus",
-    });
-    const path = promptLinkAppPath(link);
-    expect(path).toBe(new URL(link).pathname + new URL(link).search);
-    const parsed = parseNewThreadLink(new URL(link).search);
-    expect(parsed.ok && parsed.value.kind === "new" && parsed.value.prompt.text).toBe(
-      "Swear count & rating?",
-    );
-  });
-
+describe("promptLinkAppPath", () => {
   it("maps app scheme and hosted links to in-app paths, and nothing else", () => {
     expect(promptLinkAppPath("t3code://new?prompt=hi")).toBe("/new?prompt=hi");
     expect(promptLinkAppPath("t3code-dev://threads/env-1/thread-1")).toBe("/env-1/thread-1");

@@ -208,11 +208,7 @@ export function ConnectionEnvironmentRow(props: {
               diagnosis={diagnosis}
             />
           ) : null}
-          {props.environment.isRelayManaged ? (
-            <Text className="text-sm text-foreground-muted">
-              Managed by T3 Connect. Tunnel details update automatically.
-            </Text>
-          ) : (
+          {props.environment.isRelayManaged ? null : (
             <>
               <ConnectionFormField
                 label="Label"

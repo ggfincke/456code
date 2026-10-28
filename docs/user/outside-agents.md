@@ -27,7 +27,7 @@ same device can reach it.
   `http://100.x.y.z:3773`, lets an agent find the environment but not finish
   signing in.
 - **A hosted agent**, such as ChatGPT or a bot running in the cloud, must reach
-  the environment from the internet. Use the T3 Connect address. A Tailscale
+  the environment from the internet. Use a public HTTPS address. A Tailscale
   address only works from your own tailnet.
 
 ## Approve a sign-in

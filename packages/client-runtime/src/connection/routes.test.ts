@@ -17,7 +17,6 @@ import {
   insertRoute,
   entryWithRoutes,
   mergeLearnedRoutes,
-  removedWithRelay,
   routesAfterRemoving,
   sendsTokenInClear,
   upsertRoute,
@@ -73,7 +72,7 @@ describe("connection routes", () => {
     expect(connectionRouteKind(direct("lo", "http://127.0.0.1:3773/"))).toBe("loopback");
     expect(connectionRouteKind(direct("ts6", "http://[fd7a:115c:a1e0::1]:3773/"))).toBe("tailnet");
     expect(connectionRouteLabel(TAILNET)).toBe("Tailscale");
-    expect(connectionRouteLabel(RELAY)).toBe("T3 Connect");
+    expect(connectionRouteLabel(RELAY)).toBe("Relay");
   });
 
   it("places a new route after faster kinds and ahead of T3 Connect", () => {
@@ -175,7 +174,7 @@ describe("learned routes", () => {
       reported: [tailscale, mesh],
       allowInsecure: true,
     })!;
-    expect(first.map(connectionRouteLabel)).toEqual(["Tailscale", "VPN", "T3 Connect"]);
+    expect(first.map(connectionRouteLabel)).toEqual(["Tailscale", "VPN", "Relay"]);
 
     const corrected = mergeLearnedRoutes({
       entry: entryWithRoutes(relayOnly, first),
@@ -184,7 +183,7 @@ describe("learned routes", () => {
       allowInsecure: true,
     })!;
     expect(ids(corrected)).toEqual(ids(first));
-    expect(corrected.map(connectionRouteLabel)).toEqual(["VPN", "VPN", "T3 Connect"]);
+    expect(corrected.map(connectionRouteLabel)).toEqual(["VPN", "VPN", "Relay"]);
     expect(
       mergeLearnedRoutes({
         entry: entryWithRoutes(relayOnly, corrected),
@@ -333,18 +332,6 @@ describe("learned routes", () => {
     })!;
     expect(ids(routesAfterRemoving(overLan, "lan"))).toEqual(["relay"]);
     expect(ids(routesAfterRemoving(overLan, "relay"))).toHaveLength(2);
-  });
-
-  it("counts an environment reached only through T3 Connect as removed with it", () => {
-    const learned = mergeLearnedRoutes({
-      entry: relayOnly,
-      activeRoute: RELAY,
-      reported: [{ httpBaseUrl: "http://192.168.1.10:3773/" }],
-      allowInsecure: true,
-    })!;
-    expect(removedWithRelay(relayOnly)).toBe(true);
-    expect(removedWithRelay(entryWithRoutes(relayOnly, learned))).toBe(true);
-    expect(removedWithRelay(entryWithRoutes(relayOnly, [LAN, RELAY]))).toBe(false);
   });
 
   it("keeps pull request routing trust when a route is learned", () => {

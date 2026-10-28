@@ -1,8 +1,8 @@
 // packages/shared/src/promptLinks.ts
 // parses explicit prompt links without sending messages
-import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
+export const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
 
-export const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
+const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
 
 export interface PromptLinkRepository {
   readonly owner: string;
@@ -77,7 +77,7 @@ function repositoryOf(owner: string, name: string): PromptLinkRepository | null 
   return { owner, name: trimmedName };
 }
 
-export function parsePromptLinkRepository(value: string): PromptLinkRepository | null {
+function parsePromptLinkRepository(value: string): PromptLinkRepository | null {
   const trimmed = value.trim();
   const url = /^https?:\/\/(?:www\.)?github\.com\/([^/?#]+)\/([^/?#]+)\/?$/i.exec(trimmed);
   const short = /^([^/\s]+)\/([^/\s]+)$/.exec(trimmed);
@@ -109,7 +109,7 @@ function readPrompt(params: URLSearchParams): PromptLinkResult<LinkedPrompt | nu
   if (raw.length > PROMPT_LINK_MAX_PROMPT_LENGTH) {
     return {
       ok: false,
-      error: `This prompt is longer than ${PROMPT_LINK_MAX_PROMPT_LENGTH.toLocaleString("en-US")} characters, so T3 Code did not open it.`,
+      error: `This prompt is longer than ${PROMPT_LINK_MAX_PROMPT_LENGTH.toLocaleString("en-US")} characters, so 456code did not open it.`,
     };
   }
   const prompt = sanitizeLinkedPrompt(raw);
@@ -117,7 +117,7 @@ function readPrompt(params: URLSearchParams): PromptLinkResult<LinkedPrompt | nu
     return {
       ok: false,
       error:
-        "This prompt had only hidden characters, so it may be malicious. T3 Code did not open it.",
+        "This prompt had only hidden characters, so it may be malicious. 456code did not open it.",
     };
   }
   return { ok: true, value: prompt.text.length > 0 ? prompt : null };
@@ -133,7 +133,7 @@ export function parseNewThreadLink(search: string): PromptLinkResult<NewThreadLi
   if (pr !== null) {
     const pullRequest = parsePromptLinkPullRequest(pr);
     if (pullRequest === null) {
-      return { ok: false, error: "This link names a pull request T3 Code cannot read." };
+      return { ok: false, error: "This link names a pull request 456code cannot read." };
     }
     return { ok: true, value: { kind: "pull-request", pullRequest, prompt: prompt.value } };
   }
@@ -141,7 +141,7 @@ export function parseNewThreadLink(search: string): PromptLinkResult<NewThreadLi
   const repo = params.get("repo");
   const repository = repo === null ? null : parsePromptLinkRepository(repo);
   if (repo !== null && repository === null) {
-    return { ok: false, error: "This link names a repository T3 Code cannot read." };
+    return { ok: false, error: "This link names a repository 456code cannot read." };
   }
   return {
     ok: true,
@@ -166,23 +166,6 @@ export function withoutPromptLinkParams(search: string): string {
   return rest ? `?${rest}` : "";
 }
 
-export function buildNewThreadLink(input: {
-  readonly prompt: string;
-  readonly repository?: PromptLinkRepository | null;
-  readonly provider?: string | null;
-  readonly model?: string | null;
-  readonly origin?: string;
-}): string {
-  const url = new URL("/new", input.origin ?? DEFAULT_HOSTED_APP_URL);
-  url.searchParams.set("prompt", input.prompt);
-  if (input.repository) {
-    url.searchParams.set("repo", `${input.repository.owner}/${input.repository.name}`);
-  }
-  if (input.provider) url.searchParams.set("provider", input.provider);
-  if (input.provider && input.model) url.searchParams.set("model", input.model);
-  return url.toString();
-}
-
 const APP_SCHEME = /^(?:t3code(?:-[a-z]+)?|code456-thin(?:-dev)?):$/;
 const THREAD_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
 
@@ -203,10 +186,4 @@ export function promptLinkAppPath(
   if (url.pathname === "/new") return `/new${url.search}`;
   const thread = url.searchParams.has("prompt") ? THREAD_PATH.exec(url.pathname) : null;
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
-}
-
-export function promptLinkDeepLink(appPath: string, scheme = "t3code"): string {
-  const url = new URL(appPath, "https://app.invalid");
-  const host = url.pathname === "/new" ? "new" : `threads${url.pathname}`;
-  return `${scheme}://${host}${url.search}`;
 }

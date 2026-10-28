@@ -6,13 +6,7 @@ media, or to put a one-click fix in a pull request comment.
 A link never runs anything. It opens a draft. You read the prompt, then press Send. A link cannot
 change your permission mode, branch, or worktree. Your own defaults apply.
 
-## Make a link
-
-Open the command palette and choose **Copy prompt link**. It copies the draft in the composer.
-When the project is on GitHub, **Copy prompt link with repo and model** also adds the repository
-and the model you picked. Sent messages have a **Copy prompt link** button too.
-
-You can also write a link by hand:
+## Write a link
 
 ```
 https://app.t3.codes/new?prompt=Rate%20my%20swearing
@@ -31,10 +25,6 @@ https://app.t3.codes/new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
 Encode the prompt for a URL. In JavaScript, use `encodeURIComponent`.
 
 ## Open a link
-
-On app.t3.codes, the link first asks where to open it: the desktop or mobile app, this browser
-when it is connected to a machine, or the download page. Select **Remember my choice** to skip
-this step next time.
 
 - **No `repo`**: the draft opens without a project, on the machine you used last.
 - **`repo`**: the draft opens in your most recently used project for that repository. A fork

@@ -15,8 +15,6 @@ import {
   ContextHandoffId,
   ContextTransferId,
   EventId,
-  GuestMessageId,
-  GuestShareId,
   IsoDateTime,
   MessageId,
   NodeId,
@@ -1959,8 +1957,6 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   lastErrorCode: Schema.optional(Schema.NullOr(Schema.String)),
   usageLimitResetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pendingRuntimeRequest: Schema.NullOr(OrchestrationV2PendingRuntimeRequestSummary),
-  /** Guest messages waiting for the owner to send or dismiss. Absent from older servers. */
-  pendingGuestMessageCount: Schema.optional(NonNegativeInt),
   latestVisibleMessage: Schema.NullOr(OrchestrationV2LatestVisibleMessageSummary),
   latestUserMessageAt: Schema.NullOr(Schema.DateTimeUtc),
   /** Excludes wakes and agent messages that advance latestUserMessageAt through the user role. */
@@ -2791,17 +2787,6 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
   }),
   Schema.Struct({
-    type: Schema.Literal("thread.guest-share.close"),
-    commandId: CommandId,
-    threadId: ThreadId,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("thread.guest-message.dismiss"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    guestMessageId: GuestMessageId,
-  }),
-  Schema.Struct({
     type: Schema.Literal("thread.unarchive"),
     commandId: CommandId,
     threadId: ThreadId,
@@ -2991,8 +2976,6 @@ export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("message.dispatch"),
     notification: Schema.optional(OrchestrationV2Notification),
-    /** Sends this pending guest message; the server uses the guest's text, not `text`. */
-    guestMessageId: Schema.optional(GuestMessageId),
     ...OrchestrationV2CreationFields,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
@@ -3218,31 +3201,6 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
 // Excluded from dispatchCommand so only the server can send these.
 const OrchestrationV2InternalCommand = Schema.Union([
-  // Guest share commands the server issues after checking T3 Connect and the guest token.
-  Schema.Struct({
-    type: Schema.Literal("thread.guest-share.open"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    shareId: GuestShareId,
-    host: TrimmedNonEmptyString,
-    expiresAt: IsoDateTime,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("thread.guest-share.redeem"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    shareId: GuestShareId,
-    guestName: TrimmedNonEmptyString,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("thread.guest-message.submit"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    shareId: GuestShareId,
-    guestMessageId: GuestMessageId,
-    text: Schema.String,
-    attachments: Schema.optional(Schema.Array(ChatAttachment)),
-  }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
     commandId: CommandId,

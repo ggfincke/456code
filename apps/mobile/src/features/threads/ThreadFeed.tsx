@@ -19,8 +19,6 @@ import {
 } from "../../lib/enrichedLinkPresentation";
 import { ThreadContextDivider } from "./thread-context-divider";
 import { ThreadHandoffDivider, ThreadHandoffRow } from "./thread-handoff-row";
-import { GuestBubbleTint, GuestMessageName } from "./guestMessageStyle";
-import { ThreadGuestPendingMessage, useThreadGuestShare } from "./ThreadGuestShareBar";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import {
@@ -59,7 +57,6 @@ import {
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { parseThreadLinkHref, resolveThreadLinkRef } from "@t3tools/shared/threadLinks";
-import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
 import {
   parseComposerContextHref,
   collectComposerContextReferences,
@@ -164,8 +161,6 @@ import { attachmentVideoPreviewSource } from "../../lib/videoPreviewSource";
 import { CopyTextButton } from "./CopyTextButton";
 import { getReviewSectionIdForCheckpoint } from "../review/reviewModel";
 import { setReviewSelectedSectionId } from "../review/reviewState";
-import { Menu } from "../../components/ui/Menu";
-import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
 import {
   ReviewCommentCard,
@@ -220,10 +215,9 @@ import {
   WORK_GROUP_TOGGLE_HEIGHT,
 } from "./thread-work-log";
 import {
-  appendGuestPendingMessages,
   appendPendingThreadMessages,
   isCompactionCommandFeedEntry,
-  type ThreadFeedRow,
+  type PendingThreadFeedEntry,
 } from "./pending-thread-feed";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
@@ -376,40 +370,6 @@ async function waitForThreadShell(
   return waitForThreadShellReady({
     read: () => appAtomRegistry.get(atom) !== null,
   });
-}
-
-const USER_MESSAGE_COPY_MENU_ACTIONS = [
-  { id: "copy-prompt-link", title: "Copy prompt link", image: "link" },
-];
-
-function UserMessageCopyButton(props: {
-  readonly text: string;
-  readonly onCopy: (() => Promise<void>) | undefined;
-  readonly tintColor: ColorValue;
-}) {
-  const button = (
-    <CopyTextButton
-      accessibilityLabel="Copy message"
-      text={props.text}
-      onCopy={props.onCopy}
-      tintColor={props.tintColor}
-      buttonSize={28}
-      iconSize={13}
-    />
-  );
-  const linkText = replaceComposerContextReferences(props.text, (reference) => reference.label);
-  if (linkText.length > PROMPT_LINK_MAX_PROMPT_LENGTH) return button;
-  return (
-    <Menu
-      actions={USER_MESSAGE_COPY_MENU_ACTIONS}
-      onPressAction={({ nativeEvent }) => {
-        if (nativeEvent.event === "copy-prompt-link") void copyPromptLink(linkText);
-      }}
-      shouldOpenOnLongPress
-    >
-      {button}
-    </Menu>
-  );
 }
 
 function AssistantForkButton(props: {
@@ -760,7 +720,7 @@ function MessageAttachmentFile(props: {
   );
 }
 
-/** A message's files as its bubble shows them; a guest's waiting message uses it too. */
+/** A message's files as its bubble shows them. */
 function MessageAttachmentList(props: {
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly environmentId: EnvironmentId;
@@ -1228,10 +1188,12 @@ function ThreadAutomationMessageRow(props: {
           <Text className="font-t3-medium text-xs tabular-nums text-foreground-secondary">
             {props.timestampLabel}
           </Text>
-          <UserMessageCopyButton
+          <CopyTextButton
+            accessibilityLabel="Copy message"
             text={props.text}
-            onCopy={undefined}
             tintColor={props.iconSubtleColor}
+            buttonSize={28}
+            iconSize={13}
           />
         </View>
       ) : null}
@@ -1247,7 +1209,7 @@ function compactionLabel(label: string, title: string | undefined) {
 }
 
 function renderFeedEntry(
-  info: { item: ThreadFeedRow; index: number },
+  info: { item: PendingThreadFeedEntry; index: number },
   props: Pick<
     ThreadFeedProps,
     | "environmentId"
@@ -1294,25 +1256,6 @@ function renderFeedEntry(
 ) {
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
-
-  if (entry.type === "guest-pending") {
-    return (
-      <ThreadGuestPendingMessage
-        threadRef={scopeThreadRef(props.environmentId, props.threadId)}
-        guestName={entry.guestName}
-        message={entry.message}
-        bubbleMaxWidth={props.duoColumns ? "85%" : props.userBubbleMaxWidth}
-        renderAttachments={(attachments) => (
-          <MessageAttachmentList
-            attachments={attachments}
-            environmentId={props.environmentId}
-            onPressPreview={props.onPressPreview}
-            onPlaybackStart={props.onPlaybackStart}
-          />
-        )}
-      />
-    );
-  }
 
   if (entry.type === "run-fold") {
     return (
@@ -1563,9 +1506,6 @@ function renderFeedEntry(
               Sent by 456code
             </Text>
           ) : null}
-          {presentation.guestName !== undefined ? (
-            <GuestMessageName name={presentation.guestName} />
-          ) : null}
           <View
             className="min-w-0 rounded-[20px]"
             style={{
@@ -1580,7 +1520,6 @@ function renderFeedEntry(
                     : null),
             }}
           >
-            {presentation.attribution === "guest" ? <GuestBubbleTint /> : null}
             {foldRowId !== null ? (
               <AgentMessageFoldHeader
                 environmentId={props.environmentId}
@@ -1736,10 +1675,11 @@ function renderFeedEntry(
                 </Pressable>
               ) : null}
               {presentation.text.trim().length > 0 ? (
-                <UserMessageCopyButton
+                <CopyTextButton
+                  accessibilityLabel="Copy message"
                   text={presentation.text}
                   onCopy={
-                    message.context && presentation.attribution !== "guest"
+                    message.context
                       ? () =>
                           writeComposerContextClipboard(message.text, {
                             version: 1,
@@ -1749,6 +1689,8 @@ function renderFeedEntry(
                       : undefined
                   }
                   tintColor={iconSubtleColor}
+                  buttonSize={28}
+                  iconSize={13}
                 />
               ) : null}
             </View>
@@ -2120,7 +2062,6 @@ export const ThreadFeed = memo(function ThreadFeed({
 }: ThreadFeedProps & { readonly ref?: Ref<ThreadFeedHandle> }) {
   const { listRef, onEndFollowEnabledChange, onHeaderMaterialVisibilityChange } = props;
   const workflowOpening = useWorkflowOpening(props.detailRef);
-  const guestShare = useThreadGuestShare(props.detailRef);
   const deviceType = useDeviceType();
   const duoColumns = useNativeWorkspaceColumnsSupported() && isDuoDevice(deviceType);
   const openPullRequest = useOpenPullRequest();
@@ -2745,10 +2686,7 @@ export const ThreadFeed = memo(function ThreadFeed({
   const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
   const { jumpToMessageId } = props;
   const jumpReady = !!jumpToMessageId && loadedListKey === `${feedThreadKey}:filled`;
-  const presentedFeed = appendGuestPendingMessages(
-    useThreadFeedPresentation(props, expandedTurnIds, expandedWorkGroups),
-    guestShare,
-  );
+  const presentedFeed = useThreadFeedPresentation(props, expandedTurnIds, expandedWorkGroups);
   const jumpRunId =
     jumpReady &&
     !presentedFeed.some((entry) => entry.type === "message" && entry.id === jumpToMessageId)
@@ -2949,7 +2887,7 @@ export const ThreadFeed = memo(function ThreadFeed({
     }
   };
 
-  const shouldRestoreVisibleContentPosition = (entry: ThreadFeedRow) => {
+  const shouldRestoreVisibleContentPosition = (entry: ThreadFeedEntry) => {
     const disclosureAnchorKey = disclosureAnchorKeyRef.current;
     return disclosureAnchorKey === null || entry.id === disclosureAnchorKey;
   };
@@ -3024,8 +2962,7 @@ export const ThreadFeed = memo(function ThreadFeed({
   // Without this, every row above the viewport is assumed to be
   // estimatedItemSize tall, and scrolling up through unmeasured content
   // corrects each row's height as it mounts — the feed visibly jumps.
-  const getFixedItemSize = (entry: ThreadFeedRow) => {
-    if (entry.type === "guest-pending") return undefined;
+  const getFixedItemSize = (entry: ThreadFeedEntry) => {
     if (entry.type === "html-render") {
       return htmlRenderRowHeight(htmlRenderFrameHeight(entry.render, contentWidth));
     }
@@ -3079,7 +3016,7 @@ export const ThreadFeed = memo(function ThreadFeed({
     }
   }, [textSizeKey, contentWidth, hasHtmlRenders, beginReflow, listRef]);
 
-  const renderItem = (info: { item: ThreadFeedRow; index: number }) => (
+  const renderItem = (info: { item: PendingThreadFeedEntry; index: number }) => (
     <Animated.View
       key={info.item.id}
       entering={disclosureToggleSettling ? THREAD_FEED_DISCLOSURE_ENTER_TRANSITION : undefined}
@@ -3341,7 +3278,7 @@ function ThreadFeedLoadEarlierControl(props: ThreadFeedHistoryControls) {
 }
 
 function MessageImageGalleryScope(props: {
-  entry: ThreadFeedRow;
+  entry: PendingThreadFeedEntry;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   workspaceRoot: string | null | undefined;

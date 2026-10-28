@@ -23,7 +23,7 @@ export type ConnectionRouteKind =
   | "public"
   | "ssh";
 
-export const RELAY_ROUTE_ID = "relay";
+const RELAY_ROUTE_ID = "relay";
 
 export function connectionRouteId(target: ConnectionTarget): string {
   switch (target._tag) {
@@ -158,7 +158,7 @@ function routeAddressKey(route: ConnectionRoute): string | null {
 export function connectionRouteLabel(route: ConnectionRoute): string {
   switch (connectionRouteKind(route)) {
     case "relay":
-      return "T3 Connect";
+      return "Relay";
     case "loopback":
       return "This device";
     case "lan":
@@ -401,7 +401,7 @@ export function isLearned(route: ConnectionRoute): boolean {
 
 /**
  * A learned route borrows the credential of the route it was learned over, so
- * it cannot outlive that route: removing T3 Connect also removes routes learned
+ * it cannot outlive that route: removing the relay also removes routes learned
  * through it, and removing a paired address removes routes that borrow its
  * token.
  */
@@ -420,10 +420,6 @@ export function routesAfterRemoving(
     }
     return credentialConnectionId(connectionRouteId(route.target)) !== removedId;
   });
-}
-
-export function removedWithRelay(entry: ConnectionCatalogEntry): boolean {
-  return routesAfterRemoving(connectionRoutes(entry), RELAY_ROUTE_ID).length === 0;
 }
 
 export function sshTargetKey(target: DesktopSshEnvironmentTarget): string {

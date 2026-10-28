@@ -64,9 +64,11 @@ export function PullRequestRoutingSettings() {
                   <Text className="text-base font-t3-bold text-foreground">
                     {entry.target.label}
                   </Text>
-                  <Text className="text-xs text-foreground-muted" numberOfLines={1}>
-                    {connectionCatalogDisplayUrl(entry) ?? "T3 Connect"}
-                  </Text>
+                  {connectionCatalogDisplayUrl(entry) ? (
+                    <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+                      {connectionCatalogDisplayUrl(entry)}
+                    </Text>
+                  ) : null}
                 </View>
                 <Text className="text-sm text-foreground-muted">
                   {options.find((option) => option.value === selected)?.label}
