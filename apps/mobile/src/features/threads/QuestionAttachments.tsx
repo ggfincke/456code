@@ -37,6 +37,7 @@ export function QuestionAttachments(props: {
   disabled: boolean;
   value: string;
   onChangeText: (value: string) => void;
+  onSubmitEditing?: (() => void) | undefined;
   onInputFocusChange?: ((focused: boolean) => void) | undefined;
 }) {
   const { selectedThread } = useThreadSelection();
@@ -203,6 +204,7 @@ export function QuestionAttachments(props: {
           submitBehavior={props.question.initialAnswer !== undefined ? "newline" : undefined}
           editable={!props.disabled}
           onChangeText={props.onChangeText}
+          onSubmitEditing={props.onSubmitEditing}
           onFocus={() => {
             focusedRef.current = true;
             onInputFocusChange?.(true);
@@ -211,7 +213,7 @@ export function QuestionAttachments(props: {
             focusedRef.current = false;
             onInputFocusChange?.(false);
           }}
-          placeholder="Or type a custom answer"
+          placeholder="Something else…"
           className="min-h-[54px] rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground"
         />
       </TextInputWrapper>

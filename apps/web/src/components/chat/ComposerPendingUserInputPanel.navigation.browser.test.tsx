@@ -7,8 +7,9 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import { makeThreadRequestsResolvedAnnouncer } from "@t3tools/client-runtime/state/thread-requests";
-import { useLayoutEffect, useRef, type ComponentProps } from "react";
+import { useLayoutEffect, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 
 vi.mock(import("../ChatMarkdown"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -17,6 +18,7 @@ vi.mock(import("../ChatMarkdown"), async (importOriginal) => ({
 
 import { act, fakeTimers, render } from "../../../test/render";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
+import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { usePendingThreadRequests } from "./usePendingThreadRequests";
 
 const threadRef = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
@@ -35,7 +37,11 @@ const prompt = {
   })),
 };
 
-function questionProjection(threadId: ThreadId, requestIds = ["first", "second"]) {
+function questionProjection(
+  threadId: ThreadId,
+  requestIds = ["first", "second"],
+  questions = prompt.questions,
+) {
   const projection = makeThreadProjectionFixture();
   return {
     ...projection,
@@ -68,7 +74,7 @@ function questionProjection(threadId: ThreadId, requestIds = ["first", "second"]
       updatedAt: projection.updatedAt,
       type: "user_input_request" as const,
       requestId: RuntimeRequestId.make(id),
-      questions: prompt.questions,
+      questions,
     })),
   } satisfies OrchestrationV2ThreadProjection;
 }
@@ -84,17 +90,11 @@ function PendingRequestsProbe({
   projection: OrchestrationV2ThreadProjection;
   loading?: boolean;
 }) {
-  const promptRef = useRef("");
-  const composerRef = useRef(null);
   const state = usePendingThreadRequests({
     environmentId,
     activeThreadId: projection.thread.id,
     serverProjection: loading ? null : projection,
     supportsQuestionAttachments: false,
-    composerDraftTarget: { environmentId, threadId: projection.thread.id },
-    setComposerDraftPrompt: () => {},
-    promptRef,
-    composerRef,
     setThreadError: () => {},
   });
   useLayoutEffect(() => {
@@ -187,4 +187,42 @@ it("isolates drafts by environment, thread and request and discards only resolve
       index === 0 ? undefined : `Answer ${index}`,
     );
   }
+});
+
+it("submits the answer typed into the card's Something else field", async () => {
+  const environmentId = EnvironmentId.make("custom-answer-environment");
+  const projection = questionProjection(threadRef.threadId, ["only"], [prompt.questions[0]!]);
+  const submitted = vi.fn();
+  function Card() {
+    const state = usePendingThreadRequests({
+      environmentId,
+      activeThreadId: projection.thread.id,
+      serverProjection: projection,
+      supportsQuestionAttachments: false,
+      setThreadError: () => {},
+    });
+    return (
+      <ComposerPendingUserInputPanel
+        pendingUserInputs={state.pendingUserInputs}
+        cwd={undefined}
+        threadRef={threadRef}
+        respondingRequestIds={[]}
+        answers={state.activePendingDraftAnswers}
+        questionIndex={state.activePendingQuestionIndex}
+        attachmentBlockReason={null}
+        onToggleOption={state.onSelectActivePendingUserInputOption}
+        onChangeCustomAnswer={state.onChangeActivePendingUserInputCustomAnswer}
+        onPasteFiles={() => {}}
+        onSelectQuestion={state.onSelectActivePendingUserInputQuestion}
+        onAdvance={() => submitted(state.activePendingResolvedAnswers)}
+        onDismiss={() => {}}
+      />
+    );
+  }
+  await using screen = await render(<Card />);
+
+  await userEvent.type(screen.getByRole("textbox", { name: "Something else" }), "Ship it Friday");
+  await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+  expect(submitted).toHaveBeenCalledWith({ "question-0": "Ship it Friday" });
 });

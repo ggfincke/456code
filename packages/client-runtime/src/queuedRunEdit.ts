@@ -63,8 +63,9 @@ export function resolveQueuedEditExit(input: {
 
 /**
  * Why a queued message can't be opened in the composer now, or null when it
- * can. An open question takes the composer over for its answer, so an edit
- * begun then would happen out of sight and could be sent before it is seen.
+ * can. An open question holds the composer's attachments on web and covers the
+ * composer on mobile, so an edit begun then could lose its attachments or happen
+ * out of sight.
  */
 export function queuedRunEditBlockedReason(input: {
   readonly openQuestionCount: number;

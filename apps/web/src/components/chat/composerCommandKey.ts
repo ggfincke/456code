@@ -39,7 +39,6 @@ export function composerCommandKeyHandler(input: {
   readonly followUpBehavior: ChatComposerProps["settings"]["followUpBehavior"];
   readonly isSoftwareKeyboardOpen: boolean;
   readonly planModeUiEnabled: boolean;
-  readonly isLiteralPendingAnswer: boolean;
   readonly pendingUserInputs: ReadonlyArray<PendingUserInput>;
   readonly promptHistoryMessages: ChatComposerProps["promptHistoryMessages"];
   readonly promptHistoryPositionRef: RefObject<{
@@ -91,7 +90,6 @@ export function composerCommandKeyHandler(input: {
     followUpBehavior,
     isSoftwareKeyboardOpen,
     planModeUiEnabled,
-    isLiteralPendingAnswer,
     pendingUserInputs,
     promptHistoryMessages,
     promptHistoryPositionRef,
@@ -190,8 +188,7 @@ export function composerCommandKeyHandler(input: {
       return true;
     }
     const { trigger } = resolveActiveComposerTrigger();
-    const menuIsActive =
-      !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
+    const menuIsActive = composerMenuOpenRef.current || trigger !== null;
     if (key === "Escape") {
       if (!menuIsActive || event.isComposing || event.keyCode === 229) return false;
       dismissComposerTrigger(trigger);
@@ -231,11 +228,7 @@ export function composerCommandKeyHandler(input: {
       return true;
     }
     if (key === "Enter" && isTaskItem) return false;
-    if (
-      !isLiteralPendingAnswer &&
-      !event.isComposing &&
-      (key === "Enter" || (key === "Tab" && !event.shiftKey))
-    ) {
+    if (!event.isComposing && (key === "Enter" || (key === "Tab" && !event.shiftKey))) {
       const selection = composerEditorRef.current?.readSelectionRange();
       const snapshot = readComposerSnapshot();
       if (selection && selection.start === selection.end && snapshot.value === promptRef.current) {

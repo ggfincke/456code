@@ -615,7 +615,6 @@ export default function ChatView(props: ChatViewProps) {
     const draft = store.getComposerDraft(composerDraftTarget);
     return draft ? composerDraftHasUserContent({ ...draft, prompt: "" }) : false;
   });
-  const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerFilesRef = useRef<ComposerFileAttachment[]>([]);
@@ -1265,25 +1264,19 @@ export default function ChatView(props: ChatViewProps) {
     activePendingDraftAnswers,
     activePendingQuestionIndex,
     activePendingProgress,
-    activePendingResolvedAnswers,
     activePendingIsResponding,
     respondingRequestIds,
     onRespondToApproval: onRespondToApprovalStable,
     onDismissUserInput: onDismissUserInputStable,
     onSelectActivePendingUserInputOption: onSelectActivePendingUserInputOptionStable,
     onChangeActivePendingUserInputCustomAnswer,
-    onAdvanceActivePendingUserInput,
     onAdvanceActivePendingUserInputStable,
-    onPreviousActivePendingUserInputQuestion: onPreviousActivePendingUserInputQuestionStable,
+    onSelectActivePendingUserInputQuestion: onSelectActivePendingUserInputQuestionStable,
   } = usePendingThreadRequests({
     environmentId,
     activeThreadId,
     serverProjection,
     supportsQuestionAttachments,
-    composerDraftTarget,
-    setComposerDraftPrompt,
-    promptRef,
-    composerRef,
     setThreadError,
   });
   const activeProposedPlan = (() => {
@@ -2826,8 +2819,6 @@ export default function ChatView(props: ChatViewProps) {
     readPendingEnvironmentChange,
     pendingApprovals,
     respondingRequestIds,
-    activePendingProgress,
-    onAdvanceActivePendingUserInput,
     onRespondToApproval: onRespondToApprovalStable,
     beginLocalDispatch,
     resetLocalDispatch,
@@ -3530,7 +3521,6 @@ export default function ChatView(props: ChatViewProps) {
                               pendingApprovals={pendingApprovals}
                               pendingUserInputs={pendingUserInputs}
                               activePendingProgress={activePendingProgress}
-                              activePendingResolvedAnswers={activePendingResolvedAnswers}
                               activePendingIsResponding={activePendingIsResponding}
                               activePendingDraftAnswers={activePendingDraftAnswers}
                               activePendingQuestionIndex={activePendingQuestionIndex}
@@ -3597,8 +3587,8 @@ export default function ChatView(props: ChatViewProps) {
                                 onAdvanceActivePendingUserInputStable
                               }
                               onDismissActivePendingUserInput={onDismissUserInputStable}
-                              onPreviousActivePendingUserInputQuestion={
-                                onPreviousActivePendingUserInputQuestionStable
+                              onSelectActivePendingUserInputQuestion={
+                                onSelectActivePendingUserInputQuestionStable
                               }
                               onChangeActivePendingUserInputCustomAnswer={
                                 onChangeActivePendingUserInputCustomAnswer

@@ -1961,6 +1961,13 @@ export function setPendingUserInputCustomAnswer(
   };
 }
 
+export function isPendingUserInputQuestionAnswered(
+  question: ThreadUserInputQuestion,
+  draft: PendingUserInputDraftAnswer | undefined,
+): boolean {
+  return resolvePendingUserInputAnswer(question, draft) !== null;
+}
+
 export function isPendingUserInputOptionSelected(
   question: ThreadUserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
