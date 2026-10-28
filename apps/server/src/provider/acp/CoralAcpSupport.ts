@@ -102,6 +102,9 @@ export const makeCoralAcpRuntime = Effect.fn("CoralAcpSupport.makeRuntime")(func
   const acpContext = yield* Layer.build(
     AcpSessionRuntime.layer({
       ...input,
+      // coral rejects any client-supplied mcp servers with invalid params
+      mcpServers: [],
+      acpMcpServers: [],
       authenticateOnAuthRequired: false,
       clientCapabilities: {},
       resumeMethod: "resume",
@@ -124,6 +127,9 @@ export const makeCoralAcpRuntime = Effect.fn("CoralAcpSupport.makeRuntime")(func
   return {
     ...runtime,
     handleElicitation: () => runtime.handleElicitation(() => Effect.succeed({ action: "decline" })),
+    loadSession: (sessionId) => runtime.loadSession(sessionId),
+    resumeSession: (sessionId) => runtime.resumeSession(sessionId),
+    forkSession: (sessionId) => runtime.forkSession(sessionId),
     start: () =>
       runtime.initialize().pipe(
         Effect.flatMap((initialized) => {
