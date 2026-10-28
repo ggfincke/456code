@@ -30,7 +30,6 @@ import {
   Redo2Icon,
   Undo2Icon,
 } from "lucide-react";
-import { Link as LinkIconNode } from "lucide";
 import { Button, InlineButton } from "../ui/button";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { AttachmentImage } from "../media/AttachmentImage";
@@ -46,7 +45,6 @@ import {
 } from "./SnapShotAttachmentDetails";
 import { GuestMessageName, guestBubbleClassName } from "./guestMessageStyle";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { shouldCollapseUserMessage } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -153,7 +151,6 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   const summary = taskTitle ?? text.trim().split(/\r?\n/, 1)[0] ?? "";
 
   const revertTurnCount = row.revertTurnCount;
-  const promptLink = promptLinkFor(text);
   // Find reads the DOM, so a folded prompt stays mounted but hidden while find is open.
   const bodyMounted = expanded || ctx.findActive;
 
@@ -212,14 +209,6 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
                 <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
               )}
               <MessageCopyButton text={text} variant="ghost" />
-              {promptLink !== null && (
-                <MessageCopyButton
-                  text={promptLink}
-                  label="Copy prompt link"
-                  icon={LinkIconNode}
-                  variant="ghost"
-                />
-              )}
             </div>
           </div>
         </div>
@@ -334,7 +323,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     resolvedContext.text,
     (reference) => reference.label,
   );
-  const promptLink = promptLinkFor(plainText);
   const foldSummary =
     plainText
       .split(/\r?\n/)
@@ -660,14 +648,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                         },
                       }
                     : {})}
-                  variant="ghost"
-                />
-              )}
-              {promptLink !== null && (
-                <MessageCopyButton
-                  text={promptLink}
-                  label="Copy prompt link"
-                  icon={LinkIconNode}
                   variant="ghost"
                 />
               )}

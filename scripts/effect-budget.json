@@ -337,7 +337,6 @@
   "apps/web/src/components/preview/useAgentOpenedPreviews.ts": 3,
   "apps/web/src/components/preview/usePreviewBridge.ts": 2,
   "apps/web/src/components/projectScriptEditor.tsx": 1,
-  "apps/web/src/components/promptLinks/HostedPromptLinkLanding.tsx": 1,
   "apps/web/src/components/promptLinks/NewThreadLinkView.tsx": 2,
   "apps/web/src/components/promptLinks/ThreadLinkPrompt.tsx": 1,
   "apps/web/src/components/pullRequest/LinkPullRequestDialog.tsx": 1,

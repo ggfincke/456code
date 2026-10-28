@@ -89,11 +89,6 @@ import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstra
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
-import {
-  composerPromptLink,
-  copyPromptLink,
-  promptLinkRepositoryOf,
-} from "./promptLinks/copyPromptLink";
 import { useClientSettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { readLocalApi } from "../localApi";
@@ -110,11 +105,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useNewProject } from "../hooks/useNewProject";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import {
-  useEnvironmentProviders,
-  useEnvironments,
-  usePrimaryEnvironmentId,
-} from "../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -229,7 +220,6 @@ import type { ChatComposerHandle } from "./chat/ChatComposer";
 import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
-import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 import { toggleSidebarView } from "../fincke/sidebarView";
 
@@ -421,7 +411,6 @@ function OpenCommandPaletteDialog(props: {
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
-  const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -474,7 +463,6 @@ function OpenCommandPaletteDialog(props: {
   };
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const providersByEnvironment = useEnvironmentProviders();
   const { changeThemeItem, changeAppearanceItem, themeEditorItem } = useCommandPaletteThemeItems();
   const currentView = viewStack.at(-1)?.view ?? null;
   const threadSearchQuery = currentView === null && !isActionsOnly ? deferredQuery : "";
@@ -1212,55 +1200,6 @@ function OpenCommandPaletteDialog(props: {
         openThreadFind(activeThreadKey);
       },
     });
-  }
-
-  const promptLinkTarget = paletteRouteTarget
-    ? paletteRouteTarget.kind === "server"
-      ? paletteRouteTarget.threadRef
-      : paletteRouteTarget.draftId
-    : null;
-  const promptLinkProjectRef = activeThread ?? activeDraftThread;
-  const promptLinkInput =
-    promptLinkTarget === null
-      ? null
-      : {
-          target: promptLinkTarget,
-          project: projects.find(
-            (project) =>
-              project.environmentId === promptLinkProjectRef?.environmentId &&
-              project.id === promptLinkProjectRef.projectId,
-          ),
-          providers:
-            (promptLinkProjectRef
-              ? providersByEnvironment.get(promptLinkProjectRef.environmentId)
-              : undefined) ?? [],
-          threadModelSelection: activeThread?.modelSelection ?? null,
-        };
-  const plainPromptLink = promptLinkInput
-    ? composerPromptLink({ ...promptLinkInput, withContext: false })
-    : null;
-  if (promptLinkInput !== null && plainPromptLink !== null) {
-    actionItems.push({
-      kind: "action",
-      value: "action:copy-prompt-link",
-      searchTerms: ["copy", "share", "prompt", "link"],
-      title: "Copy prompt link",
-      icon: <LinkIcon className={ITEM_ICON_CLASS} />,
-      run: () => copyPromptLink(plainPromptLink),
-    });
-    if (promptLinkRepositoryOf(promptLinkInput.project) !== null) {
-      const contextLink = composerPromptLink({ ...promptLinkInput, withContext: true });
-      if (contextLink !== null) {
-        actionItems.push({
-          kind: "action",
-          value: "action:copy-prompt-link-with-context",
-          searchTerms: ["copy", "share", "prompt", "link", "repository", "model"],
-          title: "Copy prompt link with repo and model",
-          icon: <LinkIcon className={ITEM_ICON_CLASS} />,
-          run: () => copyPromptLink(contextLink),
-        });
-      }
-    }
   }
 
   if (activeThreadReferenceCopyTarget !== null) {
