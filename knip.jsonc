@@ -137,9 +137,6 @@
       // React Native codegen discovers component specifications by filename.
       "entry": ["src/*NativeComponent.ts!"],
     },
-    "infra/relay": {
-      "entry": ["alchemy.run.ts!", "src/persistence/schema.ts!"],
-    },
     "packages/*": {
       // These workspace packages are private to this monorepo.
       "includeEntryExports": true,
