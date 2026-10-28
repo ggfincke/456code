@@ -1,12 +1,10 @@
 import * as Dialog from "../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigation } from "@react-navigation/native";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
-import { hasCloudPublicConfig } from "../features/cloud/publicConfig";
 import { useConnectionController } from "../features/connection/useConnectionController";
 import { environmentPresentations } from "./presentation";
 import { useWorkspaceConnectionState, useWorkspaceEnvironments } from "./workspace";
@@ -109,7 +107,6 @@ export function useRemoteConnectionStatus() {
 
 export function useRemoteConnections() {
   const controller = useConnectionController();
-  const navigation = useNavigation();
   const connectionPairingUrl = useAtomValue(connectionPairingUrlAtom);
   const pendingConnectionError = useAtomValue(pendingConnectionErrorAtom);
   const { connectedEnvironments, connectionError, connectionState } = useRemoteConnectionStatus();
@@ -170,40 +167,22 @@ export function useRemoteConnections() {
       if (!environment) {
         return;
       }
-      const remove = {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          void controller.removeEnvironment(environmentId);
-        },
-      } as const;
-      if (environment.isRelayManaged) {
-        Dialog.alert(
-          "Remove from this device?",
-          `Forget ${environment.environmentLabel} and its cached threads on this device.\n\nIt stays on your T3 Connect account and keeps its host space. Deregister it under T3 Account → T3 Connect to free it.`,
-          [
-            { text: "Cancel", style: "cancel" },
-            // SettingsAuth renders nothing in builds without cloud config.
-            ...(hasCloudPublicConfig()
-              ? [
-                  {
-                    text: "Open T3 Account",
-                    onPress: () => navigation.navigate("SettingsAuth"),
-                  },
-                ]
-              : []),
-            remove,
-          ],
-        );
-        return;
-      }
       Dialog.alert(
         "Remove from this device?",
         `Forget ${environment.environmentLabel} and its cached threads on this device. Switch it off instead to keep it saved.`,
-        [{ text: "Cancel", style: "cancel" }, remove],
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: () => {
+              void controller.removeEnvironment(environmentId);
+            },
+          },
+        ],
       );
     },
-    [connectedEnvironments, controller, navigation],
+    [connectedEnvironments, controller],
   );
 
   return {

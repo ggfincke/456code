@@ -48,7 +48,6 @@ const VARIANT_CONFIG = {
     scheme: "t3code-dev",
     iosBundleIdentifier: "dev.fincke.456code.dev",
     androidPackage: "dev.fincke.456code.dev",
-    relyingParty: "clerk.t3.codes",
     assets: OCEAN_ASSETS,
   },
   preview: {
@@ -56,7 +55,6 @@ const VARIANT_CONFIG = {
     scheme: "t3code-preview",
     iosBundleIdentifier: "dev.fincke.456code.preview",
     androidPackage: "dev.fincke.456code.preview",
-    relyingParty: "clerk.t3.codes",
     assets: OCEAN_ASSETS,
   },
   production: {
@@ -64,7 +62,6 @@ const VARIANT_CONFIG = {
     scheme: "t3code",
     iosBundleIdentifier: "dev.fincke.456code",
     androidPackage: "dev.fincke.456code",
-    relyingParty: "clerk.t3.codes",
     assets: OCEAN_ASSETS,
   },
 } as const;
@@ -204,12 +201,8 @@ const config: ExpoConfig = {
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
-    // Avoid Personal Team fallback: it cannot sign App Groups or Apple sign-in entitlements.
+    // Avoid Personal Team fallback: it cannot sign App Groups entitlements.
     appleTeamId: "3ZX5P538FH",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
     entitlements: {
       "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
     },
@@ -294,8 +287,6 @@ const config: ExpoConfig = {
     ...(isIosPersonalTeamBuild
       ? [sharingPlugin]
       : ["./plugins/withShareExtensionDisplayName.cjs", sharingPlugin]),
-    // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",
     [
       "expo-quick-actions",
@@ -387,18 +378,6 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
-    relay: {
-      url: repoEnv.T3CODE_RELAY_URL ?? null,
-    },
-    clerk: {
-      publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
-      jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
-    },
-    // Clerk reads these exact names at prebuild. Omit unset values: manifest null becomes truthy {}.
-    EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
     eas: {
       projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     },

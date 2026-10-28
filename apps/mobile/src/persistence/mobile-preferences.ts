@@ -104,7 +104,6 @@ export interface Preferences {
   readonly mathRenderingEnabled?: boolean;
   readonly sidebarProjectFolderTint?: boolean;
   readonly sidebarProjectsView?: boolean;
-  readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];
   readonly dismissedDatabaseStorageNotices?: readonly string[];
   /** Hardware Return behavior is iOS-only. */
@@ -182,7 +181,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     mathRenderingEnabled?: boolean;
     sidebarProjectFolderTint?: boolean;
     sidebarProjectsView?: boolean;
-    connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
     composerEnterBehavior?: ComposerEnterBehavior;
@@ -268,11 +266,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     preferences.sidebarProjectFolderTint = parsed.sidebarProjectFolderTint;
   if (typeof parsed.sidebarProjectsView === "boolean")
     preferences.sidebarProjectsView = parsed.sidebarProjectsView;
-  if (Array.isArray(parsed.connectOnboardingOptOutAccounts)) {
-    preferences.connectOnboardingOptOutAccounts = parsed.connectOnboardingOptOutAccounts.filter(
-      (account): account is string => typeof account === "string",
-    );
-  }
   if (Array.isArray(parsed.collapsedProjectGroups)) {
     preferences.collapsedProjectGroups = parsed.collapsedProjectGroups.filter(
       (key): key is string => typeof key === "string",

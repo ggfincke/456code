@@ -6,23 +6,13 @@ import type { NavigationState, PartialState } from "@react-navigation/native";
  * the launcher, not app navigation. Without this filter it falls through
  * to the NotFound wildcard route on every dev launch.
  */
-export function shouldHandleAppLink(url: string, cloudConfigured: boolean): boolean {
+export function shouldHandleAppLink(url: string): boolean {
   return (
     !url.includes("expo-development-client") &&
     !url.includes("://expo-sharing") &&
-    !/^t3code(-dev|-preview)?:\/*$/.test(url) &&
-    (cloudConfigured || !CLOUD_ONLY_LINK_PATH.test(url.split(/[?#]/)[0] ?? ""))
+    !/^t3code(-dev|-preview)?:\/*$/.test(url)
   );
 }
-
-/**
- * Screens that only exist with T3 Connect configured. A build without it has
- * no entry points to them, so a link must not open one empty. Anchored to the
- * app-relative path (after `exp://host/--/` in Expo Go) so a file route whose
- * path merely ends in one of these names still opens.
- */
-const CLOUD_ONLY_LINK_PATH =
-  /^[a-z][\w+.-]*:\/*(?:[^/]*\/--\/)?(?:connect-onboarding|settings\/(?:auth|waitlist))\/*$/i;
 
 /** Keep the published draft URLs while using the root thread screen. */
 export function restoreDraftLinkState(

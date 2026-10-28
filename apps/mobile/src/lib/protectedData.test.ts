@@ -44,15 +44,8 @@ vi.mock("../persistence/layer", async () => {
   const Layer = await import("effect/Layer");
   return { layer: Layer.effectDiscard(Effect.promise(mocks.readStorage)) };
 });
-vi.mock("../features/cloud/dpop", async () => ({
+vi.mock("./expoCrypto", async () => ({
   layer: (await import("effect/Layer")).empty,
-}));
-vi.mock("../features/cloud/managedRelayLayer", async () => {
-  const Layer = await import("effect/Layer");
-  return { layer: () => Layer.empty };
-});
-vi.mock("../features/cloud/publicConfig", () => ({
-  resolveCloudPublicConfig: () => ({ relay: { url: null } }),
 }));
 vi.mock("@t3tools/client-runtime/rpc", async () => {
   const Layer = await import("effect/Layer");
