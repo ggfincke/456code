@@ -249,9 +249,9 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
         ? "The installed 456code service needs an update or repair. Update it now?"
         : platform === "darwin"
           ? "Run 456code in the background whenever you log in to this Mac? " +
-            "It stays reachable through T3 Connect while you are logged in."
+            "It stays reachable while you are logged in."
           : "Run 456code in the background whenever this machine boots? " +
-            "It stays reachable through T3 Connect even after you log out.",
+            "It stays reachable even after you log out.",
       initial: true,
     }),
   );
