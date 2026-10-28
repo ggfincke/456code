@@ -3011,6 +3011,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             thread={thread}
                             variant={rowVariant}
+                            needsYou={section === "needs-you"}
                             variantAction={
                               section === "snoozed"
                                 ? "unsnooze"
