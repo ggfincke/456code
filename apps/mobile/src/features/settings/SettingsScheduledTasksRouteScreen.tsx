@@ -11,11 +11,7 @@ import type {
   ScheduledTask,
   ScheduledTaskUpsertInput,
 } from "@t3tools/contracts";
-import {
-  MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
-  MAX_WEBHOOK_FILTERS,
-  resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+import { MAX_WEBHOOK_FILTERS, resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import { DateTimePicker } from "@expo/ui/community/datetime-picker";
 import {
@@ -26,7 +22,6 @@ import {
 import {
   DEFAULT_WEBHOOK_PROMPT,
   emptyWebhookFilterDraft,
-  parseMaxDeliveryAge,
   parseWebhookFilterDrafts,
   removeWebhookFilterDraft,
   WEBHOOK_FILTER_OPS,
@@ -708,16 +703,6 @@ function TaskForm({
         ? { ...draft.schedule, signature: liveTask.schedule.signature }
         : draft.schedule,
     );
-    if (
-      draft.schedule.mode === "webhook" &&
-      parseMaxDeliveryAge(draft.schedule.maxDeliveryAgeMinutes) === undefined
-    ) {
-      Dialog.alert(
-        "Invalid age limit",
-        `Enter whole minutes from 1 to ${MAX_WEBHOOK_DELIVERY_AGE_MINUTES}, or leave it blank.`,
-      );
-      return;
-    }
     const parsedFilters = parseWebhookFilterDrafts(draft.schedule.filters);
     if (draft.schedule.mode === "webhook" && "error" in parsedFilters) {
       Dialog.alert("Invalid filter", parsedFilters.error);
@@ -1059,17 +1044,6 @@ function TaskForm({
                 }
                 signatureConfigured={draft.schedule.signature !== null}
                 disabled={!canOperate || saving || environmentUnavailable}
-              />
-              <FormField
-                label="Skip requests older than (minutes)"
-                value={draft.schedule.maxDeliveryAgeMinutes}
-                placeholder="Run every request"
-                keyboardType="number-pad"
-                disabled={saving}
-                borderTop
-                onChange={(maxDeliveryAgeMinutes) =>
-                  setDraft({ ...draft, schedule: { ...draft.schedule, maxDeliveryAgeMinutes } })
-                }
               />
               <WebhookFilterRows
                 filters={draft.schedule.filters}

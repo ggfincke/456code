@@ -114,17 +114,8 @@ Windows. While a trace write is slow, producers keep up to one trace file of rec
 that time a stall survive it; records drop only while the disk stays stuck. Provider logging
 retains backpressure. Shutdown drains accepted writes before closing their scope.
 
-Relay awareness queues one pending publication per thread and retains a follow-up when the thread
-changes during a send. Transcript deltas and tool output do not enqueue awareness work. Run,
-request, and relevant thread metadata events do. Configuration is checked before shell reads, and
-connection changes invalidate published identities so relinking can publish unchanged state.
-Failed publications retry the latest state up to five times with exponential delays. A new
-relevant event resets the budget; successful publication, disabling, or unlinking cancels retries.
-After the budget is exhausted, publication waits for another relevant event instead of generating
-continuous traffic during an outage.
-
 Focused coverage: `ProjectionSettlement.test.ts`, `ThreadSettlementService.test.ts`,
-`runtimeLayer.test.ts`, `AgentAwarenessRelay.test.ts`, `GitVcsDriverCore.test.ts`, and
+`runtimeLayer.test.ts`, `GitVcsDriverCore.test.ts`, and
 `desktopLocal.test.ts`.
 
 ## Mobile looping animations

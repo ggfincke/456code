@@ -178,7 +178,6 @@
   "src/pullRequest/PullRequestReviewGuideService.test.ts": 0.7,
   "src/pullRequest/PullRequestService.test.ts": 4.6,
   "src/pullRequest/pullRequestSyncKey.test.ts": 0.7,
-  "src/relay/AgentAwarenessRelay.test.ts": 1.6,
   "src/resourceTelemetry/ResourceTelemetry.test.ts": 0.5,
   "src/scheduledTasks/ScheduledTaskService.schedule.test.ts": 1.5,
   "src/scheduledTasks/ScheduledTaskService.test.ts": 1.5,

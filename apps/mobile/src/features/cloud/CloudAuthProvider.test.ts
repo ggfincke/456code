@@ -7,7 +7,6 @@ import {
   cloudAccountService,
   deactivateCloudRelayAccount,
 } from "./cloudAccountService";
-import { setAgentAwarenessRelayTokenProvider } from "../agent-awareness/remoteRegistration";
 import { requestConnectOnboarding } from "./connectOnboarding";
 import { restoreCloudComposerDrafts } from "../../state/use-composer-drafts";
 
@@ -50,12 +49,6 @@ vi.mock("./publicConfig", () => ({
   resolveRelayClerkTokenOptions: vi.fn(),
 }));
 
-vi.mock("../agent-awareness/remoteRegistration", () => ({
-  releaseAgentAwarenessRelayTokenProvider: vi.fn(),
-  setAgentAwarenessRelayTokenProvider: vi.fn(),
-  unregisterAgentAwarenessDeviceForCurrentUser: vi.fn(),
-}));
-
 type ClerkListener = (resources: { readonly user: { readonly id: string } | null }) => void;
 
 function fakeClerk() {
@@ -79,7 +72,7 @@ afterEach(() => {
 });
 
 describe("CloudAuthProvider relay account isolation", () => {
-  it("clears relay and agent-awareness credentials before cleanup can fail", async () => {
+  it("clears relay credentials before cleanup can fail", async () => {
     const tokenProvider = async () => "account-1-token";
     activateCloudRelayAccount("account-1", tokenProvider);
     expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-1");
@@ -88,7 +81,6 @@ describe("CloudAuthProvider relay account isolation", () => {
     const cleanup = Promise.reject(new Error("Persistence removal failed.")).catch(() => undefined);
 
     expect(appAtomRegistry.get(managedRelaySessionAtom)).toBeNull();
-    expect(vi.mocked(setAgentAwarenessRelayTokenProvider)).toHaveBeenLastCalledWith(null);
     await cleanup;
   });
 });

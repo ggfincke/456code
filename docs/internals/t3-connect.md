@@ -4,31 +4,8 @@ T3 Connect uses Clerk for cloud identity. The relay manages environment links,
 credentials for reaching environments, and managed tunnel allocations. After
 bootstrap, clients send application traffic through the environment's tunnel
 hostname; the relay Worker does not proxy their HTTP or WebSocket sessions.
-The one exception is automation webhooks: the relay forwards
-`/v1/hooks/:endpointKey/:hookId/:token` to the environment's tunnel so
-senders get a stable URL. `endpointKey` is the 16-hex hash suffix of the
-managed tunnel's name, not the environment id. It keeps bodies and tokens out
-of its traces and leaves token and signature verification to the environment
-([forwarder](../../infra/relay/src/hooks/HookForwarder.ts)).
-
-By default the forwarder stores nothing. An environment can opt in to having
-the relay hold requests while it is offline
-(`hold_webhooks_while_offline` on its link). Only then does the relay store the
-raw request, including the hook token in the path, in a Durable Object for
-that environment, with SQLite storage. The object pushes held requests back
-through the tunnel from its alarm, oldest first, and backs off while the
-environment stays away. When the tunnel reconnects, the environment asks the
-relay to deliver right away. Requests are deleted once the environment
-answers, after 24 hours, or when no user has the environment linked. The relay
-still never checks the token; delivery goes through the same environment route.
-Every forward carries `x-t3-relay-delivery-id`, so a request that reached the
-environment before a timeout and is delivered again later runs once
-([inbox object](../../infra/relay/src/hooks/HookInboxObject.ts)).
-
-A Durable Object, not Postgres or Queues, because held requests are write-once,
-read-once bodies of up to 1 MiB that need per-environment order, caps, and
-retry timing. Queues cap messages at 128 KB and cannot hold one environment's
-requests back while it is away.
+456code environments do not use the relay's webhook forwarding or held
+requests; webhook senders call the environment's own address.
 
 Clerk, deployment, and native authentication setup live in the
 [Connect setup runbook](../operations/connect-setup.md).

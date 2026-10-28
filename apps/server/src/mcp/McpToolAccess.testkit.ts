@@ -1,5 +1,4 @@
 import {
-  type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
   ProjectId,
   type ProviderInteractionMode,
@@ -62,41 +61,3 @@ export const liveThreadShell = (
 export const liveThreadsLayer = Layer.mock(ThreadManagement.ThreadManagementService)({
   getThreadShell: (threadId) => Effect.succeed(liveThreadShell(threadId)),
 });
-
-export const idleThreadProjection = (
-  shell: OrchestrationV2ThreadShell,
-): OrchestrationV2ThreadProjection => {
-  const {
-    status: _status,
-    activeRunId: _activeRunId,
-    latestRunId: _latestRunId,
-    pendingRuntimeRequest: _pendingRuntimeRequest,
-    latestVisibleMessage: _latestVisibleMessage,
-    latestUserMessageAt: _latestUserMessageAt,
-    hasActionableProposedPlan: _hasActionableProposedPlan,
-    itemCount: _itemCount,
-    visibleItemCount: _visibleItemCount,
-    lastVisitedAt,
-    ...thread
-  } = shell;
-  return {
-    thread: { ...thread, lastVisitedAt: lastVisitedAt ?? null },
-    runs: [],
-    attempts: [],
-    nodes: [],
-    subagents: [],
-    providerSessions: [],
-    providerThreads: [],
-    providerTurns: [],
-    runtimeRequests: [],
-    messages: [],
-    plans: [],
-    turnItems: [],
-    checkpointScopes: [],
-    checkpoints: [],
-    contextHandoffs: [],
-    contextTransfers: [],
-    visibleTurnItems: [],
-    updatedAt: shell.updatedAt,
-  };
-};

@@ -40,8 +40,6 @@ const OCEAN_ASSETS = {
   androidAdaptiveBackgroundColor: "#0f111a",
   androidAdaptiveBackgroundImage: undefined,
   androidSplashIcon: oceanIcon,
-  androidNotificationIcon: "./assets/android-notification-icon.png",
-  androidNotificationColor: "#80cbc4",
 } as const;
 
 const VARIANT_CONFIG = {
@@ -98,9 +96,6 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   {
     bundleIdentifier: `${iosBundleIdentifier}.widgets`,
     groupIdentifier: `group.${iosBundleIdentifier}`,
-    enablePushNotifications: true,
-    // Frequent updates need the iOS entitlement to avoid early throttling.
-    frequentUpdates: true,
     enableAndroid: true,
     widgets: [
       {
@@ -152,13 +147,6 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
           // The embedded layout renders before first launch; publishing replaces it with stored props.
           initialLayout: "./src/widgets/SubscriptionUsage.android.tsx",
         },
-      },
-      {
-        name: "AgentActivity",
-        displayName: "Agent Activity",
-        description: "Shows the current state of active 456code agents.",
-        android: null,
-        ios: { supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"] },
       },
     ],
   },
@@ -216,7 +204,7 @@ const config: ExpoConfig = {
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
-    // Avoid Personal Team fallback: it cannot sign App Groups, Apple sign-in or push entitlements.
+    // Avoid Personal Team fallback: it cannot sign App Groups or Apple sign-in entitlements.
     appleTeamId: "3ZX5P538FH",
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
@@ -306,14 +294,6 @@ const config: ExpoConfig = {
     ...(isIosPersonalTeamBuild
       ? [sharingPlugin]
       : ["./plugins/withShareExtensionDisplayName.cjs", sharingPlugin]),
-    [
-      "expo-notifications",
-      {
-        icon: variant.assets.androidNotificationIcon,
-        color: variant.assets.androidNotificationColor,
-        mode: APP_VARIANT === "development" ? "development" : "production",
-      },
-    ],
     // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
     ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",

@@ -52,7 +52,7 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import * as ServerSettings from "../serverSettings.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
-import { idleThreadProjection, liveThreadShell } from "./McpToolAccess.testkit.ts";
+import { liveThreadShell } from "./McpToolAccess.testkit.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -2161,7 +2161,6 @@ describe("OrchestratorMcpService provider resolution", () => {
       runCount: 0,
       webhook: {
         path: "/hooks/scheduled-task/secret",
-        url: "https://t3.example/hooks/secret",
         hasSecret: false,
       },
       ...overrides,
@@ -2207,98 +2206,6 @@ describe("OrchestratorMcpService provider resolution", () => {
         ),
       );
 
-    it.effect("hides a webhook URL from a caller below the task's modes", () =>
-      Effect.gen(function* () {
-        const upserted = yield* Ref.make(0);
-        const listed = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
-          Effect.flatMap((mcp) => mcp.listScheduledTasks(supervisedClient, { projectId })),
-          Effect.provide(
-            service(
-              [
-                task({ runtimeMode: "full-access" }),
-                task({ id: ScheduledTaskId.make("scheduled-task:supervised") }),
-              ],
-              null,
-              upserted,
-            ),
-          ),
-        );
-        assert.deepEqual(
-          listed.tasks.map((summary) => summary.webhookUrl),
-          [undefined, "https://t3.example/hooks/secret"],
-        );
-      }),
-    );
-
-    it.effect("hides a webhook URL from a thread whose turn has ended", () =>
-      Effect.gen(function* () {
-        const callerId = ThreadId.make("thread:scheduled-ended");
-        const shell = liveThreadShell(callerId, { activeRunId: null });
-        const listed = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
-          Effect.flatMap((mcp) =>
-            mcp.listScheduledTasks(
-              {
-                ...supervisedClient,
-                requestNamespace: "provider:scheduled-ended",
-                thread: {
-                  threadId: callerId,
-                  providerSessionId: "provider:scheduled-ended",
-                  providerInstanceId: shell.providerInstanceId,
-                },
-                client: undefined,
-              },
-              { projectId },
-            ),
-          ),
-          Effect.provide(
-            layerOrchestratorService.pipe(
-              Layer.provide(
-                Layer.mergeAll(
-                  NodeServices.layer,
-                  Layer.mock(ThreadManagementService.ThreadManagementService)({
-                    getThreadShell: () => Effect.succeed(null),
-                    getThreadRecords: () => Effect.succeed(idleThreadProjection(shell)),
-                  }),
-                  ServerSettings.layerTest(),
-                  Layer.mock(ProviderRegistry.ProviderRegistry)({
-                    getProviders: Effect.succeed([]),
-                  }),
-                  Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
-                    list: () => Effect.succeed([]),
-                  }),
-                  Layer.mock(ProjectService.ProjectService)({}),
-                  Layer.mock(SecretRequests.SecretRequests)({}),
-                  Layer.mock(ScheduledTaskService.ScheduledTaskService)({
-                    list: () => Effect.succeed({ tasks: [task({})] }),
-                  }),
-                ),
-              ),
-            ),
-          ),
-        );
-        assert.equal(listed.tasks[0]?.webhookUrl, undefined);
-      }),
-    );
-
-    it.effect("never shows a read-only client a webhook URL", () =>
-      Effect.gen(function* () {
-        const upserted = yield* Ref.make(0);
-        const listed = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
-          Effect.flatMap((mcp) =>
-            mcp.listScheduledTasks(
-              {
-                ...supervisedClient,
-                client: { sessionId: "scheduled", label: "Claude Code", access: "read-only" },
-              },
-              { projectId },
-            ),
-          ),
-          Effect.provide(service([task({})], null, upserted)),
-        );
-        assert.equal(listed.tasks[0]?.webhookUrl, undefined);
-      }),
-    );
-
     it.effect("checks a bound task against its thread's current modes", () =>
       Effect.gen(function* () {
         const upserted = yield* Ref.make(0);
@@ -2311,8 +2218,6 @@ describe("OrchestratorMcpService provider resolution", () => {
         const mcp = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
           Effect.provide(layer),
         );
-        const listed = yield* mcp.listScheduledTasks(supervisedClient, { projectId });
-        assert.equal(listed.tasks[0]?.webhookUrl, undefined);
         const error = yield* mcp
           .updateScheduledTask(supervisedClient, {
             scheduledTaskId: bound.id,
@@ -2372,7 +2277,6 @@ describe("OrchestratorMcpService provider resolution", () => {
         });
         assert.equal(yield* Ref.get(upserted), 1);
         assert.equal(updated.scheduledTaskId, bound.id);
-        assert.equal(updated.webhookUrl, undefined);
       }),
     );
   });

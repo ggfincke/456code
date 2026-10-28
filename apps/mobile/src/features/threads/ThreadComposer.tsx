@@ -62,7 +62,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
-import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import {
   getComposerDraftSnapshot,
@@ -208,7 +207,6 @@ export interface ThreadComposerProps {
   readonly draftControls?: ReactNode;
   readonly bottomInset?: number;
   readonly connectionState: RemoteClientConnectionState;
-  readonly environmentLabel: string | null;
   readonly threadSyncPhase?: "loading" | "syncing" | null;
   readonly selectedThread: EnvironmentThreadShell;
   readonly reportedModelSelection?: ModelSelection | null;
@@ -720,13 +718,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       console.error("[composer] send failed", squashAtomCommandFailure(sent));
       return;
     }
-    if (sent.value === null) return;
-    // Arm after send so preference reads and native Activity startup do not delay tap-frame feedback.
-    armAgentAwarenessLiveActivityForLocalWork({
-      environmentId: props.environmentId,
-      threadTitle: props.selectedThread.title,
-      projectTitle: props.environmentLabel ?? "456code",
-    });
   };
 
   const lockedProviderInstanceId = props.canSwitchProvider
