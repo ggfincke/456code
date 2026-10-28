@@ -21,7 +21,7 @@ it.effect("packages a separate app and protocol without any update publication t
         true,
       ).pipe(Effect.provide(NodeServices.layer));
       expect(config.appId).toBe("com.ggfincke.456code.thin");
-      expect(config.productName).toBe("456code (Alpha)");
+      expect(config.productName).toBe("456code (Beta)");
       expect(config.publish).toBeNull();
       expect((config[platform] as { protocols: unknown }).protocols).toEqual([
         { name: "456code", schemes: ["code456-thin", "code456-thin-dev"] },
