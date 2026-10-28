@@ -17,6 +17,7 @@ export type ThreadActionMenuId =
   | "unsnooze"
   | "rename"
   | "regenerate-title"
+  | "mark-read"
   | "mark-unread"
   | "copy"
   | "copy-path"
@@ -75,6 +76,7 @@ export interface ThreadActionMenuState {
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
+  readonly isUnread: boolean;
   readonly supports: {
     readonly settlement: boolean;
     readonly autoSettleOptOut: boolean;
@@ -90,6 +92,7 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
   return ![
     "new-thread-on-branch",
     "project-settings",
+    "mark-read",
     "mark-unread",
     "copy",
     "copy-path",
@@ -155,7 +158,9 @@ export function buildThreadActionMenuItems(
           },
         ]
       : []),
-    { id: "mark-unread", label: "Mark unread", icon: "mail-open" },
+    state.isUnread
+      ? { id: "mark-read" as const, label: "Mark read", icon: "check" }
+      : { id: "mark-unread" as const, label: "Mark unread", icon: "mail-open" },
     ...(state.projectFilter
       ? [
           {

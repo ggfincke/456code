@@ -15,7 +15,8 @@ type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type Layout = Parameters<SortingStrategy>[0];
 const isShelfHeader = (item: SidebarListItem | undefined) =>
   item?.kind === "marker" &&
-  (item.marker === "working-header" ||
+  (item.marker === "needs-you-header" ||
+    item.marker === "working-header" ||
     item.marker === "snoozed-header" ||
     item.marker === "settled-header");
 // the Working shelf sits above active, so only Snoozed and Archived open the bottom-anchored shelves
@@ -119,6 +120,7 @@ export function createSidebarSortingStrategy(input: {
     if (!target) return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
+      "needs-you": [],
       active: [],
       working: [],
       snoozed: [],
@@ -135,7 +137,7 @@ export function createSidebarSortingStrategy(input: {
         }
         continue;
       }
-      if (item.section === "pinned" || item.section === "active" || item.section === "working")
+      if (item.section !== "snoozed" && item.section !== "settled")
         cardHeight ??= rects[index]?.height;
       else slimHeight ??= rects[index]?.height;
       if (item.key !== active.key) groups[item.section].push(item);
@@ -177,6 +179,10 @@ export function createSidebarSortingStrategy(input: {
     };
     marker("pinned-header");
     projected.push(...groups.pinned);
+    if (items.some((item) => item.kind === "marker" && item.marker === "needs-you-header")) {
+      marker("needs-you-header");
+      projected.push(...groups["needs-you"]);
+    }
     if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
       marker("working-header");
       projected.push(...groups.working);
@@ -197,8 +203,7 @@ export function createSidebarSortingStrategy(input: {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];
       const fallback =
-        item.kind === "thread" &&
-        (item.section === "pinned" || item.section === "active" || item.section === "working")
+        item.kind === "thread" && item.section !== "snoozed" && item.section !== "settled"
           ? cardHeight
           : slimHeight;
       const moved = item.kind === "thread" && item.key === active.key;

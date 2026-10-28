@@ -44,7 +44,7 @@ import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
-import { useThreadActions } from "./useThreadActions";
+import { readThreadUnread, useThreadActions } from "./useThreadActions";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -81,6 +81,7 @@ export function useThreadActionMenu(input: {
     setThreadAutoSettle,
     deleteThread,
     markThreadUnread,
+    markThreadRead,
   } = useThreadActions();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -135,6 +136,7 @@ export function useThreadActionMenu(input: {
         isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
         canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
         isRegeneratingTitle,
+        isUnread: readThreadUnread(thread),
         supports,
         snoozePresets,
       });
@@ -235,6 +237,9 @@ export function useThreadActionMenu(input: {
               input: { threadId: threadRef.threadId, regenerateTitle: true },
             }),
           );
+          return;
+        case "mark-read":
+          markThreadRead(threadRef);
           return;
         case "mark-unread":
           markThreadUnread(threadRef);

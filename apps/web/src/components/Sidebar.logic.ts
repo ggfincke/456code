@@ -164,7 +164,7 @@ export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
 
 // Snoozed rows cannot accept drops without a wake time. Working rows only drag out as chat context.
 
-export type SidebarSection = "pinned" | "active" | "working" | "snoozed" | "settled";
+export type SidebarSection = "pinned" | "needs-you" | "active" | "working" | "snoozed" | "settled";
 
 export function resolveSidebarThreadSection(input: {
   readonly snoozed: boolean;
@@ -184,6 +184,7 @@ export type SidebarListMarker =
   | "active-placeholder"
   | "settled-placeholder"
   | "pinned-divider"
+  | "needs-you-header"
   | "working-header"
   | "snoozed-header"
   | "settled-header";
@@ -206,6 +207,7 @@ function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number):
     const item = items[i]!;
     if (item.kind !== "marker") continue;
     if (item.marker === "pinned-divider") section = "active";
+    else if (item.marker === "needs-you-header") section = "needs-you";
     else if (item.marker === "working-header") section = "working";
     else if (item.marker === "snoozed-header") section = "snoozed";
     else if (item.marker === "settled-header") section = "settled";
@@ -230,14 +232,15 @@ export function resolveSidebarDropTarget(
   const moved = items.filter((_, index) => index !== activeIndex);
   moved.splice(overIndex, 0, items[activeIndex]!);
   const section = sectionAtSidebarSlot(moved, overIndex);
-  if (section === "working" || section === "snoozed") return null;
+  if (section === "needs-you" || section === "working" || section === "snoozed") return null;
   const pinnedOrder: string[] = [];
   const activeOrder: string[] = [];
   let currentSection: SidebarSection = "pinned";
-  // the Working shelf sits between pinned and active, so its rows join neither order
+  // Needs you and the Working shelf sit between pinned and active, so their rows join neither order
   for (const item of moved) {
     if (item.kind === "marker") {
       if (item.marker === "pinned-divider") currentSection = "active";
+      else if (item.marker === "needs-you-header") currentSection = "needs-you";
       else if (item.marker === "working-header") currentSection = "working";
       else if (item.marker === "snoozed-header" || item.marker === "settled-header") break;
     } else if (currentSection === "pinned") pinnedOrder.push(item.key);
@@ -275,7 +278,9 @@ export function resolveSidebarDropVerb(
   from: SidebarSection,
   to: SidebarSection | null,
 ): SidebarDropVerb | null {
-  if (to === null || to === from || to === "working" || to === "snoozed") return null;
+  if (to === null || to === from || to === "needs-you" || to === "working" || to === "snoozed") {
+    return null;
+  }
   if (to === "pinned") return "pin";
   if (to === "settled") return "settle";
   if (from === "pinned") return "unpin";
@@ -334,7 +339,7 @@ export function planSidebarThreadDrop(input: {
     activeKeysById,
     activeReorderableKeys,
   } = input;
-  if (activeSection === "working") return { kind: "none" };
+  if (activeSection === "working" || activeSection === "needs-you") return { kind: "none" };
   if (input.supportsSettlement === false && (target.section === "settled" || activeSettled)) {
     return { kind: "none" };
   }
@@ -610,6 +615,15 @@ export function buildBulkTitleRegenerationContextMenuItem(input: {
   };
 }
 
+export function buildBulkReadStateContextMenuItem(input: {
+  count: number;
+  unreadCount: number;
+}): ContextMenuItem<"mark-read" | "mark-unread"> {
+  return input.unreadCount > 0
+    ? { id: "mark-read", label: `Mark read (${input.count})` }
+    : { id: "mark-unread", label: `Mark unread (${input.count})` };
+}
+
 export function buildBulkUnpinContextMenuItem(input: {
   pinnedCount: number;
 }): ContextMenuItem<"unpin"> | null {
@@ -702,6 +716,15 @@ function hasUnseenFailure(thread: ThreadStatusInput): boolean {
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);
   if (Number.isNaN(completedAt) || Number.isNaN(lastVisitedAt)) return true;
   return completedAt > lastVisitedAt;
+}
+
+function hasPlanReadyPrompt(thread: ThreadStatusInput): boolean {
+  return (
+    !thread.hasPendingUserInput &&
+    thread.interactionMode === "plan" &&
+    isLatestRunSettled(thread.latestRun, thread.runtime) &&
+    thread.hasActionableProposedPlan
+  );
 }
 
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
@@ -914,6 +937,80 @@ export function resolveSidebarV2TopStatus(input: {
   return input.isUnread ? "done" : null;
 }
 
+export function isSidebarThreadWoke(input: {
+  readonly wokeAt: string | null;
+  readonly lastVisitedAt: string | null | undefined;
+  readonly settledOverride: SidebarThreadSummary["settledOverride"];
+}): boolean {
+  if (input.wokeAt === null || input.settledOverride === "settled") return false;
+  const wokeAt = Date.parse(input.wokeAt);
+  if (Number.isNaN(wokeAt)) return false;
+  const lastVisitedAt = input.lastVisitedAt == null ? Number.NaN : Date.parse(input.lastVisitedAt);
+  return Number.isNaN(lastVisitedAt) || lastVisitedAt < wokeAt;
+}
+
+type SidebarReadStateInput = ThreadStatusInput &
+  SidebarThreadStatusInput &
+  Pick<SidebarThreadSummary, "settledOverride">;
+
+/** What Mark read clears: an unseen completion or failure, or an unacknowledged wake. */
+export function isSidebarThreadUnread(
+  thread: SidebarReadStateInput,
+  wokeAt: string | null,
+): boolean {
+  return (
+    hasUnseenCompletion(thread) ||
+    hasUnseenFailure(thread) ||
+    isSidebarThreadWoke({
+      wokeAt,
+      lastVisitedAt: thread.lastVisitedAt,
+      settledOverride: thread.settledOverride,
+    })
+  );
+}
+
+export type SidebarNeedsYouTier = "request" | "failed" | "plan" | "unread";
+
+const SIDEBAR_NEEDS_YOU_TIER_RANK: Record<SidebarNeedsYouTier, number> = {
+  request: 0,
+  failed: 1,
+  plan: 2,
+  unread: 3,
+};
+
+// working and waiting rows recede in the row too, so they never count as waiting on the user
+export function resolveSidebarNeedsYouTier(
+  thread: SidebarReadStateInput,
+  wokeAt: string | null,
+): SidebarNeedsYouTier | null {
+  const status = resolveSidebarThreadStatus(thread);
+  if (status === "approval" || status === "input") return "request";
+  if (status === "working" || status === "waiting") return null;
+  if (hasUnseenFailure(thread)) return "failed";
+  if (hasPlanReadyPrompt(thread)) return "plan";
+  return isSidebarThreadUnread(thread, wokeAt) ? "unread" : null;
+}
+
+/** Splits inbox threads already in return order, keeping that order within each tier. */
+export function splitSidebarNeedsYouThreads<T>(
+  threads: readonly T[],
+  tierOf: (thread: T) => SidebarNeedsYouTier | null,
+): { readonly needsYou: T[]; readonly rest: T[] } {
+  const needsYou: Array<{ readonly thread: T; readonly rank: number }> = [];
+  const rest: T[] = [];
+  for (const thread of threads) {
+    const tier = tierOf(thread);
+    if (tier === null) rest.push(thread);
+    else needsYou.push({ thread, rank: SIDEBAR_NEEDS_YOU_TIER_RANK[tier] });
+  }
+  return {
+    needsYou: needsYou
+      .toSorted((left, right) => left.rank - right.rank)
+      .map(({ thread }) => thread),
+    rest,
+  };
+}
+
 export function firstValidTimestampMs(
   ...candidates: ReadonlyArray<string | null | undefined>
 ): number {
@@ -1107,12 +1204,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  const hasPlanReadyPrompt =
-    !thread.hasPendingUserInput &&
-    thread.interactionMode === "plan" &&
-    isLatestRunSettled(thread.latestRun, thread.runtime) &&
-    thread.hasActionableProposedPlan;
-  if (hasPlanReadyPrompt) {
+  if (hasPlanReadyPrompt(thread)) {
     return {
       label: "Plan Ready",
       colorClass:

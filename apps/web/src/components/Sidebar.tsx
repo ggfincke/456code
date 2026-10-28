@@ -104,7 +104,11 @@ import {
   getThreadKeysToDeselectAfterDelete,
   useThreadSelectionStore,
 } from "../threadSelectionStore";
-import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
+import {
+  readThreadUnread,
+  useAcknowledgeThreadWoke,
+  useThreadActions,
+} from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
@@ -153,6 +157,7 @@ import {
 import {
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
+  buildBulkReadStateContextMenuItem,
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
@@ -167,7 +172,9 @@ import {
   resolveSidebarSweepKeys,
   resolveSidebarDropTarget,
   resolveSidebarDropVerb,
+  resolveSidebarNeedsYouTier,
   resolveSidebarThreadSection,
+  resolveThreadLastVisitedAt,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
@@ -176,9 +183,11 @@ import {
   sortInboxThreadsByReturn,
   sortPinnedThreadsForSidebar,
   sortWorkingThreadsBySend,
+  splitSidebarNeedsYouThreads,
   useSnoozeWakeClock,
   useThreadJumpHintsVisible,
   type SidebarListItem,
+  type SidebarNeedsYouTier,
   type SidebarSection,
   resolveSidebarRowThreadId,
 } from "./Sidebar.logic";
@@ -307,10 +316,19 @@ interface SidebarThreadPartitionInput {
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly workingShelfEnabled: boolean;
+  readonly localLastVisitedAtByKey: Readonly<Record<string, string>>;
+  readonly needsYouHold: SidebarNeedsYouHold | null;
   // Snooze wakes, the queued-turn grace and the Working shelf's exit grace depend
   // on the clock, so the minute tick, the precise snooze-wake tick and the inbox
   // tracker's expiry version are inputs: a new key repartitions.
   readonly clockKey: string;
+}
+
+// The open thread keeps the Needs you tier it was opened with until the route moves on,
+// since opening it records the visit that would otherwise drop it into Active.
+interface SidebarNeedsYouHold {
+  readonly routeKey: string | null;
+  readonly tier: SidebarNeedsYouTier | null;
 }
 
 function threadShellKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id">): string {
@@ -373,6 +391,8 @@ function useSidebarThreads(input: {
     routeRowThreadKey,
   } = input;
   const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
+  const localLastVisitedAtByKey = useUiStateStore((state) => state.threadLastVisitedAtById);
+  const [needsYouHold, setNeedsYouHold] = useState<SidebarNeedsYouHold | null>(null);
   const inboxReturnsVersion = useSyncExternalStore(
     inboxReturns.subscribe,
     inboxReturns.getSnapshot,
@@ -411,11 +431,30 @@ function useSidebarThreads(input: {
     serverConfigs,
     optimisticDrop,
     workingShelfEnabled,
+    localLastVisitedAtByKey,
+    needsYouHold,
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
+  const routeNeedsYouTier =
+    routeRowThreadKey === null
+      ? null
+      : (partition.needsYouTierByKey.get(routeRowThreadKey) ?? null);
+  if (
+    needsYouHold === null ||
+    needsYouHold.routeKey !== routeRowThreadKey ||
+    (needsYouHold.tier !== null && needsYouHold.tier !== routeNeedsYouTier)
+  ) {
+    setNeedsYouHold({ routeKey: routeRowThreadKey, tier: routeNeedsYouTier });
+  }
 
-  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
-    partition;
+  const {
+    pinnedThreads,
+    needsYouThreads,
+    activeThreads,
+    workingThreads,
+    snoozedThreads,
+    settledThreads,
+  } = partition;
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
@@ -449,6 +488,7 @@ function useSidebarThreads(input: {
   const visibleWorkingThreads = workingShelfExpanded ? workingThreads : EMPTY_THREADS;
   const orderedThreads = [
     ...pinnedThreads,
+    ...needsYouThreads,
     ...visibleWorkingThreads,
     ...activeThreads,
     ...visibleSnoozedThreads,
@@ -457,6 +497,7 @@ function useSidebarThreads(input: {
   const sectionByThreadKey = new Map<string, SidebarSection>();
   for (const [list, section] of [
     [pinnedThreads, "pinned"],
+    [needsYouThreads, "needs-you"],
     [activeThreads, "active"],
     [workingThreads, "working"],
     [snoozedThreads, "snoozed"],
@@ -470,6 +511,7 @@ function useSidebarThreads(input: {
     workingShelfEnabled,
     searchableThreads: [
       ...pinnedThreads,
+      ...needsYouThreads,
       ...activeThreads,
       ...workingThreads,
       ...snoozedThreads,
@@ -510,7 +552,15 @@ function useSidebarThreads(input: {
 }
 
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
-  const { threads, scopedProjectKeys, serverConfigs, optimisticDrop, workingShelfEnabled } = input;
+  const {
+    threads,
+    scopedProjectKeys,
+    serverConfigs,
+    optimisticDrop,
+    workingShelfEnabled,
+    localLastVisitedAtByKey,
+    needsYouHold,
+  } = input;
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
@@ -570,8 +620,25 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   }
   // Capability gates dragging only; mixed server versions must preserve the same pinned order across clients.
   const sortedPinned = sortPinnedThreadsForSidebar(pinned);
+  const needsYouTierByKey = new Map<string, SidebarNeedsYouTier>();
   // active threads always sort by last activity, so there is no manual active order to keep
-  const sortedActive = sortInboxThreadsByReturn(active, inboxObservation.returnedAt);
+  const { needsYou, rest: sortedActive } = splitSidebarNeedsYouThreads(
+    sortInboxThreadsByReturn(active, inboxObservation.returnedAt),
+    (thread) => {
+      const threadKey = threadShellKey(thread);
+      const lastVisitedAt = resolveThreadLastVisitedAt(
+        thread.lastVisitedAt,
+        localLastVisitedAtByKey[threadKey],
+      );
+      const tier =
+        resolveSidebarNeedsYouTier(
+          { ...thread, lastVisitedAt },
+          threadWokeAt(thread, { now: preciseNow }),
+        ) ?? (needsYouHold?.routeKey === threadKey ? needsYouHold.tier : null);
+      if (tier !== null) needsYouTierByKey.set(threadKey, tier);
+      return tier;
+    },
+  );
   return {
     pinnedThreads:
       optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -581,6 +648,8 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
             preferredIds: optimisticDrop.order,
             getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
           }),
+    needsYouThreads: needsYou,
+    needsYouTierByKey,
     draggableThreadKeys: draggable,
     activeReorderableThreadKeys: activeReorderable,
     activeThreads:
@@ -798,6 +867,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     reorderPinnedThread,
     reorderActiveThread,
     markThreadUnread,
+    markThreadRead,
     deleteThread,
   } = useThreadActions();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
@@ -1086,6 +1156,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
 
   const {
     pinnedThreads,
+    needsYouThreads,
     draggableThreadKeys,
     activeReorderableThreadKeys,
     activeThreads,
@@ -1479,7 +1550,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     };
   };
 
-  const isContextDrag = dragState?.contextDrag === true || dragState?.activeSection === "working";
+  const isContextDrag =
+    dragState?.contextDrag === true ||
+    dragState?.activeSection === "working" ||
+    dragState?.activeSection === "needs-you";
   const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
   const finishThreadDrag = (started: boolean) => {
     dragSensorRef.current = null;
@@ -1688,6 +1762,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       });
     if (
       pinnedThreads.length +
+        needsYouThreads.length +
         activeThreads.length +
         workingThreads.length +
         snoozedThreads.length +
@@ -1699,6 +1774,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const items: SidebarListItem[] = [{ kind: "marker", marker: "pinned-header" }];
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
+    if (needsYouThreads.length > 0) {
+      items.push({ kind: "marker", marker: "needs-you-header" });
+      items.push(...rowsOf(needsYouThreads, "needs-you"));
+    }
     // the Working shelf sits between pinned and active; pinned-divider still opens the active section
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
@@ -2103,7 +2182,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   },
                 ]
               : []),
-            { id: "mark-unread", label: `Mark unread (${count})` },
+            buildBulkReadStateContextMenuItem({
+              count,
+              unreadCount: selectedThreads.filter(readThreadUnread).length,
+            }),
             {
               id: "delete",
               label: `Delete (${count})`,
@@ -2129,7 +2211,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 })
               : selectedThreads;
       if (clicked.value === "settle" && actionTargets.length === 0) return;
-      if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
+      if (
+        clicked.value !== "mark-read" &&
+        clicked.value !== "mark-unread" &&
+        !checkThreadOperations(actionTargets)
+      )
+        return;
       if (clicked.value?.startsWith("snooze:")) {
         const preset =
           clicked.value === "snooze:custom"
@@ -2207,10 +2294,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         clearSelection();
         return;
       }
-      if (clicked.value === "mark-unread") {
+      if (clicked.value === "mark-read" || clicked.value === "mark-unread") {
+        const markThread = clicked.value === "mark-read" ? markThreadRead : markThreadUnread;
         for (const threadKey of threadKeys) {
           const thread = threadByKeyRef.current.get(threadKey);
-          if (thread) markThreadUnread(scopeThreadRef(thread.environmentId, thread.id));
+          if (thread) markThread(scopeThreadRef(thread.environmentId, thread.id));
         }
         clearSelection();
         return;
@@ -2380,6 +2468,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
+              isUnread: readThreadUnread(thread),
               supports: {
                 settlement: supportsSettlement,
                 autoSettleOptOut: supportsAutoSettleOptOut,
@@ -2494,6 +2583,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             }
             return;
           }
+          case "mark-read":
+            markThreadRead(threadRef);
+            return;
           case "mark-unread":
             markThreadUnread(threadRef);
             return;
@@ -2905,8 +2997,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
                         );
-                        const isCard =
-                          section === "active" || section === "pinned" || section === "working";
+                        const isCard = section !== "snoozed" && section !== "settled";
                         const rowVariant = isCard ? "card" : "slim";
                         return (
                           <SortableThreadRow
@@ -2920,6 +3011,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             thread={thread}
                             variant={rowVariant}
+                            needsYou={section === "needs-you"}
                             variantAction={
                               section === "snoozed"
                                 ? "unsnooze"
@@ -3046,7 +3138,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 label="Active"
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
-                                heading={workingThreads.length > 0 ? "Active" : undefined}
+                                heading={
+                                  workingThreads.length + needsYouThreads.length > 0
+                                    ? "Active"
+                                    : undefined
+                                }
                               />,
                             );
                             break;
@@ -3065,6 +3161,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                       dragTargetSection !== "active"))
                                 }
                                 isDropTarget={dragTargetSection === "active"}
+                              />,
+                            );
+                            break;
+                          case "needs-you-header":
+                            items.push(
+                              <SidebarSectionHeader
+                                key="needs-you-header"
+                                marker="needs-you-header"
+                                label="Needs you"
+                                count={needsYouThreads.length}
+                                prominent
                               />,
                             );
                             break;
@@ -3172,6 +3279,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           {!isSearchingThreads &&
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
+            needsYouThreads.length +
             activeThreads.length +
             workingThreads.length +
             snoozedThreads.length +

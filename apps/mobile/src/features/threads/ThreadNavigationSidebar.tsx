@@ -70,6 +70,7 @@ import { SidebarFilterButton } from "./sidebar-filter-button";
 import { createSidebarHeaderItems } from "./sidebar-native-header-items";
 import { SidebarNavigationShell } from "./sidebar-navigation-shell";
 import {
+  ThreadListV2NeedsYouHeader,
   ThreadListV2PendingRow,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
@@ -685,6 +686,8 @@ function ThreadNavigationSidebarPane(
           />
         );
       }
+      case "v2-needs-you":
+        return <ThreadListV2NeedsYouHeader count={item.count} pane="sidebar" />;
       case "v2-working-shelf":
         return (
           <ThreadListV2WorkingShelfHeader

@@ -1568,14 +1568,14 @@ describe("Working section beta", () => {
     const layout = build();
     expect(ids(layout)).toEqual([
       "pinned-working",
-      "finished-late",
       "asks-approval",
+      "finished-late",
       "finished-early",
     ]);
     expect(layout.workingCount).toBe(1);
-    // the collapsed shelf sits right after pinned and lists no rows
-    expect(layout.workingShelfHeaderIndex).toBe(1);
-    expect(layout.workingShelfEndIndex).toBe(1);
+    // the collapsed shelf sits right after pinned and Needs you and lists no rows
+    expect(layout.workingShelfHeaderIndex).toBe(2);
+    expect(layout.workingShelfEndIndex).toBe(2);
 
     const off = build({ workingShelfEnabled: false });
     expect(ids(off)).toContain("working");
@@ -1615,7 +1615,7 @@ describe("Working section beta", () => {
       inboxReturnAt: (thread) =>
         thread.id === "finished-early" ? Date.parse("2026-06-01T04:00:00.000Z") : undefined,
     });
-    expect(ids(layout).slice(1)).toEqual(["finished-early", "finished-late", "asks-approval"]);
+    expect(ids(layout).slice(2)).toEqual(["finished-early", "finished-late"]);
   });
 
   it("places the shelf after queued tasks and pinned threads, above active", () => {
