@@ -1,8 +1,8 @@
 # Environment authentication
 
-The environment issues its own sessions and enforces their capabilities. Cloud
-identity and relay credentials belong to a separate trust boundary, described in
-[T3 Connect](./t3-connect.md). A relay token is never an environment login.
+The environment issues its own sessions and enforces their capabilities. Relay
+credentials belong to a separate trust boundary. A relay token is never an
+environment login.
 
 ## Authority survives transport changes
 
@@ -38,7 +38,7 @@ approval page names the host access goes to and approving stays the owner's
 call. Every client is public and proves itself with PKCE; a client that asks
 for a secret is registered without one. Client registration is stateless, so an unauthenticated caller cannot grow server
 state. Approval spends a one-time pairing code, or uses a browser session with
-`access:write`; proof-bound T3 Connect codes are refused without being spent.
+`access:write`; proof-bound codes are refused without being spent.
 
 The user grants either read-only access or a runtime-mode ceiling, not a
 scope list: MCP tools are all orchestration, and `orchestration:operate`
@@ -54,8 +54,7 @@ parameters only pick targets; see
 [threadAccess](../../apps/server/src/mcp/threadAccess.ts).
 
 Issuer and resource URLs come from the request's Host and
-`X-Forwarded-Proto`, so one server answers over loopback, Tailscale Serve and a
-T3 Connect tunnel. A proxy that rewrites Host or drops the protocol header
+`X-Forwarded-Proto`, so one server answers over loopback and Tailscale Serve. A proxy that rewrites Host or drops the protocol header
 breaks sign-in.
 
 Bearer and DPoP clients obtain short-lived WebSocket tickets through authenticated

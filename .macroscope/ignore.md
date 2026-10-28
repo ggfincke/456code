@@ -263,7 +263,6 @@ ENV/**
 apps/server/schema/expo.graphql
 packages/source-control-github/schema/github.graphql
 apps/mobile/generated-uniwind-*
-apps/mobile/clerk-theme.json
 apps/server/src/testUtils/shardWeights.json
 
 # Provider transcripts recorded from real CLI runs for the orchestration replay

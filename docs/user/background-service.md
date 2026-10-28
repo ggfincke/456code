@@ -43,9 +43,7 @@ under T3 home. Pass `--yes` from a script.
 ## Local network access
 
 The service listens on your local network and Tailscale addresses, so the
-desktop and mobile apps on the same network connect directly instead of through
-T3 Connect. The hosted web app at app.t3.codes stays on T3 Connect, because
-browsers block plain HTTP from an HTTPS page. The service does not answer on
+desktop and mobile apps on the same network connect directly. The service does not answer on
 public addresses, and every device still needs to pair or sign in. To keep the service reachable from this machine only, set
 `T3CODE_HOST=127.0.0.1` in `service.env` (below). Any `T3CODE_HOST` value
 replaces this default.
@@ -87,9 +85,6 @@ service is still installed and will start at the next login.
 
 Windows background services are not supported.
 
-T3 Connect can offer service installation during setup, but the two are managed
-separately. Signing out of T3 Connect does not stop or uninstall the service.
-
 ## Troubleshooting
 
 Start with `t3 service status` on the host. It prints the log path and, on Linux,
@@ -126,9 +121,6 @@ longer starts at login. If agent work cannot access Desktop, Documents, or
 Downloads, it may need Full Disk Access for the `t3` executable listed in
 `ProgramArguments` in
 `~/Library/LaunchAgents/com.t3tools.t3code.service.plist`.
-
-For failures after signing in to T3 Connect, see
-[connection troubleshooting](./t3-connect-troubleshooting.md).
 
 ## Reclaim database space
 
