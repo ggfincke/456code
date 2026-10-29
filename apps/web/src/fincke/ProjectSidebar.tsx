@@ -98,6 +98,7 @@ import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { makeWorkspaceFileDropHandlers } from "../components/chat/workspaceFileDrop";
 import {
   readThreadShell,
+  useDelegatedUnderParent,
   useProjects,
   useThreadShells,
   useThreadShellsForProjectRefs,
@@ -231,7 +232,7 @@ import {
   useThreadJumpHintsVisible,
   ThreadStatusPill,
 } from "../components/Sidebar.logic";
-import { sortThreads } from "../lib/threadSort";
+import { sortThreads } from "@t3tools/client-runtime/state/thread-sort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "../components/sidebar/SidebarChrome";
 import { SidebarHeaderIconButton } from "../components/sidebar/SidebarThreadHeader";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -244,7 +245,7 @@ import {
   deriveProjectGroupingOverrideKey,
   getProjectOrderKey,
   selectProjectGroupingSettings,
-} from "../logicalProject";
+} from "@t3tools/client-runtime/state/project-grouping";
 import type { SidebarThreadSummary } from "../types";
 import {
   buildPhysicalToLogicalProjectKeyMap,
@@ -1178,18 +1179,19 @@ function resolveProjectThreadStatus(
 
 // archived threads live in the activity view's Archived shelf, so the projects tree skips them
 function filterProjectTreeThreads<
-  T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage" | "settledOverride"> & {
-    environmentId: string;
+  T extends Pick<SidebarThreadSummary, "id" | "archivedAt" | "lineage" | "settledOverride"> & {
+    environmentId: EnvironmentId;
     projectId: string;
   },
->(threads: readonly T[]): T[] {
-  return filterSidebarV2VisibleThreads(threads, null).filter(
+>(threads: readonly T[], delegatedUnderParent: ReadonlySet<string>): T[] {
+  return filterSidebarV2VisibleThreads(threads, null, delegatedUnderParent).filter(
     (thread) => thread.settledOverride !== "settled",
   );
 }
 
 // Separate hooks keep array caches independent of the route-dependent panel.
 function useProjectThreads(project: SidebarProjectSnapshot) {
+  const delegatedUnderParent = useDelegatedUnderParent();
   const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   );
@@ -1238,7 +1240,7 @@ function useProjectThreads(project: SidebarProjectSnapshot) {
     ]),
   );
   const visibleProjectThreads = sortThreads(
-    filterProjectTreeThreads(sidebarThreads),
+    filterProjectTreeThreads(sidebarThreads, delegatedUnderParent),
     threadSortOrder,
   );
   const projectStatus = resolveProjectStatusIndicator(
@@ -3207,6 +3209,7 @@ function useSortedLegacySidebarProjects(input: {
     sidebarProjectSortOrder,
   } = input;
   const sidebarThreads = useThreadShells();
+  const delegatedUnderParent = useDelegatedUnderParent();
   const sidebarProjectByKey = new Map(
     sidebarProjects.map((project) => [project.projectKey, project] as const),
   );
@@ -3214,7 +3217,11 @@ function useSortedLegacySidebarProjects(input: {
     ...project,
     id: project.projectKey,
   }));
-  const sortableThreads = filterSidebarV2VisibleThreads(sidebarThreads, null).map((thread) => {
+  const sortableThreads = filterSidebarV2VisibleThreads(
+    sidebarThreads,
+    null,
+    delegatedUnderParent,
+  ).map((thread) => {
     const physicalKey =
       projectPhysicalKeyByScopedRef.get(
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
@@ -3285,9 +3292,13 @@ function useLegacySidebarThreads(input: {
       threadsByProjectKey.set(logicalKey, [thread]);
     }
   }
+  const delegatedUnderParent = useDelegatedUnderParent();
   const visibleSidebarThreadKeys = sortedProjects.flatMap((project) => {
     const projectThreads = sortThreads(
-      filterProjectTreeThreads(threadsByProjectKey.get(project.projectKey) ?? []),
+      filterProjectTreeThreads(
+        threadsByProjectKey.get(project.projectKey) ?? [],
+        delegatedUnderParent,
+      ),
       sidebarThreadSortOrder,
     );
     const projectExpanded = resolveProjectExpanded(
@@ -3578,7 +3589,7 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
     event.stopPropagation();
     navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- window shortcuts live as long as the sidebar; no element owns them
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to window shortcuts for the mounted sidebar
   useEffect(() => {
     const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => onWindowKeyDown(event);
     window.addEventListener("keydown", handleWindowKeyDown);
@@ -3586,7 +3597,7 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
       window.removeEventListener("keydown", handleWindowKeyDown);
     };
   }, []);
-  // oxlint-disable-next-line t3code/react-effect-budget -- a window listener whose lifetime is the sidebar's: no element owns outside clicks
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears sidebar selection on outside window clicks
   useEffect(() => {
     window.addEventListener("mousedown", clearThreadSelectionOnOutsideMouseDown);
     return () => window.removeEventListener("mousedown", clearThreadSelectionOnOutsideMouseDown);
@@ -3761,7 +3772,7 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
         attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
         projectsLength={projectsLength}
       />
-      <SidebarChromeFooter showUndoNotice />
+      <SidebarChromeFooter />
     </RevealActiveRowContext>
   );
 }

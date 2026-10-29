@@ -1,6 +1,6 @@
 import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/promptLinks";
 
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
+import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@t3tools/shared/remote";
 
 export interface HostedPairingRequest {
   readonly host: string;
@@ -82,12 +82,4 @@ export function buildHostedPairingUrl(input: {
   }
 
   return setPairingTokenOnUrl(url, input.token).toString();
-}
-
-export function buildHostedChannelSelectionUrl(input: {
-  readonly channel: HostedAppChannel;
-}): string {
-  const url = new URL("/__t3code/channel", configuredHostedAppUrl());
-  url.searchParams.set("channel", input.channel);
-  return url.toString();
 }

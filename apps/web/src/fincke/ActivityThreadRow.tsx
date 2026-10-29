@@ -21,6 +21,7 @@ import { formatWorkingDurationLabel } from "@t3tools/client-runtime/state/models
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  type EnvironmentId,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -97,7 +98,7 @@ import { useThreadShell } from "../state/entities";
 import { ProjectFavicon, type ProjectFaviconProject } from "../components/ProjectFavicon";
 import { makeWorkspaceFileDropHandlers } from "../components/chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../components/chat/ProviderInstanceIcon";
-import { getTriggerDisplayModelLabel } from "../components/chat/providerIconUtils";
+import { getTriggerDisplayModelName } from "../components/chat/providerIconUtils";
 import { shouldShowInstanceBadge } from "../providerInstances";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { InlineButton } from "../components/ui/button";
@@ -113,6 +114,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip"
 import { MiddleTruncate } from "../components/ui/middle-truncate";
 import { useThreadHasUnsentDraft } from "../composerDraftStore";
 import {
+  SortableThreadRow as FolderThreadRow,
   draftPenClassName,
   draftSurfaceClassName,
   SIDEBAR_SORTABLE_DRAG_DISABLED,
@@ -311,16 +313,24 @@ function SidebarThreadTooltip({
 }
 
 function SnoozeMenuButton(props: {
+  environmentId: EnvironmentId;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSnooze: (preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   timestampFormat: TimestampFormat;
 }) {
   const { open, onOpenChange, onSnooze, timestampFormat } = props;
-  // oxlint-disable-next-line react/purity -- Presets are resolved only while the menu is open, so each opening reads a fresh time.
-  const presets = open ? resolveSnoozePresets(new Date(), timestampFormat) : [];
+  const [openedAt, setOpenedAt] = useState<Date | null>(null);
+  const presets =
+    open && openedAt ? resolveSnoozePresets(openedAt, timestampFormat, props.environmentId) : [];
   return (
-    <Menu open={open} onOpenChange={onOpenChange}>
+    <Menu
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) setOpenedAt(new Date());
+        onOpenChange(nextOpen);
+      }}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
@@ -381,7 +391,7 @@ const SIDEBAR_SORTABLE_DRAG_ENABLED = { draggable: false } as const;
 // Takes the row's props rather than a render function: a closure from the
 // sidebar body is new on every sidebar render, which rebuilt the bag and
 // re-rendered every memoized row with it.
-export function SortableThreadRow(
+function SortableActivityThreadRow(
   props: Omit<SidebarThreadRowProps, "sortable"> & {
     sortableId: string;
     sortableDisabled: boolean;
@@ -418,6 +428,17 @@ export function SortableThreadRow(
   // Keyed by variant so a card/slim switch remounts the row.
   return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
 }
+export function SortableThreadRow(
+  props: Omit<Parameters<typeof SortableActivityThreadRow>[0], "variant"> & {
+    variant: "card" | "slim" | "folder" | "folder-multiline";
+  },
+) {
+  if (props.variant === "folder" || props.variant === "folder-multiline") {
+    return <FolderThreadRow {...props} />;
+  }
+  return <SortableActivityThreadRow {...props} variant={props.variant} />;
+}
+
 const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
   pin: (
     <>
@@ -454,6 +475,7 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
 type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
+  navigationParent?: string | undefined;
   variantAction: SidebarSweepAction;
   settlementSupported: boolean;
   snoozeSupported: boolean;
@@ -718,7 +740,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     (model) => model.slug === thread.modelSelection.model,
   );
   const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
+    ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
     : thread.modelSelection.model;
 
   const isRemote = thread.environmentId !== props.currentEnvironmentId;
@@ -1062,6 +1084,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 ref={rowRef}
                 role="button"
                 tabIndex={0}
+                data-sidebar-row={threadKey}
+                data-sidebar-parent={props.navigationParent}
                 aria-label={accessibility.label}
                 aria-current={accessibility.current}
                 data-testid="sidebar-row-slim"
@@ -1242,6 +1266,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ref={rowRef}
               role="button"
               tabIndex={0}
+              data-sidebar-row={threadKey}
+              data-sidebar-parent={props.navigationParent}
               aria-label={accessibility.label}
               aria-current={accessibility.current}
               data-testid="sidebar-row-card"
@@ -1341,6 +1367,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       ) : null}
                       {showSnoozeButton ? (
                         <SnoozeMenuButton
+                          environmentId={props.thread.environmentId}
                           open={snoozeMenuOpen}
                           onOpenChange={setSnoozeMenuOpen}
                           onSnooze={handleSnoozePreset}

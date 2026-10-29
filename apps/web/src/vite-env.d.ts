@@ -3,7 +3,7 @@
 
 /// <reference types="vite-plus/client" />
 
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge, ThreadId } from "@t3tools/contracts";
 
 interface ImportMetaEnv {
   readonly VITE_HTTP_URL: string;
@@ -22,5 +22,10 @@ interface ImportMeta {
 declare global {
   interface Window {
     desktopBridge?: DesktopBridge;
+    /** Dev builds only, from DevReplayHost. Agents call these from the browser console. */
+    t3dev?: {
+      readonly replayScenarios: () => ReadonlyArray<string>;
+      readonly replay: (scenario?: string) => Promise<ThreadId>;
+    };
   }
 }

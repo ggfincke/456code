@@ -1,6 +1,10 @@
+import {
+  isPendingUserInputOptionSelected,
+  type PendingUserInputDraftAnswer,
+} from "@t3tools/client-runtime/state/pending-user-input";
 import { Button } from "../../components/ui/Button";
 import { QuestionAttachments } from "./QuestionAttachments";
-import type { RuntimeRequestId } from "@t3tools/contracts";
+import type { EnvironmentId, RuntimeRequestId } from "@t3tools/contracts";
 import type { ThreadUserInputQuestion } from "@t3tools/client-runtime/state/thread-requests";
 import { useCallback, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
@@ -24,13 +28,12 @@ import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
 import {
-  isPendingUserInputOptionSelected,
   isPendingUserInputQuestionAnswered,
   type PendingUserInput,
-  type PendingUserInputDraftAnswer,
 } from "../../lib/threadActivity";
 
 export interface PendingUserInputCardProps {
+  readonly environmentId: EnvironmentId;
   readonly canOperateThread: boolean;
   readonly pendingUserInput: PendingUserInput;
   readonly maxHeight: DerivedValue<number>;

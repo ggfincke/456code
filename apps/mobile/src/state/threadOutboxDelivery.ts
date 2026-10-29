@@ -1,7 +1,6 @@
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import * as Dialog from "../components/ui/Dialog";
 import {
-  threadRuntimeIsActive,
   type EnvironmentProject,
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
@@ -188,10 +187,7 @@ function settingsCommandId(message: QueuedThreadMessage, setting: string): Comma
   return CommandId.make(`${message.commandId}:${setting}`);
 }
 
-export async function prepareQueuedMessageAttachments(
-  queuedMessage: QueuedThreadMessage,
-  supportsImageUploads = false,
-): Promise<
+export async function prepareQueuedMessageAttachments(queuedMessage: QueuedThreadMessage): Promise<
   | {
       readonly status: "ready";
       readonly prepared: PreparedTurnAttachments;
@@ -215,7 +211,7 @@ export async function prepareQueuedMessageAttachments(
   const result = await prepareTurnAttachments({
     environmentId: queuedMessage.environmentId,
     attachments: queuedMessage.attachments,
-    supportsImageUploads,
+    supportsImageUploads: true,
     persistUploadedReferences: async (draftAttachments) => {
       if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId]) {
         return "abandon";
@@ -253,6 +249,7 @@ function isQueuedMessagePayloadCurrent(
 export async function completeQueuedMessageDelivery(
   queuedMessage: QueuedThreadMessage,
   deliveryRevision: number,
+  sequence: number | undefined,
 ): Promise<"removed" | "edited" | "failed"> {
   clearThreadComposerError(
     scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId),
@@ -263,7 +260,9 @@ export async function completeQueuedMessageDelivery(
     if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId]) {
       return "edited";
     }
-    retainAcknowledgedThreadMessage(queuedMessage);
+    retainAcknowledgedThreadMessage(
+      sequence === undefined ? queuedMessage : { ...queuedMessage, sequence },
+    );
     const removed = await removeThreadOutboxMessage(
       queuedMessage,
       deliveryRevision,
@@ -607,6 +606,12 @@ const settledCreationOutcomeKeysAtom = Atom.make((get): ReadonlyArray<string> =>
   );
 }).pipe(Atom.withLabel("mobile:thread-outbox:settled-creation-outcomes"));
 
+function deliveredSequence(
+  result: AtomCommandResult<{ readonly sequence?: number }, unknown>,
+): number | undefined {
+  return AsyncResult.isSuccess(result) ? result.value.sequence : undefined;
+}
+
 const runDeliveryCommand = <W, A, E>(
   command: AtomCommand<W, A, E>,
   input: W,
@@ -804,10 +809,7 @@ export function createThreadOutboxDelivery(): {
     let deliveryRevision: number;
     if (!hasAccess()) return true;
     try {
-      const preparedResult = await prepareQueuedMessageAttachments(
-        queuedMessage,
-        serverConfig.environment.capabilities.attachmentUploads === true,
-      );
+      const preparedResult = await prepareQueuedMessageAttachments(queuedMessage);
       if (preparedResult.status === "abandoned") {
         return true;
       }
@@ -866,7 +868,6 @@ export function createThreadOutboxDelivery(): {
               queuedMessage.attachments,
               prepared.attachments,
             ),
-            currentConfig.environment.capabilities.inlineMessageContext === true,
           ),
           attachments: prepared.attachments,
         },
@@ -894,7 +895,11 @@ export function createThreadOutboxDelivery(): {
     }
     acknowledgedExistingThreadMessageIds.add(persistedMessage.messageId);
     const delivered =
-      (await completeQueuedMessageDelivery(persistedMessage, deliveryRevision)) === "removed";
+      (await completeQueuedMessageDelivery(
+        persistedMessage,
+        deliveryRevision,
+        deliveredSequence(deliveryResult),
+      )) === "removed";
     if (delivered) {
       acknowledgedExistingThreadMessageIds.delete(persistedMessage.messageId);
     }
@@ -938,10 +943,7 @@ export function createThreadOutboxDelivery(): {
     let persistedMessage: QueuedThreadMessage;
     let deliveryRevision: number;
     try {
-      const preparedResult = await prepareQueuedMessageAttachments(
-        queuedMessage,
-        serverConfig.environment.capabilities.attachmentUploads === true,
-      );
+      const preparedResult = await prepareQueuedMessageAttachments(queuedMessage);
       if (preparedResult.status === "abandoned") {
         return true;
       }
@@ -1032,7 +1034,6 @@ export function createThreadOutboxDelivery(): {
             queuedMessage.attachments,
             prepared.attachments,
           ),
-          currentConfig.environment.capabilities.inlineMessageContext === true,
         ),
         uploadedAttachments: prepared.attachments,
         modelSelection: sendSettings.modelSelection,
@@ -1054,7 +1055,11 @@ export function createThreadOutboxDelivery(): {
       return restoreQueuedMessage(persistedMessage, failure.message);
     }
     recordPendingThreadCreationOutcome({ kind: "delivered", message: persistedMessage });
-    const outcome = await completeQueuedMessageDelivery(persistedMessage, deliveryRevision);
+    const outcome = await completeQueuedMessageDelivery(
+      persistedMessage,
+      deliveryRevision,
+      deliveredSequence(deliveryResult),
+    );
     if (outcome === "edited") {
       if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId]) {
         return true;
@@ -1213,7 +1218,6 @@ export function createThreadOutboxDelivery(): {
         threadExists: thread !== undefined,
         shellStatus,
         environmentConnected: environment?.connectionState === "connected",
-        threadBusy: threadRuntimeIsActive(thread?.runtime),
         ...(familyRead === undefined ? {} : { familyRead }),
       });
       if (
@@ -1309,7 +1313,6 @@ export function createThreadOutboxDelivery(): {
             threadExists: liveThread !== undefined,
             shellStatus,
             environmentConnected: environment?.connectionState === "connected",
-            threadBusy: threadRuntimeIsActive(liveThread?.runtime),
           });
           if (liveDeliveryAction !== "send") {
             return true;

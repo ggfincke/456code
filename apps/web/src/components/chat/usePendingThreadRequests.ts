@@ -26,11 +26,11 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { getUploadedAttachments, useAttachmentUploadStore } from "../../lib/attachmentUploadQueue";
 import {
   buildPendingUserInputAnswers,
-  derivePendingUserInputProgress,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
-} from "../../pendingUserInput";
+} from "@t3tools/client-runtime/state/pending-user-input";
+import { derivePendingUserInputProgress } from "../../pendingUserInput";
 import {
   questionAttachmentDraftId,
   useQuestionAttachmentPreparation,
@@ -374,9 +374,9 @@ export function usePendingThreadRequests(input: {
       [activePendingRequestKey]: {
         ...existing[activePendingRequestKey],
         [questionId]: setPendingUserInputCustomAnswer(
+          question,
           existing[activePendingRequestKey]?.[questionId],
           value,
-          question,
         ),
       },
     }));

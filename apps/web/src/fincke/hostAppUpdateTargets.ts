@@ -4,11 +4,7 @@ import type { HostAppUpdate } from "@t3tools/contracts";
 
 import type { ServerUpdateTarget } from "~/components/ServerUpdateAction";
 import type { UpdateEverythingMachine } from "~/components/sidebar/updateEverything.logic";
-import {
-  resolveServerSelfUpdateCapability,
-  supportsDesktopAppUpdate,
-  supportsServerUpdateThreadContinuation,
-} from "~/versionSkew";
+import { resolveServerSelfUpdateCapability, supportsDesktopAppUpdate } from "~/versionSkew";
 
 export type HostAppUpdateMachine = UpdateEverythingMachine & {
   readonly hostAppUpdate: HostAppUpdate | null | undefined;
@@ -58,8 +54,6 @@ export function withHostAppUpdateTargets(
         serverLabel: machine.label,
         selfUpdate: "desktop-managed",
         desktopAppUpdate: true,
-        threadContinuation: supportsServerUpdateThreadContinuation(config),
-        continueThreadsAfterServerUpdate: config.settings.continueThreadsAfterServerUpdate ?? false,
         targetVersion: machine.hostAppUpdate.availableVersion,
       },
     ];

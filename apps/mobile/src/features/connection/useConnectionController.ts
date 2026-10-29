@@ -30,31 +30,21 @@ export function useConnectionController() {
       }),
     [connectPairingUrlMutation],
   );
-  const removeEnvironment = useCallback(
-    (environmentId: EnvironmentId) => removeEnvironmentMutation(environmentId),
-    [removeEnvironmentMutation],
-  );
-  const retryEnvironment = useCallback(
-    (environmentId: EnvironmentId) => retryEnvironmentMutation(environmentId),
-    [retryEnvironmentMutation],
-  );
-  const setEnvironmentEnabled = useCallback(
-    (environmentId: EnvironmentId, enabled: boolean) =>
-      setEnvironmentEnabledMutation({ environmentId, enabled }),
-    [setEnvironmentEnabledMutation],
-  );
-  const updateEnvironment = useCallback(
-    (
-      environmentId: EnvironmentId,
-      updates: { readonly label: string; readonly displayUrl: string },
-    ) =>
-      updateBearer({
-        environmentId,
-        label: updates.label,
-        httpBaseUrl: updates.displayUrl,
-      }),
-    [updateBearer],
-  );
+  const removeEnvironment = (environmentId: EnvironmentId) =>
+    removeEnvironmentMutation(environmentId);
+  const retryEnvironment = (environmentId: EnvironmentId) =>
+    retryEnvironmentMutation(environmentId);
+  const setEnvironmentEnabled = (environmentId: EnvironmentId, enabled: boolean) =>
+    setEnvironmentEnabledMutation({ environmentId, enabled });
+  const updateEnvironment = (
+    environmentId: EnvironmentId,
+    updates: { readonly label: string; readonly displayUrl: string },
+  ) =>
+    updateBearer({
+      environmentId,
+      label: updates.label,
+      httpBaseUrl: updates.displayUrl,
+    });
 
   return {
     connectedEnvironments,

@@ -14,10 +14,10 @@ import { BackgroundThreadContext } from "./backgroundThread";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { type PendingUserInput } from "../../session-logic";
 import {
-  derivePendingUserInputProgress,
   resolvePendingUserInputAnswer,
   type PendingUserInputDraftAnswer,
-} from "../../pendingUserInput";
+} from "@t3tools/client-runtime/state/pending-user-input";
+import { derivePendingUserInputProgress } from "../../pendingUserInput";
 import { Button } from "../ui/button";
 import { CheckboxMark } from "../ui/checkbox";
 import { Input } from "../ui/input";
@@ -135,6 +135,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     setAdvancingQuestionId(null);
   };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the auto-advance timer when the question changes, input is disabled, or the panel unmounts
   useEffect(() => {
     const cancel = () => {
       if (autoAdvanceTimerRef.current !== null) {
@@ -217,6 +218,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   });
   const backgroundThread = use(BackgroundThreadContext);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes a document keydown listener for digit shortcuts while a question is answerable
   useEffect(() => {
     if (!activeQuestion || responseDisabled || backgroundThread) return;
     const handler = (event: globalThis.KeyboardEvent) => {

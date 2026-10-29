@@ -77,7 +77,7 @@ const unitTestProject = {
   extends: true,
   test: {
     name: "unit",
-    dir: "../..",
+    dir: `${import.meta.dirname}/../..`,
     include: ["apps/web/src/**/*.test.{ts,tsx}", "tests/apps/web/**/*.test.{ts,tsx}"],
     exclude: [
       "apps/web/src/**/*.browser.test.{ts,tsx}",
