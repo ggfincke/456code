@@ -21,7 +21,7 @@ export function SidebarViewToggle() {
   const Icon = projectsView ? ListTreeIcon : BellIcon;
 
   // a focused desktop preview page forwards the chord as a menu action
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to the desktop bridge's menu actions for the button's lifetime
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the desktop bridge's menu actions for the button's lifetime
   useEffect(
     () =>
       window.desktopBridge?.onMenuAction((action) => {

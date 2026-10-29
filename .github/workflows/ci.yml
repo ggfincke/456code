@@ -250,6 +250,9 @@ jobs:
           cat "$RUNNER_TEMP/apt.log"
           exit "$(cat "$RUNNER_TEMP/apt-status")"
 
+      - name: Build Cartographer runtime for eval unit tests
+        run: vp run --filter @t3tools/cartographer-core build
+
       # `changes` lists the affected packages, or nothing when all of them are.
       - name: Test
         env:
