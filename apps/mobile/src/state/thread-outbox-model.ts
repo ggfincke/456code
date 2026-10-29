@@ -178,7 +178,6 @@ export function resolveThreadOutboxDeliveryAction(input: {
   readonly threadExists: boolean;
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
-  readonly threadBusy: boolean;
   /**
    * Set when the shell can leave idle subagent children out: absence alone is not deletion there,
    * only a settled family read without the row is.
@@ -292,3 +291,8 @@ export function resolveThreadOutboxFailureAction(input: {
   }
   return "restore";
 }
+
+export type AcknowledgedThreadMessage = QueuedThreadMessage & {
+  /** The server sequence that committed the message; older servers do not report it. */
+  readonly sequence?: number;
+};

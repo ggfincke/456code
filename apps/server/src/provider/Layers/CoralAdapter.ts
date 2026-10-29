@@ -83,7 +83,6 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
       driver: DRIVER,
       runtimeHarness: "Coral",
       capabilities: CAPABILITIES,
-      preferResumeSession: true,
       sessionModeForPolicy: () => "default",
       makeRuntime: (input) =>
         makeCoralAcpRuntime({

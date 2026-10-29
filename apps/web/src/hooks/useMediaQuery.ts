@@ -1,5 +1,9 @@
 import { useSyncExternalStore } from "react";
 
+export function useIsMobile(): boolean {
+  return useMediaQuery("max-md");
+}
+
 const BREAKPOINTS = {
   "2xl": 1536,
   "3xl": 1600,
@@ -76,8 +80,4 @@ export function useMediaQuery(query: BreakpointQuery | MediaQueryInput | (string
   };
 
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-}
-
-export function useIsMobile(): boolean {
-  return useMediaQuery("max-md");
 }

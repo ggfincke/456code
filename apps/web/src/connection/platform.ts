@@ -147,7 +147,7 @@ const layerWakeups = Wakeups.layer({
   ),
 });
 
-function clientMetadata() {
+export function currentClientMetadata() {
   return clientPresentationMetadata({
     appVersion: APP_VERSION,
     identity: {
@@ -307,7 +307,7 @@ export const prepareDesktopSshEnvironment = Effect.fn("web.connectionPlatform.ss
 const layerCapabilities = Layer.effectContext(
   Effect.sync(() => {
     const presentation = ClientCapabilities.ClientPresentation.of({
-      metadata: clientMetadata(),
+      metadata: currentClientMetadata(),
     });
     // relay routes stay in the connection model but no client signs in to a relay account
     const cloudSession = ClientCapabilities.CloudSession.of({
@@ -423,7 +423,7 @@ const loadSecondaryConnectionRegistration = Effect.fn(
     httpBaseUrl,
     credential: entry.bootstrapToken,
     scopes: AuthStandardClientScopes,
-    clientMetadata: clientMetadata(),
+    clientMetadata: currentClientMetadata(),
   }).pipe(Effect.mapError(mapRemoteEnvironmentError));
   // Desktop operations need the pool backend id to reach the owning instance; RPC uses the environment id.
   const connectionId = desktopLocalConnectionId(entry.id);

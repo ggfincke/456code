@@ -1,28 +1,34 @@
+import { useClientSettings } from "../../hooks/useSettings";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { type ReactNode } from "react";
+import { type ReactNode, useLayoutEffect } from "react";
 import { cn } from "~/lib/utils";
-import { useClientSettings } from "../../hooks/useSettings";
 import {
   animateSidebarLayoutChanges,
   sidebarMarkerId,
   type SidebarListMarker,
 } from "../Sidebar.logic";
 import { SIDEBAR_SORTABLE_DRAG_DISABLED } from "./SidebarThreadRow";
-import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 
 function SortableSidebarMarker(props: {
   marker: SidebarListMarker;
   className?: string;
   children?: ReactNode;
+  revealOverflow?: boolean;
   "data-testid"?: string;
 }) {
-  const { setNodeRef, transform, transition } = useSortable({
+  const { node, setNodeRef, transform, transition } = useSortable({
     id: sidebarMarkerId(props.marker),
     disabled: SIDEBAR_SORTABLE_DRAG_DISABLED,
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the projected drop box inside the scroll viewport as drag transforms move it
+  useLayoutEffect(() => {
+    if (props.revealOverflow && transform?.y !== undefined) {
+      node.current?.firstElementChild?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [node, props.revealOverflow, transform?.y]);
   return (
     <li
       ref={setNodeRef}
@@ -51,6 +57,7 @@ export function SidebarSectionPlaceholder(props: {
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
       className="relative mx-0.5 -mb-px h-0"
+      revealOverflow={props.marker === "settled-placeholder" && props.showHint}
     >
       {props.showHint ? (
         <div
@@ -112,7 +119,7 @@ export function SidebarDragBoundary(props: {
 export function SidebarSectionHeader(props: {
   marker: "needs-you-header" | "working-header" | "snoozed-header" | "settled-header";
   label: string;
-  /** A muted trailing count; classic shows it only while the shelf is collapsed. */
+  /** A muted trailing count. */
   count: number;
   className?: string;
   dragging?: boolean;
@@ -164,10 +171,10 @@ export function SidebarSectionHeader(props: {
       data-testid={`sidebar-${props.marker}`}
       className={cn("relative mx-0.5 h-8", props.className)}
     >
-      {props.hostsUndoNotice ? (
-        <SidebarThreadUndoNotice className="absolute inset-x-0 bottom-full bg-sidebar surface-grain" />
-      ) : null}
       <CollapsibleSectionHeader
+        role="treeitem"
+        tabIndex={-1}
+        data-sidebar-row={`shelf:${shelf}`}
         onClick={props.toggle.onToggle}
         expanded={props.toggle.expanded}
         tone={
@@ -178,7 +185,6 @@ export function SidebarSectionHeader(props: {
         accessory={redesign && count !== null ? countBadge(count) : null}
       >
         {props.label}
-        {!redesign && collapsedCount !== null ? ` (${collapsedCount})` : null}
       </CollapsibleSectionHeader>
     </SortableSidebarMarker>
   );

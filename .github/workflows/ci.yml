@@ -250,6 +250,9 @@ jobs:
           cat "$RUNNER_TEMP/apt.log"
           exit "$(cat "$RUNNER_TEMP/apt-status")"
 
+      - name: Build Cartographer runtime for eval unit tests
+        run: vp run --filter @t3tools/cartographer-core build
+
       # `changes` lists the affected packages, or nothing when all of them are.
       - name: Test
         env:
@@ -313,6 +316,12 @@ jobs:
         env:
           T3CODE_DESKTOP_UPDATE_REPOSITORY: pingdotgg/t3code
         run: vp run --filter @t3tools/web test --maxWorkers 1
+
+      # Browser tests run source modules; this boots the production chunk graph.
+      - name: Boot the built web client
+        run: |
+          vp run --filter @t3tools/web build
+          node apps/web/scripts/verify-built-boot.ts
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of

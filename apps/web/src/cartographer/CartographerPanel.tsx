@@ -90,7 +90,7 @@ export default function CartographerPanel({
     setBusy(false);
   };
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- Load the thread's analysis on mount and recheck freshness on window focus, cancelling stale responses on cleanup.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the thread analysis fresh through a window focus listener and cancels stale requests on unmount
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- the external analysis request marks pending and clears errors before its response arrives.
     void load(false, "", true);

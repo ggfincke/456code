@@ -21,6 +21,7 @@
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
         "knip-schemas.ts",
+        "mobile-behavior/run.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
         // the staged-update timer (infra/fincke-stage-update) runs this directly
@@ -30,6 +31,7 @@
         "sign-macos.ts",
         "build-cli-archive.ts",
         "resolve-nightly-release.ts",
+        "smoke-desktop-app.ts",
         "verify-windows-desktop-artifact.ts",
       ],
       "ignoreDependencies": ["agent-device", "esbuild"],

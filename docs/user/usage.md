@@ -120,6 +120,11 @@ On mobile, **Thread settings** lists each provider's remaining limits and reset 
 its name. A remaining-percentage indicator also appears above the input when the current model's
 tightest reported allowance reaches 25% or less; tap it to open Thread settings. An absent
 indicator can mean the provider has no readable limits; it does not confirm unlimited usage.
+To keep them in view on web and desktop, turn on **Usage** in **Settings → Appearance → Thread details**, or right-click the thread details card.
+The bottom of the thread details card then shows how much is left in each limit window of the
+current provider account and in the thread's context window. Some windows, such as a weekly Opus
+limit, count only one model. Hover a row to see when it resets, your pace, or
+the token count.
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
 the environment. T3 cannot report limits for external OpenCode servers because their credentials
