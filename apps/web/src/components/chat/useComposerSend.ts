@@ -241,6 +241,7 @@ interface ComposerSendInput {
   readonly setThreadError: ReturnType<typeof makeThreadErrorSetter>;
   readonly setKeepFullHistory: (threadKey: string, keep: boolean) => void;
   readonly anchorNewTurn: TimelineFollow["anchorNewTurn"];
+  readonly scrollToEnd: TimelineFollow["scrollToEnd"];
   readonly acknowledgeActiveThreadWoke: () => void;
   readonly handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
   /** Resolves true once the side chat started and got the prompt. */
@@ -329,6 +330,7 @@ export function useComposerSend(input: ComposerSendInput) {
     setThreadError,
     setKeepFullHistory,
     anchorNewTurn,
+    scrollToEnd,
     acknowledgeActiveThreadWoke,
     handleInteractionModeChange,
     onSideChat,
@@ -1209,7 +1211,9 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     const optimisticAttachments = optimisticMessageAttachments(composerAttachmentsSnapshot);
-    if (!shouldQueueBehindActiveRun) {
+    if (shouldQueueBehindActiveRun) {
+      scrollToEnd();
+    } else {
       anchorNewTurn(
         scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
         messageIdForSend,

@@ -544,10 +544,16 @@ export function useTimelineFollow(input: TimelineFollowInput) {
 
   /** Arms the anchor for a message the user just sent, before its run exists. */
   const anchorNewTurn = (threadKey: string, messageId: MessageId) => {
+    const awayFromEnd = resolveTimelineIsAtEnd(legendListRef.current?.getState()) === false;
     followStore.dispatch(visit, { type: "followEnd" });
     visitScroll().showScrollDebouncer.cancel();
     setShowScrollToBottom(false);
     setTimelineAnchor({ threadKey, messageId });
+    // The anchor is ready only once every row below it is measured, and rows far
+    // below a scrolled-up view never mount, so jump to the end first.
+    if (awayFromEnd) {
+      requestAnimationFrame(() => void legendListRef.current?.scrollToEnd({ animated: false }));
+    }
   };
 
   return {

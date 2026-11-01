@@ -2983,6 +2983,7 @@ export default function ChatView(props: ChatViewProps) {
     setThreadError,
     setKeepFullHistory,
     anchorNewTurn,
+    scrollToEnd,
     acknowledgeActiveThreadWoke,
     handleInteractionModeChange,
     onSideChat: sideChat.available ? sendSideChatStable : undefined,
