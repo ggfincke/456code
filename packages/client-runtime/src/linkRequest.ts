@@ -90,7 +90,7 @@ export function linkableMachines(input: {
         (endpoint) => endpoint.httpBaseUrl,
       );
       const routes = connectionRoutes(environment.entry).flatMap((route) => {
-        const url = route.target._tag === "RelayConnectionTarget" ? null : routeHttpBaseUrl(route);
+        const url = routeHttpBaseUrl(route);
         return url === null ? [] : [url];
       });
       return {

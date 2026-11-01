@@ -20,11 +20,6 @@ import * as ConnectionProfileStore from "./profileStore.ts";
 import * as RpcHttp from "../rpc/http.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
-const ENDPOINT = {
-  httpBaseUrl: "https://environment.example.test",
-  wsBaseUrl: "wss://environment.example.test",
-};
-
 function catalogEntry(
   target: ConnectionTarget,
   profile: Option.Option<ConnectionProfile> = Option.none(),
@@ -37,7 +32,6 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   readonly profileStore?: ConnectionProfileStore.ConnectionProfileStore["Service"];
   readonly credentials?: ReadonlyArray<readonly [string, ConnectionCredential]>;
   readonly authorizeBearer?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeBearer"];
-  readonly authorizeDpop?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeDpop"];
   readonly primaryBearerToken?: string;
   readonly descriptorProtocolVersion?: number | null | undefined;
 }) => {
@@ -71,22 +65,6 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
             token: input.bearerToken,
           },
         })),
-    authorizeDpop:
-      options?.authorizeDpop ??
-      ((input) =>
-        Effect.succeed({
-          environmentId: input.expectedEnvironmentId,
-          label: "Authorized relay environment",
-          httpBaseUrl: ENDPOINT.httpBaseUrl,
-          socketUrl: "wss://authorized.example.test/ws?wsTicket=dpop",
-          httpAuthorization: {
-            _tag: "Dpop" as const,
-            accessToken: "dpop-access-token",
-            expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
-          },
-        })),
-    authorizeDpopHttp: () => Effect.die("unused"),
-    renewDpopBeforeExpiry: () => Effect.die("unused"),
   });
   const layerDependencies = Layer.mergeAll(
     RpcHttp.layerRemoteHttpClient((() =>
@@ -168,7 +146,7 @@ describe("ConnectionResolver", () => {
     }),
   );
 
-  it.effect("omits analytics identity from a signed-in primary connection", () =>
+  it.effect("omits analytics identity from a primary connection", () =>
     Effect.gen(function* () {
       const layerBroker = yield* makeDependencies();
       const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(layerBroker));
@@ -178,15 +156,7 @@ describe("ConnectionResolver", () => {
         httpBaseUrl: "http://127.0.0.1:3777",
         wsBaseUrl: "ws://127.0.0.1:3777",
       });
-      const prepared = yield* broker.prepare(catalogEntry(target)).pipe(
-        Effect.provideService(
-          ClientCapabilities.CloudSession,
-          ClientCapabilities.CloudSession.of({
-            identity: Effect.succeedSome({ accountId: "user_connect" }),
-            clerkToken: Effect.succeed("clerk-token"),
-          }),
-        ),
-      );
+      const prepared = yield* broker.prepare(catalogEntry(target));
 
       expect([...new URL(prepared.socketUrl).searchParams.entries()]).toEqual([
         ["clientSurface", "web"],

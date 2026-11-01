@@ -104,8 +104,7 @@ export function environmentMcpUrl(input: {
     (route) => connectionRouteId(route.target) === connectedRouteId,
   );
   for (const route of connectedRoute ? [connectedRoute, ...routes] : routes) {
-    const httpBaseUrl =
-      route.target._tag === "RelayConnectionTarget" ? null : routeHttpBaseUrl(route);
+    const httpBaseUrl = routeHttpBaseUrl(route);
     const mcpUrl = httpBaseUrl === null ? null : mcpUrlFromBase(httpBaseUrl);
     if (mcpUrl !== null) return mcpUrl;
   }
@@ -129,8 +128,6 @@ export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): stri
   switch (entry.target._tag) {
     case "PrimaryConnectionTarget":
       return entry.target.httpBaseUrl;
-    case "RelayConnectionTarget":
-      return null;
     case "BearerConnectionTarget":
       return Option.isSome(entry.profile) && entry.profile.value._tag === "BearerConnectionProfile"
         ? entry.profile.value.httpBaseUrl

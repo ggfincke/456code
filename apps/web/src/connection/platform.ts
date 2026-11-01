@@ -10,7 +10,6 @@ import {
   BearerConnectionProfile,
   BearerConnectionRegistration,
   BearerConnectionTarget,
-  ConnectionBlockedError,
   type ConnectionAttemptError,
   ConnectionTransientError,
   Connectivity,
@@ -158,19 +157,6 @@ const layerCapabilities = Layer.effectContext(
     const presentation = ClientCapabilities.ClientPresentation.of({
       metadata: currentClientMetadata(),
     });
-    // relay routes stay in the connection model but no client signs in to a relay account
-    const cloudSession = ClientCapabilities.CloudSession.of({
-      identity: Effect.succeedNone,
-      clerkToken: Effect.fail(
-        new ConnectionBlockedError({
-          reason: "unsupported",
-          detail: "Relay connections are not supported.",
-        }),
-      ),
-    });
-    const identity = ClientCapabilities.RelayDeviceIdentity.of({
-      deviceId: Effect.succeedNone,
-    });
     const primaryAuth = ClientCapabilities.PrimaryEnvironmentAuth.of({
       bearerToken: Effect.tryPromise({
         try: readDesktopPrimaryBearerToken,
@@ -181,9 +167,7 @@ const layerCapabilities = Layer.effectContext(
           }),
       }).pipe(Effect.map(Option.fromNullishOr)),
     });
-    return Context.make(ClientCapabilities.CloudSession, cloudSession).pipe(
-      Context.add(ClientCapabilities.PrimaryEnvironmentAuth, primaryAuth),
-      Context.add(ClientCapabilities.RelayDeviceIdentity, identity),
+    return Context.make(ClientCapabilities.PrimaryEnvironmentAuth, primaryAuth).pipe(
       Context.add(ClientCapabilities.ClientPresentation, presentation),
     );
   }),

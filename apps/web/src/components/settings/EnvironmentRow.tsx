@@ -31,7 +31,6 @@ export function environmentTransportLabel(
       ? connectionRouteLabel(routes[0]!)
       : `via ${connectionRouteLabel(active)}`;
   }
-  if (environment.relayManaged) return "Relay";
   if (isDesktopLocalConnectionTarget(entry.target)) return "WSL";
   return environment.displayUrl ?? "Remote link";
 }

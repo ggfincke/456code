@@ -9,7 +9,6 @@ import {
   ConnectionProfile,
 } from "../connection/catalog.ts";
 import { type ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
-import * as TokenStore from "../authorization/tokenStore.ts";
 import { StoredPullRequestRoutingPermission } from "../connection/pullRequestRoutingPermissions.ts";
 
 export const StoredConnectionCredential = Schema.Struct({
@@ -23,7 +22,6 @@ const ConnectionCatalogFields = {
   targets: Schema.Array(PersistedConnectionTarget),
   profiles: Schema.Array(ConnectionProfile),
   credentials: Schema.Array(StoredConnectionCredential),
-  remoteDpopTokens: Schema.Array(TokenStore.RemoteDpopAccessToken),
   // Pull request routing grants. The field name predates the rename and stays, so older and
   // newer clients sharing this document keep reading and revoking the same grants.
   githubRoutingPermissions: Schema.optionalKey(Schema.Array(StoredPullRequestRoutingPermission)),
@@ -32,13 +30,19 @@ const ConnectionCatalogFields = {
   ),
 };
 
-// SSH environments were removed; their saved routes are dropped on read so older catalogs load.
-const RemovedConnectionTarget = Schema.TaggedStruct("SshConnectionTarget", {
-  connectionId: Schema.String,
-});
-const RemovedConnectionProfile = Schema.TaggedStruct("SshConnectionProfile", {
-  connectionId: Schema.String,
-});
+// SSH environments, relay routes and T3 Connect authorized routes were removed; their saved
+// records are dropped on read so older catalogs load. Stored relay tokens are ignored.
+const RemovedConnectionTarget = Schema.Union([
+  Schema.TaggedStruct("SshConnectionTarget", { connectionId: Schema.String }),
+  Schema.TaggedStruct("RelayConnectionTarget", {}),
+]);
+const RemovedConnectionProfile = Schema.Union([
+  Schema.TaggedStruct("SshConnectionProfile", { connectionId: Schema.String }),
+  Schema.TaggedStruct("BearerConnectionProfile", {
+    connectionId: Schema.String,
+    authorization: Schema.Literal("t3-connect"),
+  }),
+]);
 const isRemovedConnectionTarget = Schema.is(RemovedConnectionTarget);
 const isRemovedConnectionProfile = Schema.is(RemovedConnectionProfile);
 
@@ -47,7 +51,7 @@ const CurrentConnectionCatalogDocument = Schema.Struct(ConnectionCatalogFields);
 const StoredConnectionCatalogDocument = Schema.Struct({
   ...ConnectionCatalogFields,
   targets: Schema.Array(Schema.Union([PersistedConnectionTarget, RemovedConnectionTarget])),
-  profiles: Schema.Array(Schema.Union([ConnectionProfile, RemovedConnectionProfile])),
+  profiles: Schema.Array(Schema.Union([RemovedConnectionProfile, ConnectionProfile])),
 });
 
 export const ConnectionCatalogDocument = StoredConnectionCatalogDocument.pipe(
@@ -55,15 +59,21 @@ export const ConnectionCatalogDocument = StoredConnectionCatalogDocument.pipe(
     Schema.toType(CurrentConnectionCatalogDocument),
     SchemaTransformation.transform({
       decode: (stored): typeof CurrentConnectionCatalogDocument.Type => {
-        const removedIds = new Set(
-          stored.targets.flatMap((target) =>
-            isRemovedConnectionTarget(target) ? [target.connectionId] : [],
+        const removedIds = new Set([
+          ...stored.targets.flatMap((target) =>
+            isRemovedConnectionTarget(target) && "connectionId" in target
+              ? [target.connectionId]
+              : [],
           ),
-        );
+          ...stored.profiles.flatMap((profile) =>
+            isRemovedConnectionProfile(profile) ? [profile.connectionId] : [],
+          ),
+        ]);
         return {
           ...stored,
           targets: stored.targets.filter(
-            (target): target is PersistedConnectionTarget => !isRemovedConnectionTarget(target),
+            (target): target is PersistedConnectionTarget =>
+              !isRemovedConnectionTarget(target) && !removedIds.has(target.connectionId),
           ),
           profiles: stored.profiles.filter(
             (profile): profile is ConnectionProfile => !isRemovedConnectionProfile(profile),
@@ -84,7 +94,6 @@ export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Obje
   targets: [],
   profiles: [],
   credentials: [],
-  remoteDpopTokens: [],
   disabledEnvironmentIds: [],
 });
 
@@ -108,7 +117,6 @@ export function removeCatalogValue<A>(
 function connectionIdOf(target: ConnectionTarget): string | null {
   switch (target._tag) {
     case "PrimaryConnectionTarget":
-    case "RelayConnectionTarget":
       return null;
     case "BearerConnectionTarget":
       return target.connectionId;
@@ -124,15 +132,10 @@ function removeRouteMetadata(
   removed: ReadonlyArray<ConnectionTarget>,
 ): ConnectionCatalogDocument {
   const connectionIds = new Set(removed.flatMap((target) => connectionIdOf(target) ?? []));
-  const relayRemoved = removed.some((target) => target._tag === "RelayConnectionTarget");
-  const environmentIds = new Set(removed.map((target) => target.environmentId));
   return {
     ...document,
     profiles: document.profiles.filter((value) => !connectionIds.has(value.connectionId)),
     credentials: document.credentials.filter((value) => !connectionIds.has(value.connectionId)),
-    remoteDpopTokens: relayRemoved
-      ? document.remoteDpopTokens.filter((value) => !environmentIds.has(value.environmentId))
-      : document.remoteDpopTokens,
   };
 }
 
@@ -176,24 +179,18 @@ export function registerConnectionInCatalog(
   routes: ReadonlyArray<PersistedConnectionTarget> = [registration.target],
 ): ConnectionCatalogDocument {
   const next = setRoutesInCatalog(document, registration.target.environmentId, routes);
-
-  switch (registration._tag) {
-    case "RelayConnectionRegistration":
-      return next;
-    case "BearerConnectionRegistration":
-      return {
-        ...next,
-        profiles: replaceCatalogValue(
-          next.profiles,
-          (value) => value.connectionId,
-          registration.profile,
-        ),
-        credentials: replaceCatalogValue(next.credentials, (value) => value.connectionId, {
-          connectionId: registration.target.connectionId,
-          credential: registration.credential,
-        }),
-      };
-  }
+  return {
+    ...next,
+    profiles: replaceCatalogValue(
+      next.profiles,
+      (value) => value.connectionId,
+      registration.profile,
+    ),
+    credentials: replaceCatalogValue(next.credentials, (value) => value.connectionId, {
+      connectionId: registration.target.connectionId,
+      credential: registration.credential,
+    }),
+  };
 }
 
 export function removeConnectionFromCatalog(
@@ -203,11 +200,6 @@ export function removeConnectionFromCatalog(
   const next = setRoutesInCatalog(document, environmentId, []);
   return {
     ...next,
-    remoteDpopTokens: removeCatalogValue(
-      next.remoteDpopTokens,
-      (value) => value.environmentId,
-      environmentId,
-    ),
     disabledEnvironmentIds: removeCatalogValue(
       next.disabledEnvironmentIds,
       (value) => value,
@@ -237,26 +229,5 @@ export function setConnectionEnabledInCatalog(
   return {
     ...document,
     disabledEnvironmentIds: registered && !enabled ? [...without, environmentId] : without,
-  };
-}
-
-export function putRemoteDpopTokenInCatalog(
-  document: ConnectionCatalogDocument,
-  token: TokenStore.RemoteDpopAccessToken,
-): ConnectionCatalogDocument {
-  const registered = document.targets.some(
-    (target) =>
-      target._tag === "RelayConnectionTarget" && target.environmentId === token.environmentId,
-  );
-  if (!registered) {
-    return document;
-  }
-  return {
-    ...document,
-    remoteDpopTokens: replaceCatalogValue(
-      document.remoteDpopTokens,
-      (value) => value.environmentId,
-      token,
-    ),
   };
 }

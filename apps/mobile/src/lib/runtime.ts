@@ -6,9 +6,7 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Socket from "effect/socket/Socket";
 
-import { ManagedRelay } from "@t3tools/client-runtime/relay";
 import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
-import { RelayMobileClientId } from "@t3tools/contracts/relay";
 
 import * as Persistence from "../persistence/layer";
 import * as ExpoCrypto from "./expoCrypto";
@@ -19,45 +17,13 @@ declare const module: { readonly hot?: FoundationHotModule } | undefined;
 
 const layerHttpClient = layerRemoteHttpClient(fetch);
 
-// client-runtime's relay connection path still requires these services; relay environments are unsupported
-const layerRelayUnavailable = ManagedRelay.layer({
-  relayUrl: "",
-  clientId: RelayMobileClientId,
-}).pipe(
-  Layer.provideMerge(
-    Layer.succeed(
-      ManagedRelay.ManagedRelayDpopSigner,
-      ManagedRelay.ManagedRelayDpopSigner.of({
-        thumbprint: Effect.fail(
-          new ManagedRelay.ManagedRelayDpopKeyLoadError({
-            keyStore: "expo-secure-store",
-            cause: "Relay environments are not supported.",
-          }),
-        ),
-        createProof: (input) =>
-          Effect.fail(
-            new ManagedRelay.ManagedRelayDpopProofCreationError({
-              method: input.method,
-              url: input.url,
-              cause: "Relay environments are not supported.",
-            }),
-          ),
-      }),
-    ),
-  ),
-);
-
 type RuntimeLayerSource =
-  | typeof layerRelayUnavailable
   | typeof Socket.layerWebSocketConstructorGlobal
   | typeof ExpoCrypto.layer
   | typeof layerHttpClient
   | typeof Persistence.layer;
 
-const layerRuntime = Layer.merge(
-  layerRelayUnavailable,
-  Socket.layerWebSocketConstructorGlobal,
-).pipe(
+const layerRuntime = Socket.layerWebSocketConstructorGlobal.pipe(
   Layer.provideMerge(ExpoCrypto.layer),
   Layer.provideMerge(layerHttpClient),
   Layer.provideMerge(Persistence.layer),

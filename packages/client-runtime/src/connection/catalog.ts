@@ -2,12 +2,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import {
-  BearerConnectionTarget,
-  PrimaryConnectionTarget,
-  RelayConnectionTarget,
-  type ConnectionTarget,
-} from "./model.ts";
+import { BearerConnectionTarget, PrimaryConnectionTarget, type ConnectionTarget } from "./model.ts";
 
 const ConnectionProfileBase = {
   connectionId: Schema.String,
@@ -22,7 +17,6 @@ export class BearerConnectionProfile extends Schema.TaggedClass<BearerConnection
     httpBaseUrl: Schema.String,
     wsBaseUrl: Schema.String,
     learned: Schema.optionalKey(Schema.Literal(true)),
-    authorization: Schema.optionalKey(Schema.Literal("t3-connect")),
     /**
      * "tailscale" on a learned route the server found on its Tailscale
      * interface. A bare 100.64.0.0/10 address could belong to any VPN.
@@ -65,13 +59,6 @@ export class PrimaryConnectionRegistration extends Schema.TaggedClass<PrimaryCon
   },
 ) {}
 
-export class RelayConnectionRegistration extends Schema.TaggedClass<RelayConnectionRegistration>()(
-  "RelayConnectionRegistration",
-  {
-    target: RelayConnectionTarget,
-  },
-) {}
-
 export class BearerConnectionRegistration extends Schema.TaggedClass<BearerConnectionRegistration>()(
   "BearerConnectionRegistration",
   {
@@ -81,10 +68,7 @@ export class BearerConnectionRegistration extends Schema.TaggedClass<BearerConne
   },
 ) {}
 
-export const ConnectionRegistration = Schema.Union([
-  RelayConnectionRegistration,
-  BearerConnectionRegistration,
-]);
+export const ConnectionRegistration = Schema.Union([BearerConnectionRegistration]);
 export type ConnectionRegistration = typeof ConnectionRegistration.Type;
 
 /**
@@ -104,7 +88,6 @@ export function connectionRegistrationCatalogEntry(
 ): ConnectionCatalogEntry {
   switch (registration._tag) {
     case "PrimaryConnectionRegistration":
-    case "RelayConnectionRegistration":
       return {
         target: registration.target,
         profile: Option.none(),

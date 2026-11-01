@@ -3,8 +3,6 @@ import {
   AVAILABLE_CONNECTION_STATE,
   type ConnectionDiagnosis,
   connectionDiagnosisText,
-  connectionRoutes,
-  hasRelayRoute,
   presentConnectionDiagnosis,
 } from "@t3tools/client-runtime/connection";
 
@@ -32,20 +30,18 @@ export function useConnectionDiagnosis(environment: EnvironmentPresentation) {
     useAtomValue(environmentCatalog.stateAtom(environmentId)),
     () => AVAILABLE_CONNECTION_STATE,
   );
-  const routes = connectionRoutes(environment.entry);
-  const relayOnly = routes.length === 1 && hasRelayRoute(environment.entry);
   const phase = environment.connection.phase;
   const diagnosis =
     environment.entry.enabled && phase !== "connected" && phase !== "unsupported"
       ? presentConnectionDiagnosis({
           hostLabel: environment.label,
           state,
-          via: relayOnly ? "relay" : "direct",
+          via: "direct",
           clientVersion: APP_VERSION,
           serverVersion: environment.serverConfig?.environment.serverVersion,
         })
       : null;
-  return { diagnosis, state, relayOnly };
+  return { diagnosis, state };
 }
 
 /** The failure headline alone, for banners outside Settings. */
@@ -117,12 +113,10 @@ export function ConnectionDiagnosisPanel({
   hostLabel,
   diagnosis,
   onRetry,
-  onAddRoute,
 }: {
   readonly hostLabel: string;
   readonly diagnosis: ConnectionDiagnosis;
   readonly onRetry: () => void;
-  readonly onAddRoute: (() => void) | null;
 }) {
   const { copyToClipboard } = useCopyToClipboard({
     target: "connection diagnostics",
@@ -186,11 +180,6 @@ export function ConnectionDiagnosisPanel({
         >
           Copy diagnostics
         </Button>
-        {onAddRoute ? (
-          <Button type="button" size="xs" variant="outline" onClick={onAddRoute}>
-            Add direct route
-          </Button>
-        ) : null}
       </div>
     </div>
   );

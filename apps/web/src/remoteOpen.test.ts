@@ -1,4 +1,7 @@
-import { PrimaryConnectionTarget, RelayConnectionTarget } from "@t3tools/client-runtime/connection";
+import {
+  BearerConnectionTarget,
+  PrimaryConnectionTarget,
+} from "@t3tools/client-runtime/connection";
 import { buildRemoteOpenUrl, EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -54,9 +57,13 @@ describe("resolveRemoteOpenState", () => {
     ).toEqual({ mode: "local-exec" });
   });
 
-  it("uses the advertised login username in editor links over a relay", () => {
+  it("uses the advertised login username in editor links for a remote environment", () => {
     const state = resolveRemoteOpenState({
-      target: new RelayConnectionTarget({ environmentId, label: "server" }),
+      target: new BearerConnectionTarget({
+        environmentId,
+        label: "server",
+        connectionId: "remote",
+      }),
       isDesktopRenderer: false,
       remoteOpenTargets: [
         { kind: "tailscale", host: "server.tail1234.ts.net", username: "admin-user" },
@@ -73,7 +80,11 @@ describe("resolveRemoteOpenState", () => {
     for (const remoteOpenTargets of [[], undefined] as const) {
       expect(
         resolveRemoteOpenState({
-          target: new RelayConnectionTarget({ environmentId, label: "sol" }),
+          target: new BearerConnectionTarget({
+            environmentId,
+            label: "sol",
+            connectionId: "remote",
+          }),
           isDesktopRenderer: false,
           remoteOpenTargets,
         }),

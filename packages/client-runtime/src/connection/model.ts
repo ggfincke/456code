@@ -1,5 +1,4 @@
 import { EnvironmentId } from "@t3tools/contracts";
-import { RelayEnvironmentEndpointFailure } from "@t3tools/contracts/relay";
 import * as Schema from "effect/Schema";
 
 const ConnectionTargetBase = {
@@ -24,24 +23,10 @@ export class BearerConnectionTarget extends Schema.TaggedClass<BearerConnectionT
   },
 ) {}
 
-export class RelayConnectionTarget extends Schema.TaggedClass<RelayConnectionTarget>()(
-  "RelayConnectionTarget",
-  {
-    ...ConnectionTargetBase,
-  },
-) {}
-
-export const ConnectionTarget = Schema.Union([
-  PrimaryConnectionTarget,
-  BearerConnectionTarget,
-  RelayConnectionTarget,
-]);
+export const ConnectionTarget = Schema.Union([PrimaryConnectionTarget, BearerConnectionTarget]);
 export type ConnectionTarget = typeof ConnectionTarget.Type;
 
-export const PersistedConnectionTarget = Schema.Union([
-  BearerConnectionTarget,
-  RelayConnectionTarget,
-]);
+export const PersistedConnectionTarget = Schema.Union([BearerConnectionTarget]);
 export type PersistedConnectionTarget = typeof PersistedConnectionTarget.Type;
 
 export type NetworkStatus = "unknown" | "offline" | "online";
@@ -71,7 +56,14 @@ export type ConnectionHop = typeof ConnectionHop.Type;
 
 /** The relay's endpoint failures plus the causes the client can name from other errors. */
 export const ConnectionFailureCause = Schema.Literals([
-  ...RelayEnvironmentEndpointFailure.literals,
+  "tunnel_down",
+  "origin_unreachable",
+  "dns",
+  "tls",
+  "refused",
+  "timeout",
+  "invalid_response",
+  "unknown",
   "clock_skew",
   "not_linked",
   "relay_error",
@@ -124,18 +116,10 @@ export class ConnectionBlockedError extends Schema.TaggedError<ConnectionBlocked
 
 export type ConnectionAttemptError = ConnectionTransientError | ConnectionBlockedError;
 
-export const DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
-
-export type PreparedHttpAuthorization =
-  | {
-      readonly _tag: "Bearer";
-      readonly token: string;
-    }
-  | {
-      readonly _tag: "Dpop";
-      readonly accessToken: string;
-      readonly expiresAtEpochMs: number;
-    };
+export interface PreparedHttpAuthorization {
+  readonly _tag: "Bearer";
+  readonly token: string;
+}
 
 export interface PreparedConnection {
   readonly environmentId: EnvironmentId;

@@ -394,7 +394,7 @@ export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
   httpBaseUrl: Schema.String,
   createdAt: Schema.String,
   lastConnectedAt: Schema.NullOr(Schema.String),
-  // SSH environments were removed; legacy records still decode and are skipped.
+  // SSH environments and relay routes were removed; legacy records still decode and are skipped.
   desktopSsh: Schema.optionalKey(DesktopSshEnvironmentTargetSchema),
   relayManaged: Schema.optionalKey(
     Schema.Struct({

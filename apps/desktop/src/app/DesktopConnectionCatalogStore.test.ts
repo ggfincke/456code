@@ -123,7 +123,7 @@ describe("DesktopConnectionCatalogStore", () => {
     ),
   );
 
-  it.effect("migrates legacy relay, bearer profile, and credential data and skips SSH", () =>
+  it.effect("migrates legacy bearer profile and credential data and skips relay and SSH", () =>
     withStore(
       Effect.gen(function* () {
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
@@ -187,13 +187,8 @@ describe("DesktopConnectionCatalogStore", () => {
         }
         const catalog = yield* decodeConnectionCatalog(migrated.value);
 
+        assert.equal(catalog.targets.length, 1);
         assert.deepInclude(catalog.targets[0], {
-          _tag: "RelayConnectionTarget",
-          environmentId: EnvironmentId.make("relay-environment"),
-          label: "Relay",
-        });
-        assert.equal(catalog.targets.length, 2);
-        assert.deepInclude(catalog.targets[1], {
           _tag: "BearerConnectionTarget",
           environmentId: EnvironmentId.make("bearer-environment"),
           label: "Bearer",

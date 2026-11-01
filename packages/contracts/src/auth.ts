@@ -44,8 +44,9 @@ export const AuthFilesystemWriteScope = "filesystem:write" as const;
 const AuthReviewWriteScope = "review:write" as const;
 export const AuthAccessReadScope = "access:read" as const;
 export const AuthAccessWriteScope = "access:write" as const;
-export const AuthRelayReadScope = "relay:read" as const;
-export const AuthRelayWriteScope = "relay:write" as const;
+/** Retained for decoding existing credentials; no longer issued or offered. */
+const AuthRelayReadScope = "relay:read" as const;
+const AuthRelayWriteScope = "relay:write" as const;
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -146,7 +147,7 @@ export function sessionHasLegacyPermissions(session: SessionGrantInput): boolean
   );
 }
 
-// Shell and full-access agent scopes already confer access and relay authority.
+// Shell and full-access agent scopes already confer access authority.
 export const AuthStandardClientScopes = [
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -160,10 +161,8 @@ export const AuthStandardClientScopes = [
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
   AuthFilesystemWriteScope,
-  AuthRelayReadScope,
   AuthAccessReadScope,
   AuthAccessWriteScope,
-  AuthRelayWriteScope,
 ] as const;
 
 export const AuthTokenExchangeGrantType =

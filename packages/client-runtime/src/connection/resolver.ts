@@ -31,7 +31,6 @@ import type {
   ConnectionTarget,
   PreparedConnection,
   PrimaryConnectionTarget,
-  RelayConnectionTarget,
 } from "./model.ts";
 import { ConnectionBlockedError, type ConnectionAttemptError } from "./model.ts";
 import {
@@ -133,13 +132,6 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         actual: profile.environmentId,
       });
     }
-    if (profile.authorization === "t3-connect") {
-      const authorized = yield* remote.authorizeDpop({
-        expectedEnvironmentId: target.environmentId,
-        directEndpoint: { httpBaseUrl: profile.httpBaseUrl, wsBaseUrl: profile.wsBaseUrl },
-      });
-      return { ...authorized, target } satisfies PreparedConnection;
-    }
     const credential = yield* credentials.get(credentialConnectionId(target.connectionId)).pipe(
       Effect.flatMap(
         Option.match({
@@ -165,22 +157,10 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
   });
 });
 
-const makeRelayBroker = Effect.fn("clientRuntime.connection.broker.makeRelay")(function* () {
-  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
-
-  return Effect.fnUntraced(function* (target: RelayConnectionTarget) {
-    const authorized = yield* remote.authorizeDpop({
-      expectedEnvironmentId: target.environmentId,
-    });
-    return { ...authorized, target } satisfies PreparedConnection;
-  }, Effect.withSpan("clientRuntime.connection.broker.relay"));
-});
-
 /** @public */
 export const make = Effect.gen(function* () {
   const primary = yield* makePrimaryBroker();
   const bearer = yield* makeBearerBroker();
-  const relay = yield* makeRelayBroker();
   const httpClient = yield* HttpClient.HttpClient;
 
   const authorize = Effect.fn("clientRuntime.connection.broker.authorize")(function* (
@@ -199,8 +179,6 @@ export const make = Effect.gen(function* () {
           return primary(target);
         case "BearerConnectionTarget":
           return bearer({ ...entry, target });
-        case "RelayConnectionTarget":
-          return relay(target);
       }
     })();
     const { descriptor: authorizedDescriptor, ...prepared } = authorized;

@@ -2,7 +2,6 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   BearerConnectionTarget,
-  RelayConnectionTarget,
 } from "@t3tools/client-runtime/connection";
 import {
   ConnectionCatalogDocument as RuntimeConnectionCatalogDocument,
@@ -297,18 +296,8 @@ const migrateSavedEnvironmentRecords = Effect.fn(
   const credentials: Array<RuntimeConnectionCatalogDocumentType["credentials"][number]> = [];
 
   for (const record of records) {
-    if (record.relayManaged !== undefined) {
-      targets.push(
-        new RelayConnectionTarget({
-          environmentId: record.environmentId,
-          label: record.label,
-        }),
-      );
-      continue;
-    }
-
-    // SSH environments were removed, so their legacy records are not migrated.
-    if (record.desktopSsh !== undefined) continue;
+    // Relay routes and SSH environments were removed, so their legacy records are not migrated.
+    if (record.relayManaged !== undefined || record.desktopSsh !== undefined) continue;
 
     const id = connectionId("bearer", record.environmentId);
     targets.push(
@@ -351,7 +340,6 @@ const migrateSavedEnvironmentRecords = Effect.fn(
     targets,
     profiles,
     credentials,
-    remoteDpopTokens: [],
     disabledEnvironmentIds: [],
   };
 });

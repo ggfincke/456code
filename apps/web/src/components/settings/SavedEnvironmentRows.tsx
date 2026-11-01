@@ -152,11 +152,8 @@ export function SavedBackendListRow({
   const status = savedBackendStatus(environment);
   const serverVersion = environment.serverConfig?.environment.serverVersion ?? null;
   const retryNow = useAtomCommand(environmentCatalog.retryNow);
-  const {
-    diagnosis: currentDiagnosis,
-    state: connectionState,
-    relayOnly,
-  } = useConnectionDiagnosis(environment);
+  const { diagnosis: currentDiagnosis, state: connectionState } =
+    useConnectionDiagnosis(environment);
   const diagnosis = resumingServerUpdate ? null : currentDiagnosis;
   const prepared = usePreparedConnection(environmentId);
   const connectedTarget = isConnected && prepared._tag === "Some" ? prepared.value.target : null;
@@ -288,7 +285,6 @@ export function SavedBackendListRow({
               hostLabel={environment.label}
               diagnosis={diagnosis}
               onRetry={() => void retryNow(environmentId)}
-              onAddRoute={relayOnly ? () => onAddRoute(environment) : null}
             />
           ) : null}
           {routesOpen && (
