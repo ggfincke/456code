@@ -1,9 +1,6 @@
 {
-  "platforms": ["apple", "android"],
+  "platforms": ["apple"],
   "apple": {
     "modules": ["T3ComposerEditorModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.t3composereditor.T3ComposerEditorModule"]
   }
 }
