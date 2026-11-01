@@ -15,8 +15,6 @@ outputs:
     value: ${{ steps.detect.outputs.test_server }}
   rust:
     value: ${{ steps.detect.outputs.rust }}
-  release_smoke:
-    value: ${{ steps.detect.outputs.release_smoke }}
   mobile_native:
     value: ${{ steps.detect.outputs.mobile_native }}
 runs:

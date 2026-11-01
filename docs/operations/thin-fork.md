@@ -20,7 +20,7 @@
 
 Earlier integrations minimized changes to upstream V2 conversation orchestration, provider lifecycle, persistence/migrations, Git implementations, shared client runtime and `apps/mobile`. Those historical boundaries are no longer restrictions on changes needed to meet the guiding principles. Regular upstream merges remain the strategy, with an explicit principles review for each update. Preserve my working setup and report deferred upstream changes when adaptation is too costly. Prefer existing boundaries and tooling where they serve my workflow.
 
-Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. CI retains code/build checks, Windows tests and advisory mobile fingerprints on standard GitHub runners; automated releases, deployments, previews and upstream administration workflows have been removed.
+Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. CI retains code/build checks and advisory mobile fingerprints on standard GitHub runners; automated releases, Windows tests, deployments, previews and upstream administration workflows have been removed.
 
 ## Product and ownership boundaries
 
@@ -63,7 +63,17 @@ Remains:
 - Server-side DPoP verification on `/oauth/token` and the bearer bootstrap exchange used by direct pairing.
 - The dormant service launcher (`__service-launcher`, `serviceLauncherClient.ts`, `serviceProtocol.ts`), which upstream startup still wires in.
 - The "This computer is off" screen and its `hosted-static` auth gate state for a desktop whose local environment is off.
-- Out of scope for this pass: the LiteLLM usage-rates fetch, the Google favicon service, the dormant `scheduled_task_webhook_relay_deliveries` table, `apps/marketing`, install scripts, `CONTRIBUTING.md` and Android-only paths.
+- Out of scope for this pass: the LiteLLM usage-rates fetch, the Google favicon service, and the dormant `scheduled_task_webhook_relay_deliveries` table.
+
+## November 1 repository cleanup
+
+Upstream distribution and community tooling with no role in this fork was removed. Future upstream merges should drop these paths again rather than restore them.
+
+- Distribution: `apps/marketing`, `packaging/aur`, `.vercelignore`, the npm launcher and its builder, the curl and PowerShell installers, the CLI archive builder and smoke test, nightly and previous-tag release resolvers, update manifest merging (`scripts/lib/update-manifest.ts`), the Windows artifact verifier and `scripts/lib/windows-tar.ts`, `scripts/release-smoke.ts`, the `dist:desktop:win*`, `dist:gnome-extension` and `release:smoke` scripts, the Windows test workflow, and the unused `release_smoke` CI changes output. The `t3.json` JSON Schema builder went with the site, its only caller.
+- Community and review bots: `CONTRIBUTING.md`, the bug report template and issue chooser, `.github/SECURITY.md`, `.github/TRIAGE_EXEMPTIONS.td`, the `contribution-triage` skill, CodeRabbit config and its dependency, Macroscope config, `.cursor/` and `.devcontainer/`. The Effect service checklist now lives at `docs/internals/effect-service-review.md`, and the test-signal check at `evals/test-signal/check.md`.
+- The pull request template now follows the fork's PR rules. The issue-21397 seed script and fixture, the CI web test's upstream release repository override and `.gitignore` entries for removed tooling were also dropped.
+
+Kept: `build-desktop-artifact.ts` with its Windows internals, `update-release-package-versions.ts`, `sign-macos.ts`, `smoke-desktop-app.ts`, the mock update server, the staged-update tooling, the GNOME extension (bundled for SnapShot), mobile scripts, evals, CI and mobile fingerprint workflows, and the `test-t3-app` and `test-t3-mobile` skills. Android tooling is left for a separate change.
 
 ## October 31 update (v0.1.6)
 

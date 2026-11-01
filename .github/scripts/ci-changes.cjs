@@ -7,12 +7,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
 
-const INERT = [
-  /^docs\//,
-  /^\.(agents|cursor|vscode|devcontainer|macroscope|repos)\//,
-  /^[^/]+\.md$/,
-  /^LICENSE$/,
-];
+const INERT = [/^docs\//, /^\.(agents|vscode|repos)\//, /^[^/]+\.md$/, /^LICENSE$/];
 
 // Shared test setup and vendored mobile dependencies affect every package.
 const RUNS_EVERYTHING = [
@@ -129,8 +124,6 @@ function decide(files, packages, full) {
     }
   }
 
-  // Release smoke reads scripts/ itself, not what the scripts tests read.
-  let scriptsChanged = everything;
   if (everything) {
     affected = all;
   } else {
@@ -144,7 +137,6 @@ function decide(files, packages, full) {
         }
       }
     }
-    scriptsChanged = affected.has("@t3tools/scripts");
     for (const [name, deps] of Object.entries(TEST_ONLY_DEPS)) {
       if (deps.some((dep) => affected.has(dep))) affected.add(name);
     }
@@ -166,7 +158,6 @@ function decide(files, packages, full) {
       test_web: has("@t3tools/web"),
       test_server: has("t3"),
       rust: everything || rust,
-      release_smoke: scriptsChanged,
       mobile_native: files === null || files.some((file) => MOBILE_NATIVE.test(file)),
     },
   };

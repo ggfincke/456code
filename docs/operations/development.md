@@ -2,8 +2,9 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). It provides the Node version
-pinned in `package.json` (Node 26), so no separate Node install is needed. From the repository root:
+Install the global `vp` command with `curl -fsSL https://vite.plus | bash` (see the
+[Vite+ guide](https://viteplus.dev/guide/)). It provides the Node version pinned in
+`package.json` (Node 26), so no separate Node install is needed. From the repository root:
 
 ```sh
 vp i
@@ -12,8 +13,6 @@ vp run dev
 
 Open the pairing URL printed by the dev runner. The bare origin does not authenticate
 a new browser.
-
-Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Code and Codespaces setup.
 
 ## GitCafe mirror (optional)
 
@@ -198,8 +197,6 @@ refactors built in. VS Code uses it through `js/ts.tsdk.path` in `.vscode/settin
 
 Use `vp run lint:mobile` for native mobile changes. CI owns the full suite; see
 [ci.yml](../../.github/workflows/ci.yml) for its current jobs.
-The [manual Windows lane](../../.github/workflows/windows-tests.yml) is available for focused
-Windows investigation while that suite is not a required gate.
 
 ### Unused code
 
@@ -226,7 +223,6 @@ Local artifact builds are unsigned by default and write to `release/`:
 ```sh
 vp run dist:desktop:dmg
 vp run dist:desktop:linux
-vp run dist:desktop:win
 ```
 
 DMGs default to the host architecture. Use `--arch` to choose another target and `--keep-stage`
@@ -268,24 +264,8 @@ For a cross-architecture or universal build, add the requested Rust targets:
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
 ```
 
-### Windows installer prerequisites
-
-Install Rust, Python 3, and Visual Studio Build Tools with **Desktop development with C++**.
-Include the Windows SDK and the MSVC build tools and Spectre-mitigated libraries for the target
-architecture. Add its Rust target:
-
-```powershell
-rustup target add x86_64-pc-windows-msvc
-# For an ARM64 installer:
-rustup target add aarch64-pc-windows-msvc
-```
-
-NSIS is downloaded by electron-builder. WSL support additionally needs the Linux CLI archive
-passed as `--wsl-runtime`; see the
-[release runbook](./release.md#windows-payload-topology-and-update-validation).
-
 ### Signing and passkeys
 
-Add `--signed` after configuring the platform credentials in the
-[release runbook](./release.md). In-app browser passkeys on macOS need a signed app built with
-`T3CODE_APPLE_TEAM_ID` and `T3CODE_MACOS_PROVISIONING_PROFILE` set.
+No signing is configured for this fork. `--signed` uses the platform's code-signing identity from
+the environment and runs `scripts/sign-macos.ts` on macOS. In-app browser passkeys on macOS need
+a signed app built with `T3CODE_APPLE_TEAM_ID` and `T3CODE_MACOS_PROVISIONING_PROFILE` set.

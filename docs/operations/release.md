@@ -2,10 +2,10 @@
 
 > For maintainers. Using 456code? See [docs/user](../user/).
 
-This fork retains local desktop and CLI packaging tools. CI runs code/build checks, manual Windows
-compatibility tests, and advisory mobile fingerprints on standard GitHub runners. Automated
-release publishing, deployment, hosted previews, store submission, and upstream administration
-workflows have been removed.
+This fork retains local desktop packaging tools. CI runs code/build checks and advisory mobile
+fingerprints on standard GitHub runners. Release publishing, installers, npm and CLI archives,
+deployment, hosted previews, store submission, and upstream administration workflows have been
+removed.
 
 ## Build desktop artifacts
 
@@ -22,9 +22,8 @@ pnpm run dist:desktop:dmg:arm64 --output-dir /absolute/path/to/artifacts
 
 Use the Node version required by `package.json`. Keep its directory ahead of the local binaries
 so a packaging subprocess uses the supported runtime. Choose `dist:desktop:dmg:x64` on Intel
-macOS. Linux and Windows packaging commands and their target-specific prerequisites are listed
-in `package.json` and [development](development.md#desktop-artifacts); Windows requires the
-matching Linux CLI archive for its WSL payload.
+macOS. The Linux packaging command and its prerequisites are listed in `package.json` and
+[development](development.md#desktop-artifacts).
 
 Build from a clean, pinned source revision. Do not use `--skip-build` when validating a new
 revision. The builder validates package self-containment and writes the source commit prefix to
@@ -34,8 +33,7 @@ keeps its existing unsigned packaging policy; packaging success is not signing o
 
 ## Validate and install locally
 
-Run the relevant existing packaging helper tests and `pnpm run release:smoke`. Add the local
-binary directory to `PATH` for smoke subprocesses. Keep runtime smoke state disposable and
+Run the relevant existing packaging helper tests. Keep runtime smoke state disposable and
 separate from the installed application's profile. Inspect a DMG through a read-only mount
 without launching Finder or the application. Day-to-day installs go through staged updates
 below rather than a manually copied artifact.

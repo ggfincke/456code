@@ -1,6 +1,6 @@
 # Test signal
 
-Runs the Macroscope `test-signal` check ([`.macroscope/check-run-agents/test-signal.md`](../../.macroscope/check-run-agents/test-signal.md)) on real and synthetic test diffs, and checks that a cheap model flags low-signal tests and leaves good ones alone. Use it to cut the check to the fewest words that still work.
+Runs the former Macroscope `test-signal` check ([`check.md`](./check.md)) on real and synthetic test diffs, and checks that a cheap model flags low-signal tests and leaves good ones alone. Use it to cut the check to the fewest words that still work.
 
 The model gets the check body, the PR's test diff, `read_file` and `grep` at the PR head, and `post_comment`. The wrapper prompt around the body is a stand-in for Macroscope's, which is not public.
 
