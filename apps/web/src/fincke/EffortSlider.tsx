@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import "./effortSlider.css";
 
 export interface EffortLevel {
@@ -49,15 +50,16 @@ const SPARKS: ReadonlyArray<readonly [number, number]> = [
   [90, 38],
 ];
 
-// ten dots thrown outward from the thumb; fixed angles keep render pure
-const BURST = Array.from({ length: 10 }, (_, index) => {
-  const angle = (index / 10) * Math.PI * 2 + (index % 3) * 0.13;
-  const distance = 18 + ((index * 7) % 5) * 3;
+// eighteen dots of mixed size thrown outward from the thumb; fixed angles keep render pure
+const BURST = Array.from({ length: 18 }, (_, index) => {
+  const angle = (index / 18) * Math.PI * 2 + (index % 3) * 0.17;
+  const distance = 24 + ((index * 7) % 6) * 4;
   return {
     id: `burst-${index}`,
     dx: Math.cos(angle) * distance,
-    dy: Math.sin(angle) * distance * 0.7,
-    purple: index % 2 === 1,
+    dy: Math.sin(angle) * distance * 0.8,
+    size: 3 + (index % 3),
+    purple: index % 3 !== 0,
   };
 });
 
@@ -168,7 +170,8 @@ export function EffortSlider(props: {
       aria-valuemin={0}
       aria-valuemax={Math.max(0, count - 1)}
       aria-valuenow={live}
-      aria-valuetext={levels[live]?.label}
+      aria-valuetext={[levels[live]?.label, levels[live]?.description].filter(Boolean).join(". ")}
+      style={{ "--effort-pct": pct } as CSSProperties}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endPress}
@@ -176,12 +179,14 @@ export function EffortSlider(props: {
       onKeyDown={onKeyDown}
     >
       <div data-slot="effort-clip">
-        <div data-slot="effort-fill" style={{ width: `calc(${pct}% + 13px)` }}>
+        <div data-slot="effort-fill">
           <div data-slot="effort-ultra" aria-hidden="true">
             {SPARKS.map(([left, top]) => (
               <span
-                key={`${left}:${top}`}
+                // re-keyed per entry so the twinkle replays
+                key={`${effectKey}:${left}:${top}`}
                 data-slot="effort-spark"
+                data-twinkle={effectKey > 0 ? "" : undefined}
                 style={{ left: `${left}%`, top: `${top}%`, opacity: 0.45 + ((left * 7) % 5) / 10 }}
               />
             ))}
@@ -200,7 +205,25 @@ export function EffortSlider(props: {
           style={{ left: `${stopPosition(stopIndex, count)}%` }}
         />
       ))}
-      <span aria-hidden="true" data-slot="effort-thumb" style={{ left: `${pct}%` }} />
+      {/* descriptions live in stop tooltips, so the popover never resizes between levels */}
+      {levels.map((level, stopIndex) =>
+        level.description ? (
+          <Tooltip key={level.id}>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-hidden="true"
+                  data-slot="effort-stop-hit"
+                  style={{ left: `${stopPosition(stopIndex, count)}%` }}
+                />
+              }
+            />
+            <TooltipPopup side="top">{level.description}</TooltipPopup>
+          </Tooltip>
+        ) : null,
+      )}
+      <span aria-hidden="true" data-slot="effort-thumb" />
+      {effectKey > 0 ? <span key={effectKey} aria-hidden="true" data-slot="effort-glow" /> : null}
       {effectKey > 0 ? (
         <span
           key={effectKey}
@@ -208,11 +231,19 @@ export function EffortSlider(props: {
           data-slot="effort-burst"
           style={{ left: `${stopPosition(index, count)}%` }}
         >
+          <span data-slot="effort-ring" />
           {BURST.map((dot) => (
             <span
               key={dot.id}
+              data-slot="effort-dot"
               data-purple={dot.purple ? "" : undefined}
-              style={{ "--dx": `${dot.dx}px`, "--dy": `${dot.dy}px` } as CSSProperties}
+              style={
+                {
+                  "--dx": `${dot.dx}px`,
+                  "--dy": `${dot.dy}px`,
+                  "--size": `${dot.size}px`,
+                } as CSSProperties
+              }
             />
           ))}
         </span>

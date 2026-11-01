@@ -6,19 +6,25 @@
 export function resolveComposerControlsOwnership(input: {
   /** Permissions hide while the mode is the default, or while the new-thread strip names it. */
   readonly matchesDefault: boolean;
-  /** The model has an effort (traits) menu, which then always holds Permissions. */
+  /** The model has an effort (traits) control. */
   readonly hasTraits: boolean;
+  /**
+   * The effort control is a menu that holds Permissions (defaults to hasTraits). Without one,
+   * the chip is Permissions' only row home, so it never hides.
+   */
+  readonly traitsHoldPermissions?: boolean;
   readonly planModeUiEnabled: boolean;
   readonly collapsed: boolean;
   /** How many trailing blocks the width measurement moved into the overflow menu. */
   readonly measuredHiddenBlockCount: number;
 }) {
+  const traitsHoldPermissions = input.traitsHoldPermissions ?? input.hasTraits;
   const accessDisplay = !input.matchesDefault
     ? input.collapsed
       ? ("icon" as const)
       : ("label" as const)
-    : // Without traits there is no effort menu to hold Permissions, so keep an icon.
-      input.hasTraits
+    : // Without an effort menu to hold Permissions, keep an icon.
+      traitsHoldPermissions
       ? ("hidden" as const)
       : ("icon" as const);
   const showModeBlock = !(accessDisplay === "hidden" && !input.planModeUiEnabled);
@@ -28,7 +34,7 @@ export function resolveComposerControlsOwnership(input: {
   ];
   const hiddenFor = (count: number) => blockIds.slice(blockIds.length - count);
   const overflowShowsPermissionsFor = (hidden: ReadonlyArray<string>) =>
-    hidden.includes(input.hasTraits ? "traits" : "mode");
+    hidden.includes(traitsHoldPermissions ? "traits" : "mode");
   const overflowHasContent = (hidden: ReadonlyArray<string>) =>
     hidden.includes("traits") ||
     (input.planModeUiEnabled && hidden.includes("mode")) ||
@@ -57,7 +63,8 @@ export function resolveComposerControlsOwnership(input: {
      * The effort chip answers composer.mode while the chip is hidden or overflowed, until the
      * effort chip overflows too; then the overflow menu (which holds Permissions) answers it.
      */
-    effortOwnsModeShortcut: (input.matchesDefault || modeHidden) && !traitsHidden,
+    effortOwnsModeShortcut:
+      traitsHoldPermissions && (input.matchesDefault || modeHidden) && !traitsHidden,
     overflowShowsPermissions: overflowShowsPermissionsFor(hiddenBlockIds),
   };
 }

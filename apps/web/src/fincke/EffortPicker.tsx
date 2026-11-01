@@ -256,8 +256,22 @@ export const EffortPicker = memo(function EffortPicker(props: ComponentProps<typ
                 />
               </>
             )}
-            <span data-composer-control-label className="min-w-0 truncate">
-              {level?.label ?? triggerLabel}
+            {/* every level name shares one cell, so the chip keeps the widest one's width */}
+            <span data-composer-control-label className="grid min-w-0 text-start">
+              {level
+                ? levels.map((option) => (
+                    <span
+                      key={option.id}
+                      aria-hidden={option.id !== level.id || undefined}
+                      className={cn(
+                        "col-start-1 row-start-1 truncate",
+                        option.id !== level.id && "invisible",
+                      )}
+                    >
+                      {option.label}
+                    </span>
+                  ))
+                : triggerLabel}
             </span>
             <ComposerControlChevron size={size} />
           </span>
@@ -289,6 +303,7 @@ export const EffortPicker = memo(function EffortPicker(props: ComponentProps<typ
             )}
             <div className="min-w-0 flex-1 text-center leading-tight">
               <div
+                key={shownLevel?.id}
                 data-slot="effort-level"
                 className="truncate font-semibold"
                 data-ultra={shownLevel?.ultra ? "" : undefined}
@@ -335,10 +350,6 @@ export const EffortPicker = memo(function EffortPicker(props: ComponentProps<typ
             <p className="text-center text-muted-foreground text-xs">
               Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this
               option.
-            </p>
-          ) : levels.some((option) => option.description) ? (
-            <p data-slot="effort-description" data-ultra={shownLevel?.ultra ? "" : undefined}>
-              {shownLevel?.description}
             </p>
           ) : null}
           {selectRows.length > 0 || booleanRows.length > 0 ? (
