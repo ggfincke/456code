@@ -1,19 +1,15 @@
 import { Alert, AlertDescription } from "../ui/alert";
 import type { AuthSessionState } from "@t3tools/contracts";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import React, { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 
-import { connectPairing } from "../../connection/onboarding";
 import {
   peekPairingTokenFromUrl,
   stripPairingTokenFromUrl,
   submitServerAuthCredential,
 } from "../../environments/primary";
-import { readHostedPairingRequest } from "../../hostedPairing";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
-import { useAtomCommand } from "../../state/use-atom-command";
 
 export function PairingPendingSurface() {
   return (
@@ -131,124 +127,6 @@ export function PairingRouteSurface({
 
       <div className="mt-6 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
         {describeSupportedMethods(auth.bootstrapMethods)}
-      </div>
-    </StandalonePage>
-  );
-}
-
-export function HostedPairingRouteSurface() {
-  const connectPairingEnvironment = useAtomCommand(connectPairing, {
-    reportFailure: false,
-  });
-  const [request] = useState(readHostedPairingRequest);
-  const [status, setStatus] = useState<"pairing" | "paired" | "error">(
-    request ? "pairing" : "error",
-  );
-  const [message, setMessage] = useState(
-    request
-      ? "Connecting to this backend."
-      : "This pairing link is missing its backend host or token.",
-  );
-  const [canRetry, setCanRetry] = useState(false);
-  const submitAttemptedRef = useRef(false);
-  const tokenSubmittedRef = useRef(false);
-
-  const submitHostedPairingRequest = async () => {
-    if (!request) {
-      setStatus("error");
-      setMessage("This pairing link is missing its backend host or token.");
-      setCanRetry(false);
-      return;
-    }
-
-    if (tokenSubmittedRef.current) {
-      setStatus("error");
-      setMessage("This one-time pairing token was already submitted. Request a new pairing link.");
-      setCanRetry(false);
-      return;
-    }
-
-    setStatus("pairing");
-    setMessage("Connecting to this backend.");
-    setCanRetry(false);
-    tokenSubmittedRef.current = true;
-
-    const result = await connectPairingEnvironment({
-      host: request.host,
-      pairingCode: request.token,
-    });
-    if (result._tag === "Success") {
-      setStatus("paired");
-      setMessage(`${request.label || "The environment"} is saved in this browser.`);
-      return;
-    }
-
-    tokenSubmittedRef.current = false;
-    setStatus("error");
-    setCanRetry(true);
-    setMessage(
-      `${errorMessageFromUnknown(squashAtomCommandFailure(result))} If the backend accepted this one-time token, request a new pairing link before retrying.`,
-    );
-  };
-
-  const submitOnMount = useEffectEvent(() => {
-    void submitHostedPairingRequest();
-  });
-
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- strips the pairing token from the URL and submits the hosted pairing request once on mount
-  useEffect(() => {
-    if (submitAttemptedRef.current) {
-      return;
-    }
-    submitAttemptedRef.current = true;
-
-    stripPairingTokenFromUrl();
-    submitOnMount();
-  }, []);
-
-  return (
-    <StandalonePage>
-      <StandalonePageHeader
-        title={
-          status === "paired"
-            ? "Backend paired"
-            : status === "error"
-              ? "Pairing failed"
-              : "Pairing backend"
-        }
-        description={message}
-      />
-
-      {request ? (
-        <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-          Host: <span className="font-mono text-foreground/80">{request.host}</span>
-        </div>
-      ) : null}
-
-      {status === "error" ? (
-        <Alert variant="error" className="mt-5">
-          <AlertDescription>
-            Verify the backend is reachable from this browser, supports CORS for hosted clients, and
-            is served over HTTPS when opening this page from HTTPS.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <div className="mt-6 flex flex-wrap gap-2">
-        {status === "pairing" ? (
-          <Button disabled size="sm">
-            Pairing...
-          </Button>
-        ) : canRetry ? (
-          <Button size="sm" onClick={() => void submitHostedPairingRequest()}>
-            Try again
-          </Button>
-        ) : null}
-        {status === "paired" ? (
-          <Button size="sm" variant="outline" onClick={() => (window.location.href = "/")}>
-            Open app
-          </Button>
-        ) : null}
       </div>
     </StandalonePage>
   );

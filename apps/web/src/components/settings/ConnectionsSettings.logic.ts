@@ -1,8 +1,11 @@
 import * as DateTime from "effect/DateTime";
 
 import { resolveDesktopPairingUrl } from "./pairingUrls";
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@t3tools/shared/remote";
-import { readHostedPairingRequest } from "../../hostedPairing";
+import {
+  getPairingTokenFromUrl,
+  readHostedPairingRequest,
+  setPairingTokenOnUrl,
+} from "@t3tools/shared/remote";
 import {
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,

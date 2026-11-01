@@ -1,7 +1,5 @@
 // packages/shared/src/promptLinks.ts
 // parses explicit prompt links without sending messages
-export const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
-
 const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
 
 export interface PromptLinkRepository {
@@ -169,21 +167,13 @@ export function withoutPromptLinkParams(search: string): string {
 const APP_SCHEME = /^(?:t3code(?:-[a-z]+)?|code456-thin(?:-dev)?):$/;
 const THREAD_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
 
-export function promptLinkAppPath(
-  value: string,
-  hostedAppUrl: string = DEFAULT_HOSTED_APP_URL,
-): string | null {
+export function promptLinkAppPath(value: string): string | null {
   if (!URL.canParse(value)) return null;
   const url = new URL(value);
-  if (APP_SCHEME.test(url.protocol)) {
-    if (url.host === "new" && (url.pathname === "" || url.pathname === "/")) {
-      return `/new${url.search}`;
-    }
-    const thread = url.host === "threads" ? THREAD_PATH.exec(url.pathname) : null;
-    return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
+  if (!APP_SCHEME.test(url.protocol)) return null;
+  if (url.host === "new" && (url.pathname === "" || url.pathname === "/")) {
+    return `/new${url.search}`;
   }
-  if (!URL.canParse(hostedAppUrl) || url.origin !== new URL(hostedAppUrl).origin) return null;
-  if (url.pathname === "/new") return `/new${url.search}`;
-  const thread = url.searchParams.has("prompt") ? THREAD_PATH.exec(url.pathname) : null;
+  const thread = url.host === "threads" ? THREAD_PATH.exec(url.pathname) : null;
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
 }

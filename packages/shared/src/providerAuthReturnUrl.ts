@@ -9,9 +9,7 @@ export function providerAuthReturnUrl(value: string | undefined): string | undef
     const desktop =
       ["t3code:", "t3code-dev:", "code456-thin:", "code456-thin-dev:"].includes(url.protocol) &&
       url.host === "app";
-    const web =
-      ["http:", "https:"].includes(url.protocol) &&
-      (isLoopbackHost(url.hostname) || url.origin === "https://app.t3.codes");
+    const web = ["http:", "https:"].includes(url.protocol) && isLoopbackHost(url.hostname);
     if (
       url.username ||
       url.password ||
