@@ -1,6 +1,6 @@
 ---
 name: test-t3-mobile
-description: Test T3 Code's native iOS and Android app through its Device panel and returned AgentDevice command. Use for mobile verification, native-client builds, Metro launch, and mobile pairing against isolated development state.
+description: Test T3 Code's native iOS app through its Device panel and returned AgentDevice command. Use for mobile verification, native-client builds, Metro launch, and mobile pairing against isolated development state.
 ---
 
 # Test T3 Mobile
@@ -31,22 +31,21 @@ when inspecting or seeding SQLite. Stop the test server before fixture writes.
 From the checkout being tested on the selected device host, run:
 
 ```bash
-vp run mobile:install <ios|android> <device-id>
+vp run mobile:install ios <device-id>
 ```
 
 This installs the dev client for the checkout's native fingerprint: from the
 device or this machine's cache (`~/.cache/t3code/native-clients/artifacts`) in
 seconds, building once only when this machine has no build for that fingerprint
-yet (5-15 minutes, logged to the file it names). The device id may be omitted when exactly one device is booted. It
+yet (5-15 minutes, logged to the file it names). The device id may be omitted when exactly one simulator is booted. It
 prints one JSON line; on failure it names the next command. Authorized mobile
 verification includes that step unless the user prohibits it.
 
 For a device you opened in an agent-device session elsewhere (a device pool,
-cloud, or remote host), run `vp run mobile:install <ios|android> --session <s>`
+cloud, or remote host), run `vp run mobile:install ios --session <s>`
 from the directory you opened the session in. It installs the cached build into
-that session (`--abi arm64-v8a` for an ARM Android device; `--metro <url>` also
-opens it against Metro), building it here first on a cache miss. Run
-`vp run mobile:install <ios|android> --prepare` before leasing a device so a
+that session (`--metro <url>` also opens it against Metro), building it here first on a cache miss. Run
+`vp run mobile:install ios --prepare` before leasing a device so a
 build does not outlast the lease.
 
 Start `vp run dev:client` from `apps/mobile`, or reuse a healthy Metro belonging
@@ -71,8 +70,7 @@ arguments stored in `agent_device_command` and the Bash array
 
 It issues a fresh credential and opens T3 Code Dev's existing pairing route
 through AgentDevice. For a backend on the device host, use
-`http://127.0.0.1:<server-port>` on iOS or `http://10.0.2.2:<server-port>`
-on Android. For a remote backend, use its reachable origin.
+`http://127.0.0.1:<server-port>`. For a remote backend, use its reachable origin.
 
 Confirm the intended projects appear, exercise the affected flow, and capture
 evidence. Retain the app and environment while iterating. At teardown, remove

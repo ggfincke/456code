@@ -3,7 +3,7 @@
 Proposed invariant: a command's visible label, tooltip, menu wording and accessible
 name describe the same action on the same object. An icon-only presentation must
 retain that meaning. This applies to shared web/Electron controls and corresponding
-React Native iOS/Android actions, wherever those actions are available.
+React Native iOS actions, wherever those actions are available.
 
 Separate strings can drift while each presentation still looks plausible. A message
 copy action called “Copy link” promises a different clipboard payload to someone

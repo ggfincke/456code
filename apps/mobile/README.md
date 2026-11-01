@@ -22,31 +22,29 @@ repository-root `.env` or `.env.local`, not an `apps/mobile/.env` file. See
 
 ## Development
 
-For simulator, emulator, or Android phone development, boot or connect a device, then install the
+456code ships only the iOS app. For simulator development, boot a simulator, then install the
 native client that matches this checkout before starting Metro:
 
 ```bash
 vp run mobile:install ios [simulator-udid]
-# Or: vp run mobile:install android [emulator-or-phone-serial]
 vp run dev:client
 ```
 
-The device argument can be omitted when exactly one device is booted or connected. The helper
+The device argument can be omitted when exactly one simulator is booted. The helper
 compares this checkout's Expo fingerprint and the installed binary with its last install record,
 and reuses a matching client. Otherwise it installs this machine's build for that fingerprint from
 `~/.cache/t3code/native-clients/artifacts`, building it there once when it is missing (5-15
-minutes). One iOS simulator build serves every iPhone and iPad simulator, and one APK per ABI
-(x86_64 or arm64-v8a) serves every emulator and phone of that ABI. Build output goes to the log
+minutes). One iOS simulator build serves every iPhone and iPad simulator. Build output goes to the log
 file it prints (`T3_NATIVE_CLIENT_VERBOSE=1` streams it instead). Physical iPhones still use
 `vp run ios:dev`.
 
 `--session <name>` installs into an agent-device session opened elsewhere, such as a device pool
-or a cloud simulator, instead of a local device: `vp run mobile:install android --session pool-1
---metro http://<this-machine>:8081`. It uses the same local cache (x86_64 by default; `--abi`
-for ARM) and builds on this machine on a miss. `--prepare` builds or reuses the client without a
+or a cloud simulator, instead of a local device: `vp run mobile:install ios --session pool-1
+--metro http://<this-machine>:8081`. It uses the same local cache and builds on this machine on a
+miss. `--prepare` builds or reuses the client without a
 device, so a build does not outlast a device lease.
 
-For a read-only decision, run `node ../../scripts/mobile-native-client.ts check <ios|android>
+For a read-only decision, run `node ../../scripts/mobile-native-client.ts check ios
 [device]`: exit 0 means compatible, 2 means an install is needed, and 1 means an operational error.
 An externally installed client is unverified until the helper installs it once.
 
@@ -146,12 +144,4 @@ Create a persistent preview build:
 
 ```bash
 vp run eas:ios:preview
-```
-
-Android equivalents:
-
-```bash
-vp run eas:android:dev
-vp run eas:android:preview:dev
-vp run eas:android:preview
 ```

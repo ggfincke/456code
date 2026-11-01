@@ -36,7 +36,7 @@ T3 Code has 3 key app surfaces: **web**, **desktop**, and **mobile**.
 
 **Desktop** is the main surface most users install first. It's a full Electron app that bundles the server runner as well. The desktop app can also be used as the host server, allowing remote connections from browsers, other desktop apps, or the mobile app.
 
-**Mobile** is a React Native app for both iOS and Android. The mobile app allows for connecting to any T3 Code server to control work remotely.
+**Mobile** is a React Native app for iOS; 456code does not ship an Android client. The mobile app allows for connecting to any T3 Code server to control work remotely.
 
 ## A note from Theo
 
@@ -142,7 +142,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 
 - Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
 
-For authorized mobile verification, a missing or outdated native client is an install step, not a blocker. Run `vp run mobile:install <ios|android> [device-id]` on the device host before starting Metro; it targets the only booted simulator or connected Android device when the id is omitted. It installs the dev client for this checkout's native fingerprint from this machine's cache in seconds and builds it locally once on a miss, so prefer it over `expo run:*`, `xcodebuild`, or `gradlew`, which rebuild from scratch. Its stdout is one JSON line; build output goes to the log it names. See `test-t3-mobile` for the full workflow.
+For authorized mobile verification, a missing or outdated native client is an install step, not a blocker. Run `vp run mobile:install ios [device-id]` on the device host before starting Metro; it targets the only booted simulator when the id is omitted. It installs the dev client for this checkout's native fingerprint from this machine's cache in seconds and builds it locally once on a miss, so prefer it over `expo run:*` or `xcodebuild`, which rebuild from scratch. Its stdout is one JSON line; build output goes to the log it names. See `test-t3-mobile` for the full workflow.
 
 ## Evals
 

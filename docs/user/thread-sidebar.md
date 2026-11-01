@@ -152,7 +152,7 @@ answer. The Working section lists the thread you last sent work to first. Pinned
 the pinned section.
 
 This is on by default. Turn it off with **Settings → General → Working section** on web and desktop,
-or **Settings → General → Working section** on iOS and Android. Each device keeps its own
+or **Settings → General → Working section** on iOS. Each device keeps its own
 choice.
 
 While this is on, a thread that leaves the Working section counts as new activity, so it

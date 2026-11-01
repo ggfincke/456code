@@ -367,5 +367,4 @@ automatically. HTML previews cannot access your T3 Code session.
 The file viewer recognizes images, HTML, and PDF files by their filename extension,
 including filenames or folders containing `#` or `?`.
 
-On mobile, select a PDF attachment or link to open it. iOS uses the native viewer;
-Android opens a compatible installed file viewer.
+On mobile, select a PDF attachment or link to open it in the native viewer.
