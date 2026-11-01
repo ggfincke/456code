@@ -7,30 +7,14 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
-import { HttpClient, HttpClientResponse } from "effect/http";
 
-import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
-import { ServerConfig } from "../config.ts";
-import * as ServerSettings from "../serverSettings.ts";
 import { hasValidClaudeManifestAdapters } from "./ClaudeModelManifest.ts";
 import bundledManifestJson from "./model-manifest.json" with { type: "json" };
 import { ProviderCompatibilityPolicy } from "./providerCompatibility.ts";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 
-const MODEL_MANIFEST_URL =
-  "https://raw.githubusercontent.com/pingdotgg/t3code/main/apps/server/src/provider/model-manifest.json";
-
-const MANIFEST_TTL_MS = 60 * 60 * 1000;
-
-/** Back off failed fetches so offline health checks do not each wait on the network. */
-const MANIFEST_RETRY_MS = 5 * 60 * 1000;
-
-const FETCH_TIMEOUT_MS = 10_000;
 const MODEL_NEW_BADGE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ManifestModelStatus = Schema.Literals(["current", "legacy"]);
@@ -65,7 +49,6 @@ const ManifestProviderCatalog = Schema.Struct({
 
 const ModelManifestEnvelopeSchema = Schema.Struct({
   version: Schema.Literal(1),
-  /** Older disk caches must not override bundled manifests; absent dates rank below any dated bundle. */
   updatedAt: Schema.optional(Schema.String),
   compatibility: Schema.optional(Schema.Array(ProviderCompatibilityPolicy)),
   currentModels: Schema.Record(Schema.String, Schema.Array(Schema.String)),
@@ -99,16 +82,8 @@ const ModelManifestSchema = ModelManifestEnvelopeSchema.pipe(
 );
 export type ModelManifestData = typeof ModelManifestSchema.Type;
 
-const decodeManifest = Schema.decodeUnknownEffect(ModelManifestSchema);
-
 export const BUNDLED_MODEL_MANIFEST: ModelManifestData =
   Schema.decodeUnknownSync(ModelManifestSchema)(bundledManifestJson);
-
-function manifestUpdatedAtMs(manifest: ModelManifestData): number {
-  if (manifest.updatedAt === undefined) return 0;
-  const parsed = Date.parse(manifest.updatedAt);
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
 
 export function resolveProviderCatalog(
   manifest: ModelManifestData,
@@ -152,125 +127,25 @@ export function resolveProviderCatalog(
   return { models, defaultChatModel: catalog.defaults?.chat };
 }
 
-const ManifestCacheFile = Schema.Struct({
-  fetchedAtMs: Schema.Number,
-  manifest: ModelManifestSchema,
-});
-const decodeManifestCache = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    ManifestCacheFile as unknown as Schema.Codec<typeof ManifestCacheFile.Type>,
-  ),
-);
-export const encodeManifestCache = Schema.encodeEffect(
-  Schema.fromJsonString(
-    ManifestCacheFile as unknown as Schema.Codec<typeof ManifestCacheFile.Type>,
-  ),
-);
-
 export class ModelManifest extends Context.Service<
   ModelManifest,
   {
-    /**  Snapshot classification reads this, so it never waits on the network. */
     readonly current: Effect.Effect<ModelManifestData>;
     readonly refresh: Effect.Effect<ModelManifestData>;
     readonly forceRefresh: Effect.Effect<ModelManifestData>;
-    /** Process-shared fetches must survive the triggering instance's teardown. */
     readonly refreshInBackground: Effect.Effect<void>;
   }
 >()("t3/provider/ModelManifest") {}
 
-const BundledOnlyModelManifest: ModelManifest["Service"] = {
+// 456code only uses the manifest bundled with the build; it never fetches upstream's copy.
+export const layer = Layer.succeed(ModelManifest, {
   current: Effect.succeed(BUNDLED_MODEL_MANIFEST),
   refresh: Effect.succeed(BUNDLED_MODEL_MANIFEST),
   forceRefresh: Effect.succeed(BUNDLED_MODEL_MANIFEST),
   refreshInBackground: Effect.void,
-};
-
-const layerBundledOnly = Layer.succeed(ModelManifest, BundledOnlyModelManifest);
-
-export const make = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const config = yield* ServerConfig;
-  const settingsService = yield* ServerSettings.ServerSettingsService;
-  const httpClient = yield* HttpClient.HttpClient;
-  const serviceScope = yield* Effect.scope;
-
-  const cachePath = path.join(config.stateDir, "model-manifest.json");
-  let manifest = BUNDLED_MODEL_MANIFEST;
-  let fetchedAtMs: number | null = null;
-  let lastAttemptMs: number | null = null;
-  const refreshSemaphore = yield* Semaphore.make(1);
-
-  // Only refresh takes the fetch semaphore; current must not wait on network I/O.
-  const ensureDiskCacheLoaded = yield* Effect.cached(
-    Effect.gen(function* () {
-      const fromDisk = yield* fileSystem.readFileString(cachePath).pipe(
-        Effect.flatMap((raw) => decodeManifestCache(raw)),
-        Effect.catchCause(() => Effect.succeed(null)),
-      );
-      if (fromDisk === null) return;
-      if (manifestUpdatedAtMs(BUNDLED_MODEL_MANIFEST) > manifestUpdatedAtMs(fromDisk.manifest)) {
-        return;
-      }
-      manifest = fromDisk.manifest;
-      fetchedAtMs = fromDisk.fetchedAtMs;
-    }),
-  );
-
-  const refresh = Effect.fn("ModelManifest.refresh")(function* (force = false) {
-    yield* ensureDiskCacheLoaded;
-    const now = yield* Clock.currentTimeMillis;
-    // Expire future timestamps after clock rollback; disk caches cross restarts, ruling out monotonic time.
-    const isWithin = (sinceMs: number | null, windowMs: number) =>
-      sinceMs !== null && now >= sinceMs && now - sinceMs < windowMs;
-    if (!force && isWithin(fetchedAtMs, MANIFEST_TTL_MS)) return manifest;
-    if (!force && isWithin(lastAttemptMs, MANIFEST_RETRY_MS)) return manifest;
-
-    const settings = yield* settingsService.getSettings.pipe(
-      Effect.catchCause(() => Effect.succeed(null)),
-    );
-    if (settings !== null && !settings.enableProviderUpdateChecks) return manifest;
-
-    lastAttemptMs = now;
-    const fetched = yield* httpClient.get(MODEL_MANIFEST_URL).pipe(
-      Effect.flatMap(HttpClientResponse.filterStatusOk),
-      Effect.flatMap((response) => response.json),
-      Effect.flatMap((json) => decodeManifest(json)),
-      Effect.timeout(FETCH_TIMEOUT_MS),
-      Effect.catchCause(() => Effect.succeed(null)),
-    );
-    // Reject stale CDN edits just like stale disk caches to preserve bundled version gates.
-    if (fetched === null || manifestUpdatedAtMs(fetched) < manifestUpdatedAtMs(manifest)) {
-      return manifest;
-    }
-
-    manifest = fetched;
-    fetchedAtMs = now;
-    yield* encodeManifestCache({ fetchedAtMs: now, manifest: fetched }).pipe(
-      Effect.flatMap((contents) => writeFileStringAtomically({ filePath: cachePath, contents })),
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
-      Effect.provideService(Path.Path, path),
-      Effect.ignoreCause,
-    );
-    return manifest;
-  });
-
-  const guardedRefresh = refreshSemaphore.withPermits(1)(refresh());
-
-  return ModelManifest.of({
-    current: ensureDiskCacheLoaded.pipe(Effect.map(() => manifest)),
-    refresh: guardedRefresh,
-    forceRefresh: refreshSemaphore.withPermits(1)(refresh(true)),
-    refreshInBackground: Effect.forkIn(guardedRefresh, serviceScope).pipe(Effect.asVoid),
-  });
 });
 
-export const layer = Layer.effect(ModelManifest, make);
-
-export const layerTest = Layer.suspend(() =>
-  layerModelCatalog.pipe(Layer.provideMerge(layerBundledOnly)),
-);
+export const layerTest = Layer.suspend(() => layerModelCatalog.pipe(Layer.provideMerge(layer)));
 
 export const layerModelCatalog = Layer.effect(
   ModelCatalog.ModelCatalog,
