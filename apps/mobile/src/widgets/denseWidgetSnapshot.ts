@@ -4,13 +4,15 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { PendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadPullRequestLink } from "@t3tools/contracts";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   collectLimitAccounts,
   collectLimitPools,
   type LimitPresentations,
 } from "@t3tools/shared/usageLimits";
 
+import { PullRequestGlyph } from "../features/pull-requests/pullRequestGlyphs";
 import type { WidgetTheme } from "./widgetTheme";
 
 export interface DenseWidgetRow {
@@ -25,6 +27,19 @@ export interface DenseWidgetRow {
   detail?: string;
 }
 
+export interface DenseWidgetPullRequest {
+  key: string;
+  number: number;
+  title: string;
+  repository: string;
+  url: string;
+  tone: "alert" | "ready" | "pending";
+  status: string;
+  // widgetkit only draws sf symbols, so custom glyphs like the draft icon stay out
+  glyph: typeof PullRequestGlyph.pullRequest | typeof PullRequestGlyph.conflicting;
+  watched: boolean;
+}
+
 export interface DenseWidgetData {
   host: string;
   live: boolean;
@@ -35,6 +50,8 @@ export interface DenseWidgetData {
   running: DenseWidgetRow[];
   runningCount: number;
   finished: DenseWidgetRow[];
+  pullRequests: DenseWidgetPullRequest[];
+  pullRequestCount: number;
   quotas: Array<{
     provider: string;
     name: string;
@@ -63,6 +80,28 @@ export function denseAttentionThreads(threads: readonly EnvironmentThreadShell[]
         (a.source.pendingRuntimeRequest?.createdAt.epochMilliseconds ?? 0) -
         (b.source.pendingRuntimeRequest?.createdAt.epochMilliseconds ?? 0),
     );
+}
+
+const PULL_REQUEST_TONE_RANK = { alert: 0, ready: 1, pending: 2 } as const;
+
+// most actionable first: anything blocking a merge, then mergeable, then waiting
+function pullRequestStatus(link: ThreadPullRequestLink) {
+  const snapshot = link.snapshot!;
+  const conflicting = snapshot.mergeability === "conflicting" || link.watch?.conflicting === true;
+  if (conflicting)
+    return { tone: "alert", status: "Conflicts", glyph: PullRequestGlyph.conflicting } as const;
+  if (snapshot.checksState === "failing")
+    return { tone: "alert", status: "Checks failing" } as const;
+  if (snapshot.reviewDecision === "changes-requested")
+    return { tone: "alert", status: "Changes requested" } as const;
+  if (snapshot.isDraft) return { tone: "pending", status: "Draft" } as const;
+  if (snapshot.checksState === "pending")
+    return { tone: "pending", status: "Checks running" } as const;
+  if (snapshot.reviewDecision === "review-required")
+    return { tone: "pending", status: "Needs review" } as const;
+  if (snapshot.checksState === "passing" || snapshot.reviewDecision === "approved")
+    return { tone: "ready", status: "Ready to merge" } as const;
+  return { tone: "pending", status: "Open" } as const;
 }
 
 export function buildDenseWidgetData(input: {
@@ -110,6 +149,31 @@ export function buildDenseWidgetData(input: {
     )
     .map(row)
     .sort((a, b) => b.at - a.at);
+  // a pr linked from several threads shows once, from the thread that touched it last
+  const pullRequestsByKey = new Map<string, DenseWidgetPullRequest & { at: number }>();
+  for (const thread of [...threads].sort(
+    (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+  )) {
+    for (const link of visibleThreadPullRequests(thread.pullRequests ?? [])) {
+      if (link.snapshot?.state !== "open") continue;
+      const key = `${link.host}/${link.repository}#${link.number}`;
+      if (pullRequestsByKey.has(key)) continue;
+      pullRequestsByKey.set(key, {
+        key,
+        number: link.number,
+        title: link.snapshot.title,
+        repository: link.repository.split("/").pop() ?? link.repository,
+        url: input.threadUrl(thread),
+        glyph: PullRequestGlyph.pullRequest,
+        ...pullRequestStatus(link),
+        watched: link.watch !== undefined,
+        at: Date.parse(link.snapshot.updatedAt ?? link.linkedAt),
+      });
+    }
+  }
+  const pullRequests = [...pullRequestsByKey.values()]
+    .sort((a, b) => PULL_REQUEST_TONE_RANK[a.tone] - PULL_REQUEST_TONE_RANK[b.tone] || b.at - a.at)
+    .map(({ at: _at, ...pullRequest }) => pullRequest);
   const accounts = collectLimitAccounts(input.presentations);
   const quotas = collectLimitPools(accounts, 0)
     .filter((pool) => pool.driver === "codex" || pool.driver === "claudeAgent")
@@ -169,11 +233,12 @@ export function buildDenseWidgetData(input: {
       )
       .map((thread) => ({
         ...row(thread),
-        status: "Finished",
         at: Date.parse(thread.latestRun!.completedAt ?? thread.updatedAt),
       }))
       .sort((a, b) => b.at - a.at)
-      .slice(0, 3),
+      .slice(0, 6),
+    pullRequestCount: pullRequests.length,
+    pullRequests: pullRequests.slice(0, 4),
     quotas,
   };
 }
