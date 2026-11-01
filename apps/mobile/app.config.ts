@@ -36,10 +36,6 @@ const OCEAN_ASSETS = {
   appIcon: oceanIcon,
   iosIcon: fromRepoRoot("assets/fincke/ocean-ios-1024.png"),
   splashIcon: oceanIcon,
-  androidAdaptiveForeground: oceanIcon,
-  androidAdaptiveBackgroundColor: "#0f111a",
-  androidAdaptiveBackgroundImage: undefined,
-  androidSplashIcon: oceanIcon,
 } as const;
 
 const VARIANT_CONFIG = {
@@ -47,21 +43,18 @@ const VARIANT_CONFIG = {
     appName: "456code Dev",
     scheme: "t3code-dev",
     iosBundleIdentifier: "dev.fincke.456code.dev",
-    androidPackage: "dev.fincke.456code.dev",
     assets: OCEAN_ASSETS,
   },
   preview: {
     appName: "456code Preview",
     scheme: "t3code-preview",
     iosBundleIdentifier: "dev.fincke.456code.preview",
-    androidPackage: "dev.fincke.456code.preview",
     assets: OCEAN_ASSETS,
   },
   production: {
     appName: "456code",
     scheme: "t3code",
     iosBundleIdentifier: "dev.fincke.456code",
-    androidPackage: "dev.fincke.456code",
     assets: OCEAN_ASSETS,
   },
 } as const;
@@ -95,13 +88,11 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   {
     bundleIdentifier: `${iosBundleIdentifier}.widgets`,
     groupIdentifier: `group.${iosBundleIdentifier}`,
-    enableAndroid: true,
     widgets: [
       {
         name: "DenseWidget",
         displayName: "456code Dense",
         description: "Connected plan limits, pending decisions, and running agents.",
-        android: null,
         ios: {
           supportedFamilies: [
             "systemMedium",
@@ -151,15 +142,6 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
             "accessoryRectangular",
           ],
         },
-        android: {
-          minWidth: 250,
-          minHeight: 180,
-          targetCellWidth: 4,
-          targetCellHeight: 3,
-          resizeMode: "both",
-          // The embedded layout renders before first launch; publishing replaces it with stored props.
-          initialLayout: "./src/widgets/SubscriptionUsage.android.tsx",
-        },
       },
     ],
   },
@@ -181,20 +163,13 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
         supportsFileWithMaxCount: 8,
       },
     },
-    android: {
-      enabled: true,
-      singleShareMimeTypes: ["*/*"],
-      multipleShareMimeTypes: ["*/*"],
-    },
   },
 ];
-
-// Match iOS PostScript names on Android so RN and the native composer share fonts before runtime loading.
 
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "t3-code",
-  platforms: ["ios", "android"],
+  platforms: ["ios"],
   scheme: variant.scheme,
   version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.2.0",
   runtimeVersion: {
@@ -250,51 +225,16 @@ const config: ExpoConfig = {
         : {}),
     },
   },
-  android: {
-    icon: variant.assets.appIcon,
-    package: variant.androidPackage,
-    ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
-      ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
-      : {}),
-    adaptiveIcon: {
-      backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
-      ...(variant.assets.androidAdaptiveBackgroundImage
-        ? { backgroundImage: variant.assets.androidAdaptiveBackgroundImage }
-        : {}),
-      foregroundImage: variant.assets.androidAdaptiveForeground,
-    },
-    // JS back dispatch needs RN's Android 16 shim and withAndroidPredictiveBackCompat on Android 13-15.
-    predictiveBackGestureEnabled: true,
-    // expo-sensors declares this for its pedometer, which the app does not use.
-    blockedPermissions: ["android.permission.ACTIVITY_RECOGNITION"],
-  },
   web: {
     favicon: variant.assets.appIcon,
   },
   plugins: [
     "expo-asset",
-    "react-native-pdf-jsi",
     [
       "expo-font",
       {
         ios: {
           fonts: [dmSansFonts.regular, dmSansFonts.medium, dmSansFonts.bold],
-        },
-        android: {
-          fonts: [
-            {
-              fontFamily: "DMSans-Regular",
-              fontDefinitions: [{ path: dmSansFonts.regular, weight: 400 }],
-            },
-            {
-              fontFamily: "DMSans-Medium",
-              fontDefinitions: [{ path: dmSansFonts.medium, weight: 500 }],
-            },
-            {
-              fontFamily: "DMSans-Bold",
-              fontDefinitions: [{ path: dmSansFonts.bold, weight: 700 }],
-            },
-          ],
         },
       },
     ],
@@ -304,25 +244,11 @@ const config: ExpoConfig = {
       ? [sharingPlugin]
       : ["./plugins/withShareExtensionDisplayName.cjs", sharingPlugin]),
     "expo-web-browser",
-    [
-      "expo-quick-actions",
-      {
-        androidIcons: {
-          shortcut_icon: {
-            foregroundImage: variant.assets.androidAdaptiveForeground,
-            backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
-            ...(variant.assets.androidAdaptiveBackgroundImage
-              ? { backgroundImage: variant.assets.androidAdaptiveBackgroundImage }
-              : {}),
-          },
-        },
-      },
-    ],
+    "expo-quick-actions",
     [
       "expo-audio",
       {
         microphonePermission: "Allow 456code to use your microphone for voice input.",
-        recordAudioAndroid: false,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
       },
@@ -333,7 +259,6 @@ const config: ExpoConfig = {
         cameraPermission: "Allow 456code to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
-        recordAudioAndroid: false,
       },
     ],
     ["expo-image-picker", { photosPermission: false, microphonePermission: false }],
@@ -348,25 +273,11 @@ const config: ExpoConfig = {
           image: variant.assets.splashIcon,
           backgroundColor: "#0a0a0a",
         },
-        android: {
-          // Android 12+ masks the central two thirds of the 288dp canvas; adaptive layers avoid clipped corners.
-          image: variant.assets.androidSplashIcon,
-          imageWidth: 288,
-          dark: { image: variant.assets.androidSplashIcon },
-        },
       },
     ],
     [
       "expo-build-properties",
       {
-        android: {
-          minSdkVersion: 24,
-          // SDK 58 lacks Kotlin 2.3's runtime-inert annotation. R8 needs explicit InputMerger constructors for widgets.
-          extraProguardRules: [
-            "-dontwarn kotlin.MustUseReturnValues",
-            "-keep class * extends androidx.work.InputMerger { <init>(); }",
-          ].join("\n"),
-        },
         ios: {
           deploymentTarget: "18.0",
           // AppCheckCore 11.3+ includes Swift and needs module maps for these Objective-C dependencies.
@@ -388,13 +299,6 @@ const config: ExpoConfig = {
           widgetsPlugin,
         ]
       : []),
-    "./plugins/withAndroidNetworkSecurityConfig.cjs",
-    "./plugins/withAndroidGradleHeap.cjs",
-    "./plugins/withAndroidInputBackground.cjs",
-    "./plugins/withAndroidModernPopupMenu.cjs",
-    "./plugins/withAndroidModernAlertDialog.cjs",
-    "./plugins/withAndroidPredictiveBackCompat.cjs",
-    "./plugins/withAndroidTabletOrientation.cjs",
     ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {

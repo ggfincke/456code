@@ -26,8 +26,7 @@ it.each([
   ["development", "dev.fincke.456code.dev"],
   ["preview", "dev.fincke.456code.preview"],
   ["production", "dev.fincke.456code"],
-])("keeps the iOS and Android identifiers for APP_VARIANT=%j", async (value, identifier) => {
+])("keeps the iOS identifier for APP_VARIANT=%j", async (value, identifier) => {
   const config = await loadConfig(value);
   expect(config.ios?.bundleIdentifier).toBe(identifier);
-  expect(config.android?.package).toBe(identifier);
 });
