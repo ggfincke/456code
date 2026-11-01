@@ -38,8 +38,7 @@ const composer = (snapshot: Snapshot) =>
       (node) =>
         (node.kind === "text-field" || node.kind === "text-view" || node.editable === true) &&
         node.rect &&
-        node.rect.y < snapshot.viewport.height &&
-        node.bundleId !== "com.android.systemui",
+        node.rect.y < snapshot.viewport.height,
     )
     .toSorted((a, b) => b.rect!.y - a.rect!.y)[0];
 const threadRow = (snapshot: Snapshot) => findLabel(snapshot, THREAD_TITLE);

@@ -70,7 +70,7 @@ jobs:
         working-directory: apps/mobile
         run: |
           mkdir -p "$RUNNER_TEMP/fp/head" "$RUNNER_TEMP/fp/base"
-          for platform in ios android; do
+          for platform in ios; do
             npx expo-updates fingerprint:generate --platform "$platform" > "$RUNNER_TEMP/fp/head/$platform.json"
           done
 
@@ -85,7 +85,7 @@ jobs:
           # against head's installed packages.
           pnpm install --filter=@t3tools/mobile...
           cd apps/mobile
-          for platform in ios android; do
+          for platform in ios; do
             npx expo-updates fingerprint:generate --platform "$platform" > "$RUNNER_TEMP/fp/base/$platform.json"
           done
 
@@ -95,7 +95,7 @@ jobs:
           {
             echo "## Native fingerprint diff"
             echo
-            for platform in ios android; do
+            for platform in ios; do
               head_hash="$(jq -r .hash "$RUNNER_TEMP/fp/head/$platform.json")"
               base_hash="$(jq -r .hash "$RUNNER_TEMP/fp/base/$platform.json")"
               if [ "$head_hash" = "$base_hash" ]; then

@@ -1,11 +1,11 @@
 export interface Pose {
   readonly id: string;
-  readonly platform: "ios" | "android";
+  readonly platform: "ios";
   /** A model name from the pool's catalog (`GET /v1/catalog`). */
   readonly device: string;
   readonly form: "phone" | "tablet";
   readonly appearance: "light" | "dark";
-  /** Phones are portrait-locked; tablets and an unfolded Fold can start rotated. */
+  /** Phones are portrait-locked; tablets and an unfolded Duo can start rotated. */
   readonly landscape?: boolean;
   readonly fold?: "closed" | "open";
   readonly textSize?: "accessibility-large";
@@ -65,53 +65,5 @@ export const POSES: ReadonlyArray<Pose> = [
     appearance: "dark",
     landscape: true,
     textSize: "accessibility-large",
-  }),
-  pose({
-    id: "pixel-10-pro-large-text",
-    platform: "android",
-    device: "Pixel 10 Pro",
-    form: "phone",
-    appearance: "light",
-    textSize: "accessibility-large",
-  }),
-  pose({
-    id: "pixel-fold-folded-dark",
-    platform: "android",
-    device: "Pixel 10 Pro Fold",
-    form: "phone",
-    appearance: "dark",
-    fold: "closed",
-  }),
-  pose({
-    id: "pixel-fold-unfolded",
-    platform: "android",
-    device: "Pixel 10 Pro Fold",
-    form: "tablet",
-    appearance: "light",
-    fold: "open",
-  }),
-  pose({
-    id: "pixel-fold-unfolded-landscape",
-    platform: "android",
-    device: "Pixel 10 Pro Fold",
-    form: "tablet",
-    appearance: "dark",
-    fold: "open",
-    landscape: true,
-  }),
-  pose({
-    id: "pixel-tablet-portrait",
-    platform: "android",
-    device: "Pixel Tablet",
-    form: "tablet",
-    appearance: "dark",
-  }),
-  pose({
-    id: "pixel-tablet-landscape",
-    platform: "android",
-    device: "Pixel Tablet",
-    form: "tablet",
-    appearance: "light",
-    landscape: true,
   }),
 ];

@@ -3,7 +3,6 @@
 .eas/
 
 # Build outputs
-android/
 ios/
 dist/
 web-build/
