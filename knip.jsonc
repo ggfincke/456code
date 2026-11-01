@@ -10,7 +10,6 @@
     ".": {
       // Keep vendored reference repositories outside the root project.
       "project": ["*.{js,mjs,cjs,ts,mts,cts}"],
-      "entry": [".coderabbit.config.ts"],
     },
     "scripts": {
       // knip loads its preprocessor through a cli option; native checks, worktree setup, branding

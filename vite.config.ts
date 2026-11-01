@@ -152,8 +152,6 @@ export default defineConfig({
   fmt: {
     ignorePatterns: [
       ".repos/**",
-      // Macroscope requires one glob per line; Markdown formatting corrupts it.
-      ".macroscope/ignore.md",
       "dist",
       "dist-electron",
       "node_modules",
@@ -172,14 +170,6 @@ export default defineConfig({
       "*.icon/**",
     ],
     sortPackageJson: {},
-    overrides: [
-      {
-        files: [".devcontainer/devcontainer.json"],
-        options: {
-          trailingComma: "none",
-        },
-      },
-    ],
   },
   lint: {
     ignorePatterns: [

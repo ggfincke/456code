@@ -49,7 +49,6 @@
     "sync:repos": "node scripts/sync-reference-repos.ts"
   },
   "devDependencies": {
-    "@coderabbitai/config": "1.1.0",
     "@shadcn/lint": "0.1.5",
     "@types/node": "catalog:",
     "knip": "6.34.0",

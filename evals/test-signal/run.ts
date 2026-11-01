@@ -30,9 +30,8 @@ if (!values.out) throw new Error("Use --out <directory> [--model <id>] [--prompt
 const outDirectory = values.out;
 const models = values.model ?? ["gpt-6.1-terra", "gpt-6-luna"];
 const repo = NodePath.resolve(import.meta.dirname, "../..");
-const checkFile =
-  values.prompt ?? NodePath.join(repo, ".macroscope/check-run-agents/test-signal.md");
-// Macroscope gives the model the body; the front matter only configures the run.
+const checkFile = values.prompt ?? NodePath.join(import.meta.dirname, "check.md");
+// Macroscope gave the model the body; the front matter only configured the run.
 const instructions = NodeFS.readFileSync(checkFile, "utf8")
   .replace(/^---\n[\s\S]*?\n---\n/, "")
   .trim();

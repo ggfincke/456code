@@ -1,25 +1,3 @@
----
-title: Effect Service Conventions
-model: gpt-6-1-sol
-reasoning: low
-input: incremental
-tools:
-  - browse_code
-  - modify_pr
-include:
-  - "apps/**/*.ts"
-  - "packages/**/*.ts"
-  - "infra/**/*.ts"
-exclude:
-  - "**/*.test.ts"
-requires:
-  - Check
-maxBudgetPerRun: 5
-maxBudgetPerPR: 25
-conclusion: neutral
-showToolCalls: true
----
-
 # Effect service review
 
 Review changed TypeScript for the conventions below. They apply when a pull request creates, moves, refactors, or consumes an Effect service, or adds server behavior. Authors read the same rules in `docs/internals/effect-services.md`; keep the two in step. Review only the lines the PR changed; older code in the same file that predates these conventions is not a finding. Do not demand repository-wide cleanup.

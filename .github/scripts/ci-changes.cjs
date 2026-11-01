@@ -7,12 +7,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
 
-const INERT = [
-  /^docs\//,
-  /^\.(agents|cursor|vscode|devcontainer|macroscope|repos)\//,
-  /^[^/]+\.md$/,
-  /^LICENSE$/,
-];
+const INERT = [/^docs\//, /^\.(agents|vscode|repos)\//, /^[^/]+\.md$/, /^LICENSE$/];
 
 // Shared test setup and vendored mobile dependencies affect every package.
 const RUNS_EVERYTHING = [
