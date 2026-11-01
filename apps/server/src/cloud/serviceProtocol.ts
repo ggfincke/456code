@@ -171,28 +171,6 @@ export function parseServiceState(value: string): ServiceState | undefined {
   }
 }
 
-export function serviceStateHasPendingUpdate(value: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return isRecord(parsed) && isRecord(parsed.update) && parsed.update.status === "pending";
-  } catch {
-    return false;
-  }
-}
-
-export function serviceStateActiveVersion(value: string): string | undefined {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return isRecord(parsed) &&
-      typeof parsed.activeVersion === "string" &&
-      isExactServiceVersion(parsed.activeVersion)
-      ? parsed.activeVersion
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function decodeServiceLauncherContext(value: string): ServiceLauncherContext | undefined {
   let parsed: unknown;
   try {

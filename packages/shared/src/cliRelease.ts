@@ -10,8 +10,6 @@ import { compareSemverVersions } from "./semver.ts";
 
 const CLI_RELEASE_REPOSITORY = "pingdotgg/t3code";
 export const CLI_RELEASES_PAGE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
-export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
-export const CLI_RELEASE_BASE_URL_ENV = "T3CODE_RELEASE_BASE_URL";
 
 // keep local archives compatible with the upstream release assets consumed by installers
 // node single-executables do not support darwin-x64 and segfault at startup
@@ -24,6 +22,7 @@ const CLI_ARCHIVE_PLATFORM_KEYS = [
 ] as const;
 export type CliArchivePlatformKey = (typeof CLI_ARCHIVE_PLATFORM_KEYS)[number];
 
+/** @public */
 export function cliArchivePlatformKey(
   platform: NodeJS.Platform,
   arch: string,
@@ -42,17 +41,9 @@ export function cliArchiveTarCommand(
   return `${systemRoot}\\System32\\tar.exe`;
 }
 
+/** @public */
 export function cliArchiveFileName(version: string, platformKey: CliArchivePlatformKey): string {
   return `t3-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
-}
-
-const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`;
-
-export function cliReleaseDownloadBaseUrl(
-  version: string,
-  baseUrl: string | undefined = CLI_RELEASE_DEFAULT_BASE_URL,
-): string {
-  return `${(baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL).replace(/\/+$/, "")}/v${version}`;
 }
 
 export function parseChecksums(text: string): ReadonlyMap<string, string> {
@@ -67,11 +58,6 @@ export function parseChecksums(text: string): ReadonlyMap<string, string> {
 }
 
 export type CliReleaseChannel = "stable" | "nightly" | "preview";
-export const CLI_RELEASE_CHANNELS: ReadonlyArray<CliReleaseChannel> = [
-  "stable",
-  "nightly",
-  "preview",
-];
 
 export function cliReleaseChannelOf(version: string): CliReleaseChannel {
   const channel = /^[^-+]+-(nightly|preview)\.\d{8}\.\d+$/.exec(version)?.[1];

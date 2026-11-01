@@ -64,11 +64,6 @@ export const Arguments = Context.Reference<ReadonlyArray<string>>(
   },
 );
 
-/** Original shell command spelling; argv[0] and execPath instead identify the resolved binary. */
-export const InvokedAs = Context.Reference<string>("@t3tools/shared/HostProcess/InvokedAs", {
-  defaultValue: () => process.argv0,
-});
-
 export const IsExecutable = Context.Reference<boolean>("@t3tools/shared/HostProcess/IsExecutable", {
   defaultValue: () => NodeSea.isSea(),
 });
