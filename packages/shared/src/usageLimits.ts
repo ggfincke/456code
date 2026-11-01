@@ -1,3 +1,5 @@
+// packages/shared/src/usageLimits.ts
+// collects account limits & derives their shared client presentation
 import {
   type EnvironmentId,
   type ModelSelection,
@@ -251,6 +253,28 @@ export interface LimitAccount {
   readonly limits: ServerProviderUsageLimits;
 }
 
+function usageLimitPresentation(
+  driver: ServerProvider["driver"],
+  plan: string | undefined,
+  limits: ServerProviderUsageLimits,
+) {
+  const normalized = plan
+    ?.toLowerCase()
+    .replace(/[\s_-]+/g, "")
+    .replace(/^claude/, "")
+    .replace(/subscription$|plan$/, "");
+  // older clis and proxy sources still call ultra max 20x
+  const ultra =
+    driver === "claudeAgent" &&
+    (normalized === "ultra" || normalized === "max20" || normalized === "max20x");
+  return {
+    plan: ultra ? "Claude Ultra Subscription" : plan,
+    limits: ultra
+      ? { ...limits, windows: limits.windows.filter((window) => window.id !== "five_hour") }
+      : limits,
+  };
+}
+
 export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
   const creditSources = new Map<string, LimitAccount>();
@@ -332,12 +356,11 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         driver: provider.driver,
         displayName: provider.displayName?.trim() || null,
         email: provider.auth.email,
-        plan: provider.auth.label,
         accentColor: provider.accentColor,
         environments: [{ environmentId, label }],
         sourceLabel: null,
         redeem: { environmentId, input: { instanceId: provider.instanceId } },
-        limits: provider.usageLimits,
+        ...usageLimitPresentation(provider.driver, provider.auth.label, provider.usageLimits),
       });
     }
   }
@@ -355,7 +378,6 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
           driver: account.driver,
           displayName: account.email ? null : account.id.replace(/\.json$/i, ""),
           email: account.email,
-          plan: account.plan,
           accentColor: undefined,
           environments: [],
           sourceLabel,
@@ -369,7 +391,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
                 },
               }
             : null,
-          limits: account.usageLimits,
+          ...usageLimitPresentation(account.driver, account.plan, account.usageLimits),
         });
       }
     }
@@ -819,7 +841,6 @@ export function collectProviderUsageLimits(
       id: provider.instanceId,
       driver: provider.driver,
       label: `${provider.displayName?.trim() || String(provider.driver)} [${provider.instanceId}]`,
-      ...(provider.auth.label ? { plan: provider.auth.label } : {}),
       instanceId: provider.instanceId,
       resetCreditInput:
         hubCreditId && hubCredits
@@ -832,7 +853,11 @@ export function collectProviderUsageLimits(
       ...(provider.displayName ? { displayName: provider.displayName } : {}),
       ...(provider.accentColor ? { accentColor: provider.accentColor } : {}),
       ...(provider.auth.email ? { email: provider.auth.email } : {}),
-      limits: shownCredits ? { ...limits, resetCredits: shownCredits } : limits,
+      ...usageLimitPresentation(
+        provider.driver,
+        provider.auth.label,
+        shownCredits ? { ...limits, resetCredits: shownCredits } : limits,
+      ),
     });
   }
   for (const source of sources) {
@@ -854,9 +879,8 @@ export function collectProviderUsageLimits(
               },
             }
           : {}),
-        ...(account.plan ? { plan: account.plan } : {}),
         ...(account.email ? { email: account.email } : {}),
-        limits: account.usageLimits,
+        ...usageLimitPresentation(account.driver, account.plan, account.usageLimits),
       });
     }
     if (source.error && (matching.length > 0 || source.accounts.length === 0)) {
