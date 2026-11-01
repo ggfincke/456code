@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, expect, it } from "@effect/vitest";
+import { afterEach, assert, beforeEach, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -66,6 +66,15 @@ const setup = Effect.gen(function* () {
       { number: 2, headBranch: "feat/answer-doc", headSha: yield* head("feat/answer-doc") },
     ],
   };
+});
+
+// the cascade commits w/ the host's own identity, which CI runners don't configure
+beforeEach(() => {
+  vi.stubEnv("GIT_COMMITTER_NAME", "t");
+  vi.stubEnv("GIT_COMMITTER_EMAIL", "t@t");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 it.layer(layer)("cascadeRebaseStack", (it) => {
