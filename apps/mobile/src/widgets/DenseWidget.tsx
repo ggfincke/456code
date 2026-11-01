@@ -1,16 +1,19 @@
 // apps/mobile/src/widgets/DenseWidget.tsx
 // renders plan-aware limits and thread activity in native ios widgets
 
-import { HStack, Image, Link, ProgressView, Spacer, Text, VStack } from "@expo/ui/swift-ui";
+import { HStack, Image, Link, ProgressView, Spacer, Text, VStack, ZStack } from "@expo/ui/swift-ui";
 import {
   accessibilityElement,
   accessibilityLabel,
+  aspectRatio,
   background,
   containerBackground,
   environment,
+  fixedSize,
   font,
   foregroundStyle,
   frame,
+  kerning,
   layoutPriority,
   lineLimit,
   opacity,
@@ -18,12 +21,17 @@ import {
   progressViewStyle,
   resizable,
   shapes,
+  textCase,
   tint,
   widgetURL,
 } from "@expo/ui/swift-ui/modifiers";
 import { createWidget, type WidgetEnvironment } from "expo-widgets";
 
-import type { DenseWidgetRow, DenseWidgetSnapshot } from "./denseWidgetSnapshot";
+import type {
+  DenseWidgetPullRequest,
+  DenseWidgetRow,
+  DenseWidgetSnapshot,
+} from "./denseWidgetSnapshot";
 
 function DenseWidget(
   props: DenseWidgetSnapshot,
@@ -57,48 +65,55 @@ function DenseWidget(
   const amber = monochrome
     ? primary
     : (palette?.warning ?? (appearance === "light" ? "#885500" : "#ffcb6b"));
+  const red = monochrome ? primary : (palette?.danger ?? "#f07178");
+  const surface = palette?.surface ?? "clear";
+  const toneSurface = (color: string) =>
+    color === red
+      ? palette?.dangerSurface
+      : color === blue
+        ? palette?.infoSurface
+        : color === accent
+          ? palette?.accentSurface
+          : palette?.track;
   const attention = props.attention ?? [];
   const running = props.running ?? [];
   const finished = props.finished ?? [];
+  const pullRequests = props.pullRequests ?? [];
   const quotas = props.quotas ?? [];
   const attentionCount = props.attentionCount ?? 0;
   const runningCount = props.runningCount ?? 0;
-  const shownAttention = attention.slice(0, compact ? 1 : 2);
-  const runningLimit = portrait
-    ? 6
-    : extraLarge
-      ? 4
-      : compact
-        ? attentionCount > 0
-          ? 0
-          : 1
-        : attentionCount > 1
-          ? 2
-          : 3;
-  const shownRunning = running.slice(0, runningLimit);
-  // portrait is tall enough to backfill unused running slots with finished rows
-  const finishedLimit = portrait
-    ? 6 - shownRunning.length
-    : compact
-      ? runningCount === 0 && attentionCount === 0
-        ? 1
-        : 0
-      : runningCount === 0 && attentionCount === 0
-        ? extraLarge
-          ? 3
-          : 2
-        : attentionCount === 0 && runningCount < 3
-          ? 1
-          : 0;
-  const shownFinished = finished.slice(0, finishedLimit);
+  const pullRequestCount = props.pullRequestCount ?? 0;
+  // sections fill one shared row budget in priority order, so short lists leave room for the next
+  let budget = portrait ? 6.5 : extraLarge ? 5 : large ? 4 : 1.2;
+  const take = <T,>(rows: readonly T[], max: number, cost: number) => {
+    const count = Math.max(0, Math.min(rows.length, max, Math.floor((budget - 0.4) / cost)));
+    if (count > 0) budget -= 0.4 + count * cost;
+    return rows.slice(0, count);
+  };
+  const shownAttention = take(attention, compact ? 1 : 2, 1);
+  const shownRunning = take(running, portrait ? 5 : 4, 1);
+  const shownPullRequests = take(
+    compact ? pullRequests.filter((pullRequest) => pullRequest.tone === "alert") : pullRequests,
+    portrait ? 4 : 3,
+    1,
+  );
+  const shownFinished = take(finished, portrait ? 6 : 3, 0.5);
+  const timeLabel = (at: number) =>
+    new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  // finished rows keep a fixed timestamp; a relative age would go stale between timeline reloads
+  const finishedLabel = (at: number) =>
+    now - at < 86_400_000 && new Date(at).getDate() === new Date(now).getDate()
+      ? timeLabel(at)
+      : new Date(at).toLocaleDateString(undefined, { weekday: "short" });
   // weekly windows reset days out, so an absolute time reads better than a ticking timer
   const resetLabel = (resetsAt: number) => {
     const date = new Date(resetsAt);
-    const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
     return resetsAt - now < 86_400_000
-      ? time
+      ? timeLabel(resetsAt)
       : `${date.toLocaleDateString(undefined, { weekday: "short" })} ${date.toLocaleTimeString(undefined, { hour: "numeric" })}`;
   };
+  const titleSize = portrait ? 14 : 12;
+  const detailSize = portrait ? 12 : 11;
 
   const providerIcon = (provider: string, size = 18) => {
     const asset =
@@ -121,27 +136,80 @@ function DenseWidget(
       <Image systemName="terminal" size={size} modifiers={[foregroundStyle(secondary)]} />
     );
   };
-  const threadRow = (row: DenseWidgetRow, done = false) => (
-    <Link
-      key={row.key}
-      destination={row.url}
+  const sectionHeader = (label: string, count: number | null, color: string) => (
+    <HStack spacing={6}>
+      <Text
+        modifiers={[
+          font({ size: 10, weight: "bold" }),
+          textCase("uppercase"),
+          kerning(0.8),
+          foregroundStyle(secondary),
+          lineLimit(1),
+        ]}
+      >
+        {label}
+      </Text>
+      {count !== null ? (
+        <Text
+          modifiers={[
+            font({ size: 10, weight: "bold" }),
+            foregroundStyle(color),
+            padding({ horizontal: 6, vertical: 1 }),
+            background(toneSurface(color) ?? "clear", shapes.capsule()),
+            lineLimit(1),
+          ]}
+        >
+          {count}
+        </Text>
+      ) : null}
+    </HStack>
+  );
+  const pill = (label: string, color: string) => (
+    <Text
       modifiers={[
-        accessibilityElement("ignore"),
-        accessibilityLabel(
-          `${row.title}, ${row.project}, ${row.status}${stale ? ", at last update" : ""}`,
-        ),
+        font({ size: portrait ? 11 : 10, weight: "semibold" }),
+        foregroundStyle(color),
+        padding({ horizontal: 7, vertical: 2 }),
+        background(toneSurface(color) ?? "clear", shapes.capsule()),
+        lineLimit(1),
+        layoutPriority(1),
       ]}
     >
-      <HStack spacing={7}>
-        {done ? (
-          <Image
-            systemName="checkmark"
-            size={12}
-            modifiers={[foregroundStyle(accent), frame({ width: 18 })]}
-          />
-        ) : (
-          providerIcon(row.provider, portrait ? 20 : 18)
-        )}
+      {label}
+    </Text>
+  );
+  // grouped rows sit on one soft card, echoing the app's grouped list surfaces
+  const card = (children: ReturnType<typeof pill>[]) => (
+    <VStack
+      alignment="leading"
+      spacing={compact ? 4 : 8}
+      modifiers={[
+        frame({ maxWidth: Infinity, alignment: "leading" }),
+        padding({ all: compact ? 6 : 9 }),
+        background(surface, shapes.roundedRectangle({ cornerRadius: 14 })),
+      ]}
+    >
+      {children}
+    </VStack>
+  );
+  const twoLineRow = (input: {
+    key: string;
+    url: string;
+    label: string;
+    icon: ReturnType<typeof providerIcon>;
+    title: string;
+    detail: string;
+    status: string | null;
+    statusColor: string;
+    trailing?: ReturnType<typeof providerIcon>;
+  }) => (
+    <Link
+      key={input.key}
+      destination={input.url}
+      modifiers={[accessibilityElement("ignore"), accessibilityLabel(input.label)]}
+    >
+      <HStack spacing={8} modifiers={[opacity(stale ? 0.6 : 1)]}>
+        {input.icon}
         <VStack
           alignment="leading"
           spacing={1}
@@ -149,42 +217,104 @@ function DenseWidget(
         >
           <Text
             modifiers={[
-              font({ size: portrait ? 14 : 12, weight: "medium" }),
-              foregroundStyle(done ? secondary : primary),
+              font({ size: titleSize, weight: "medium" }),
+              foregroundStyle(primary),
               lineLimit(1),
             ]}
           >
-            {row.title}
+            {input.title}
           </Text>
-          <HStack spacing={0}>
+          <HStack spacing={6}>
             <Text
-              modifiers={[
-                font({ size: portrait ? 12 : 11 }),
-                foregroundStyle(secondary),
-                lineLimit(1),
-              ]}
+              modifiers={[font({ size: detailSize }), foregroundStyle(secondary), lineLimit(1)]}
             >
-              {row.project} ·{" "}
+              {input.detail}
             </Text>
-            <Text
-              modifiers={[
-                font({ size: portrait ? 12 : 11 }),
-                foregroundStyle(done ? secondary : blue),
-                lineLimit(1),
-                layoutPriority(1),
-              ]}
-            >
-              {row.status}
-            </Text>
+            {input.status ? pill(input.status, input.statusColor) : null}
           </HStack>
         </VStack>
+        {input.trailing ?? null}
+      </HStack>
+    </Link>
+  );
+  const runningRow = (row: DenseWidgetRow) =>
+    twoLineRow({
+      key: row.key,
+      url: row.url,
+      label: `${row.title}, ${row.project}, ${row.status}${stale ? ", at last update" : ""}`,
+      icon: providerIcon(row.provider, portrait ? 20 : 18),
+      title: row.title,
+      // "working" is implied by the section, so only unusual states take the status slot
+      detail:
+        row.status === "Working" ? `${row.project} · since ${timeLabel(row.at)}` : row.project,
+      status: row.status === "Working" ? null : row.status,
+      statusColor: blue,
+    });
+  const pullRequestRow = (pullRequest: DenseWidgetPullRequest) => {
+    const color =
+      pullRequest.tone === "alert" ? red : pullRequest.tone === "ready" ? accent : secondary;
+    return twoLineRow({
+      key: pullRequest.key,
+      url: pullRequest.url,
+      label: `Pull request ${pullRequest.number}, ${pullRequest.title}, ${pullRequest.status}${pullRequest.watched ? ", watched" : ""}${stale ? ", at last update" : ""}`,
+      icon: (
+        <Image
+          systemName={pullRequest.glyph}
+          size={portrait ? 15 : 13}
+          modifiers={[foregroundStyle(color), frame({ width: portrait ? 20 : 18 })]}
+        />
+      ),
+      title: `#${pullRequest.number} ${pullRequest.title}`,
+      detail: pullRequest.repository,
+      status: pullRequest.status,
+      statusColor: color,
+      trailing: pullRequest.watched ? (
+        <Image systemName="eye" size={10} modifiers={[foregroundStyle(secondary)]} />
+      ) : undefined,
+    });
+  };
+  const finishedRow = (row: DenseWidgetRow) => (
+    <Link
+      key={row.key}
+      destination={row.url}
+      modifiers={[
+        accessibilityElement("ignore"),
+        accessibilityLabel(`${row.title}, ${row.project}, finished ${finishedLabel(row.at)}`),
+      ]}
+    >
+      <HStack spacing={8}>
+        <Image
+          systemName="checkmark"
+          size={11}
+          modifiers={[foregroundStyle(accent), frame({ width: portrait ? 20 : 18 })]}
+        />
+        <Text
+          modifiers={[
+            font({ size: portrait ? 13 : 11 }),
+            foregroundStyle(secondary),
+            lineLimit(1),
+            frame({ maxWidth: Infinity, alignment: "leading" }),
+          ]}
+        >
+          {row.title}
+        </Text>
+        <Text
+          modifiers={[
+            font({ size: 10 }),
+            foregroundStyle(secondary),
+            lineLimit(1),
+            layoutPriority(1),
+          ]}
+        >
+          {finishedLabel(row.at)}
+        </Text>
       </HStack>
     </Link>
   );
   const freshness = !props.checkedAt
     ? "Open to sync"
     : stale
-      ? `Updated ${new Date(props.checkedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+      ? `Updated ${timeLabel(props.checkedAt)}`
       : "";
 
   if (accessory) {
@@ -205,47 +335,82 @@ function DenseWidget(
     );
   }
 
+  const hostLabel = (
+    <Text
+      modifiers={[
+        font({ size: 10, weight: "medium" }),
+        foregroundStyle(stale ? amber : secondary),
+        lineLimit(1),
+      ]}
+    >
+      {props.host ?? "Connect"}
+      {freshness ? ` · ${freshness}` : ""}
+    </Text>
+  );
+  const title = (
+    <Text
+      modifiers={[
+        font({ size: portrait ? 17 : compact ? 13 : 15, weight: "bold" }),
+        foregroundStyle(compact || monochrome ? accent : primary),
+        lineLimit(1),
+      ]}
+    >
+      456code
+    </Text>
+  );
+  const showWave = !compact && !monochrome;
+
   return (
     <VStack
       alignment="leading"
-      spacing={compact ? 4 : portrait ? 10 : 7}
+      spacing={compact ? 5 : portrait ? 10 : 9}
       modifiers={[
         ...(props.url ? [widgetURL(props.url)] : []),
         ...(palette
           ? [
               containerBackground(palette.background, "widget"),
+              // ios lays a sheen over the container background, so full color repaints it as
+              // content bled past the margins to land the exact theme color
+              ...(monochrome
+                ? []
+                : [padding({ all: 30 }), background(palette.background), padding({ all: -30 })]),
               environment("colorScheme", appearance),
             ]
           : []),
       ]}
     >
-      <HStack spacing={5}>
-        <Image assetName="T3Mark" modifiers={[resizable(), frame({ width: 16, height: 16 })]} />
-        <Text
+      {showWave ? (
+        // the whole ribbon field bled to the widget edges; the brand tucks under its high left
+        // end & the host sits above its low right end. fixed vertical size stops the vstack
+        // squeezing it below the height its full width needs
+        <ZStack
           modifiers={[
-            font({ size: 12, weight: "semibold" }),
-            foregroundStyle(accent),
-            lineLimit(1),
+            aspectRatio({ ratio: 470 / 163, contentMode: "fit" }),
+            padding({ top: -6, bottom: -6, horizontal: -18 }),
+            fixedSize({ vertical: true }),
           ]}
         >
-          456code
-        </Text>
-        <Spacer />
-        <Text
-          modifiers={[font({ size: 10 }), foregroundStyle(stale ? amber : secondary), lineLimit(1)]}
-        >
-          {props.host ?? "Connect"}
-          {freshness ? ` · ${freshness}` : ""}
-          {!stale && props.checkedAt ? " ·" : ""}
-        </Text>
-        {!stale && props.checkedAt ? (
-          <Text
-            date={new Date(props.checkedAt)}
-            dateStyle="relative"
-            modifiers={[font({ size: 10 }), foregroundStyle(secondary), lineLimit(1)]}
-          />
-        ) : null}
-      </HStack>
+          <Image assetName="WidgetWave" modifiers={[resizable()]} />
+          <VStack
+            alignment="leading"
+            modifiers={[padding({ top: 16, leading: 18, bottom: 2, trailing: 18 })]}
+          >
+            <HStack>
+              <Spacer />
+              {hostLabel}
+            </HStack>
+            <Spacer />
+            {title}
+          </VStack>
+        </ZStack>
+      ) : (
+        <HStack spacing={5}>
+          <Image assetName="T3Mark" modifiers={[resizable(), frame({ width: 16, height: 16 })]} />
+          {title}
+          <Spacer />
+          {hostLabel}
+        </HStack>
+      )}
 
       {quotas.length === 0 ? (
         <Link destination={props.usageUrl ?? props.url}>
@@ -254,117 +419,92 @@ function DenseWidget(
           </Text>
         </Link>
       ) : (
-        quotas.map((quota) => {
-          const quotaColor = quota.provider === "claudeAgent" ? blue : accent;
-          const quotaStale = stale || !quota.expiresAt || now >= quota.expiresAt;
-          const shownWindows = quota.windows.slice(0, extraLarge ? 2 : 1);
-          return (
-            <Link
-              key={quota.provider}
-              destination={props.usageUrl ?? props.url}
-              modifiers={[
-                accessibilityElement("ignore"),
-                accessibilityLabel(
-                  `${quota.name}. ${shownWindows.map((window) => `${window.label}, ${window.remaining} percent remaining`).join(". ")}${quotaStale ? ". Last known quota; open to refresh." : ""}`,
-                ),
-              ]}
-            >
-              <HStack spacing={7}>
-                {providerIcon(quota.provider, 13)}
-                <Text
+        <HStack spacing={8}>
+          {quotas.map((quota) => {
+            const quotaColor = quota.provider === "claudeAgent" ? blue : accent;
+            const quotaStale = stale || !quota.expiresAt || now >= quota.expiresAt;
+            // windows arrive tightest first, so the tile always shows what runs out soonest
+            const window = quota.windows[0];
+            const expired = !!window && window.resetsAt !== null && now >= window.resetsAt;
+            const dim = quotaStale || expired;
+            return (
+              <Link
+                key={quota.provider}
+                destination={props.usageUrl ?? props.url}
+                modifiers={[
+                  accessibilityElement("ignore"),
+                  accessibilityLabel(
+                    `${quota.name}. ${window ? `${window.label}, ${window.remaining} percent left` : "No limits reported"}${quotaStale ? ". Last known quota; open to refresh." : ""}`,
+                  ),
+                  frame({ maxWidth: Infinity }),
+                ]}
+              >
+                <VStack
+                  alignment="leading"
+                  spacing={compact ? 3 : 5}
                   modifiers={[
-                    font({ size: 11, weight: "medium" }),
-                    foregroundStyle(quotaColor),
-                    frame({ width: 38, alignment: "leading" }),
-                    lineLimit(1),
+                    frame({ maxWidth: Infinity, alignment: "leading" }),
+                    padding({ all: compact ? 6 : 10 }),
+                    background(surface, shapes.roundedRectangle({ cornerRadius: 14 })),
                   ]}
                 >
-                  {quota.name}
-                </Text>
-                {shownWindows.map((window) => {
-                  const expired = window.resetsAt !== null && now >= window.resetsAt;
-                  return (
-                    <VStack
-                      key={window.label}
-                      alignment="leading"
-                      spacing={2}
-                      modifiers={[frame({ maxWidth: Infinity, alignment: "leading" })]}
+                  <HStack spacing={5}>
+                    {providerIcon(quota.provider, 13)}
+                    <Text
+                      modifiers={[
+                        font({ size: 11, weight: "semibold" }),
+                        foregroundStyle(secondary),
+                        lineLimit(1),
+                      ]}
                     >
-                      <HStack spacing={4}>
-                        <Text
-                          modifiers={[font({ size: 11 }), foregroundStyle(secondary), lineLimit(1)]}
-                        >
-                          {window.label}
-                          {quota.totalWindows > shownWindows.length
-                            ? ` +${quota.totalWindows - shownWindows.length}`
-                            : ""}
-                        </Text>
-                        <Spacer />
-                        <Text
-                          modifiers={[
-                            font({ size: 12, weight: "semibold" }),
-                            foregroundStyle(quotaColor),
-                            opacity(quotaStale || expired ? 0.5 : 1),
-                            lineLimit(1),
-                            layoutPriority(1),
-                          ]}
-                        >
-                          {window.remaining}%
-                        </Text>
-                        {!compact && window.resetsAt !== null ? (
-                          expired ? (
-                            <Text modifiers={[font({ size: 10 }), foregroundStyle(secondary)]}>
-                              Refresh
-                            </Text>
-                          ) : (
-                            <Text
-                              modifiers={[
-                                font({ size: 10 }),
-                                foregroundStyle(secondary),
-                                lineLimit(1),
-                              ]}
-                            >
-                              {resetLabel(window.resetsAt)}
-                            </Text>
-                          )
-                        ) : null}
-                      </HStack>
-                      {!compact ? (
-                        <ProgressView
-                          value={window.remaining / 100}
-                          modifiers={[
-                            progressViewStyle("linear"),
-                            frame({ height: 3 }),
-                            opacity(quotaStale || expired ? 0.4 : 1),
-                            ...(monochrome ? [] : [tint(quotaColor)]),
-                          ]}
-                        />
-                      ) : null}
-                    </VStack>
-                  );
-                })}
-                {shownWindows.length === 0 ? (
-                  <Text modifiers={[font({ size: 11 }), foregroundStyle(secondary), lineLimit(1)]}>
-                    No limits reported
-                  </Text>
-                ) : null}
-              </HStack>
-            </Link>
-          );
-        })
+                      {quota.name}
+                    </Text>
+                    <Spacer minLength={4} />
+                    {!compact && window && window.resetsAt !== null ? (
+                      <Text
+                        modifiers={[font({ size: 10 }), foregroundStyle(secondary), lineLimit(1)]}
+                      >
+                        {expired ? "Refresh" : resetLabel(window.resetsAt)}
+                      </Text>
+                    ) : null}
+                  </HStack>
+                  <HStack spacing={3}>
+                    <Text
+                      modifiers={[
+                        font({ size: compact ? 14 : portrait ? 20 : 18, weight: "bold" }),
+                        foregroundStyle(quotaColor),
+                        opacity(dim ? 0.5 : 1),
+                        lineLimit(1),
+                      ]}
+                    >
+                      {window ? `${window.remaining}%` : "–"}
+                    </Text>
+                    <Text
+                      modifiers={[font({ size: 10 }), foregroundStyle(secondary), lineLimit(1)]}
+                    >
+                      {window ? "left" : "No limits"}
+                    </Text>
+                  </HStack>
+                  {window ? (
+                    <ProgressView
+                      value={window.remaining / 100}
+                      modifiers={[
+                        progressViewStyle("linear"),
+                        opacity(dim ? 0.4 : 1),
+                        ...(monochrome ? [] : [tint(quotaColor)]),
+                      ]}
+                    />
+                  ) : null}
+                </VStack>
+              </Link>
+            );
+          })}
+        </HStack>
       )}
 
-      {attentionCount > 0 ? (
+      {shownAttention.length > 0 ? (
         <VStack alignment="leading" spacing={4}>
-          <Text
-            modifiers={[
-              font({ size: 11, weight: "semibold" }),
-              foregroundStyle(amber),
-              lineLimit(1),
-            ]}
-          >
-            {stale ? "Pending at last update" : "Needs you"} · {attentionCount}
-          </Text>
+          {sectionHeader(stale ? "Pending at last update" : "Needs you", attentionCount, amber)}
           {shownAttention.map((row) => (
             <Link
               key={row.key}
@@ -377,7 +517,7 @@ function DenseWidget(
               ]}
             >
               <HStack
-                spacing={7}
+                spacing={8}
                 modifiers={[
                   padding({ all: compact ? 5 : 6 }),
                   background(
@@ -433,31 +573,25 @@ function DenseWidget(
       ) : null}
 
       {shownRunning.length > 0 ? (
-        <VStack alignment="leading" spacing={compact ? 3 : 5}>
-          <Text
-            modifiers={[
-              font({ size: 11, weight: "semibold" }),
-              foregroundStyle(accent),
-              lineLimit(1),
-            ]}
-          >
-            {stale ? "Last active" : "Running"} · {runningCount}
-          </Text>
-          {shownRunning.map((row) => threadRow(row))}
+        <VStack alignment="leading" spacing={compact ? 3 : 6}>
+          {sectionHeader(stale ? "Last active" : "Running", runningCount, accent)}
+          {card(shownRunning.map(runningRow))}
+          {runningCount > shownRunning.length ? (
+            <Link
+              destination={props.url}
+              label={`+${runningCount - shownRunning.length} more running`}
+              modifiers={[font({ size: 10 }), foregroundStyle(secondary)]}
+            />
+          ) : null}
         </VStack>
       ) : null}
-      {runningCount > shownRunning.length ? (
-        <Link
-          destination={props.url}
-          label={`+${runningCount - shownRunning.length} running${stale ? " at last update" : ""}`}
-          modifiers={[font({ size: 10 }), foregroundStyle(secondary)]}
-        />
-      ) : null}
 
-      {runningCount === 0 && attentionCount === 0 ? (
-        <Text
-          modifiers={[font({ size: 12, weight: "medium" }), foregroundStyle(primary), lineLimit(1)]}
-        >
+      {shownAttention.length +
+        shownRunning.length +
+        shownPullRequests.length +
+        shownFinished.length ===
+      0 ? (
+        <Text modifiers={[font({ size: 11 }), foregroundStyle(secondary), lineLimit(1)]}>
           {!props.checkedAt
             ? "Open 456code to sync"
             : stale
@@ -465,15 +599,21 @@ function DenseWidget(
               : "Nothing running or waiting"}
         </Text>
       ) : null}
+
       {shownFinished.length > 0 ? (
-        <VStack alignment="leading" spacing={4}>
-          <Text modifiers={[font({ size: 11 }), foregroundStyle(secondary), lineLimit(1)]}>
-            Recently finished
-          </Text>
-          {shownFinished.map((row) => threadRow(row, true))}
+        <VStack alignment="leading" spacing={5}>
+          {sectionHeader("Finished", null, accent)}
+          {card(shownFinished.map(finishedRow))}
         </VStack>
       ) : null}
+      {/* prs anchor to the bottom edge as a footer; spare height collects above them */}
       <Spacer minLength={0} />
+      {shownPullRequests.length > 0 ? (
+        <VStack alignment="leading" spacing={compact ? 3 : 6}>
+          {sectionHeader("Pull requests", pullRequestCount, accent)}
+          {card(shownPullRequests.map(pullRequestRow))}
+        </VStack>
+      ) : null}
     </VStack>
   );
 }

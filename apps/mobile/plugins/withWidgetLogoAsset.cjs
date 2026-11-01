@@ -1,5 +1,5 @@
 // apps/mobile/plugins/withWidgetLogoAsset.cjs
-// installs ocean artwork and provider marks in the ios widget asset catalog
+// installs ocean artwork, the wave ribbon & provider marks in the ios widget asset catalog
 
 "use strict";
 
@@ -44,11 +44,13 @@ function withAssetFiles(config) {
       fs.writeFileSync(path.join(catalogDir, "Contents.json"), CATALOG_CONTENTS);
       fs.writeFileSync(path.join(imageSetDir, "Contents.json"), IMAGE_SET_CONTENTS);
       fs.copyFileSync(source, path.join(imageSetDir, IMAGE_NAME));
-      const providerAssets = path.join(cfg.modRequest.projectRoot, "assets", "widget-providers");
-      for (const [name, files] of [
-        ["WidgetCodex", ["codex-light.png", "codex-dark.png"]],
-        ["WidgetClaude", ["claude.png"]],
-        ["WidgetCoral", ["coral.png"]],
+      const assets = path.join(cfg.modRequest.projectRoot, "assets");
+      // wave.png is the app header ribbon (`@t3tools/shared/fincke-wave`) on a transparent field
+      for (const [name, folder, files] of [
+        ["WidgetCodex", "widget-providers", ["codex-light.png", "codex-dark.png"]],
+        ["WidgetClaude", "widget-providers", ["claude.png"]],
+        ["WidgetCoral", "widget-providers", ["coral.png"]],
+        ["WidgetWave", "widget", ["wave.png"]],
       ]) {
         const directory = path.join(catalogDir, `${name}.imageset`);
         fs.mkdirSync(directory, { recursive: true });
@@ -62,7 +64,7 @@ function withAssetFiles(config) {
           JSON.stringify({ images, info: { author: "expo", version: 1 } }, null, 2) + "\n",
         );
         for (const filename of files)
-          fs.copyFileSync(path.join(providerAssets, filename), path.join(directory, filename));
+          fs.copyFileSync(path.join(assets, folder, filename), path.join(directory, filename));
       }
       return cfg;
     },
