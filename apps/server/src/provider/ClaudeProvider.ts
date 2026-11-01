@@ -1,3 +1,5 @@
+// apps/server/src/provider/ClaudeProvider.ts
+// probes claude capabilities & account metadata
 import {
   type ClaudeSettings,
   type ModelCapabilities,
@@ -13,6 +15,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -36,7 +39,11 @@ import {
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import { resolveClaudeSdkExecutablePath } from "./Drivers/ClaudeExecutable.ts";
-import { hasClaudeManagedMcpConfig, makeClaudeEnvironment } from "./Drivers/ClaudeHome.ts";
+import {
+  hasClaudeManagedMcpConfig,
+  makeClaudeEnvironment,
+  resolveClaudeHomePath,
+} from "./Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills, readClaudeSettingsBaseUrl } from "./Drivers/ClaudeSkills.ts";
 import type { ProviderWorkspaceSnapshot } from "@t3tools/provider-core/server/driver";
 import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
@@ -62,6 +69,12 @@ const CLAUDE_PRESENTATION = {
   showInteractionModeToggle: true,
   reportsContextWindow: true,
 } as const;
+const decodeClaudeOauthTier = Schema.decodeOption(
+  Schema.fromJsonString(
+    Schema.Struct({ claudeAiOauth: Schema.Struct({ rateLimitTier: Schema.String }) }),
+  ),
+);
+
 function toTitleCaseWords(value: string): string {
   const parts: Array<string> = [];
   for (const part of value.split(/[\s_-]+/g)) {
@@ -81,6 +94,9 @@ function claudeSubscriptionLabel(subscriptionType: string | undefined): string |
     case "claudemax5xsubscription":
       return "Max";
     case "claudemax20xsubscription":
+    case "claudeultrasubscription":
+    case "ultra":
+    case "ultraplan":
       return "Ultra";
     case "claudeenterprisesubscription":
       return "Enterprise";
@@ -95,6 +111,7 @@ function claudeSubscriptionLabel(subscriptionType: string | undefined): string |
     case "max5":
       return "Max";
     case "max20":
+    case "max20x":
       return "Ultra";
     case "enterprise":
       return "Enterprise";
@@ -628,12 +645,29 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  let subscriptionType = capabilities.subscriptionType;
+  // the sdk reports both max tiers as max; furnace's oauth metadata retains the tier
+  if (claudeSubscriptionLabel(subscriptionType) === "Max") {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* resolveClaudeHomePath(claudeSettings, resolvedEnvironment);
+    const credentials = yield* fileSystem
+      .readFileString(path.join(home, ".credentials.json"))
+      .pipe(Effect.orElseSucceed(() => ""));
+    const tier = decodeClaudeOauthTier(credentials);
+    if (
+      Option.isSome(tier) &&
+      tier.value.claudeAiOauth.rateLimitTier === "default_claude_max_20x"
+    ) {
+      subscriptionType = "ultra";
+    }
+  }
   // A proxy's ANTHROPIC_AUTH_TOKEN reads as an API key; the endpoint is what the token is for.
   const authMetadata =
     apiProviderAuthMetadata(capabilities.apiProvider) ??
     (customApiEndpoint ? { type: "customEndpoint", label: "Custom API endpoint" } : undefined) ??
     claudeAuthMetadata({
-      subscriptionType: capabilities.subscriptionType,
+      subscriptionType,
       authMethod: capabilities.tokenSource,
     });
   const usageCheckedAt = capabilities.usageCheckedAt ?? checkedAt;
