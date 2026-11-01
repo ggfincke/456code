@@ -29,6 +29,15 @@ const fixture = Effect.fn("coral.probe.fixture")(function* (mode = "ready") {
 const fs = require('node:fs');
 fs.writeFileSync(${encodeLiteral(pid)}, String(process.pid));
 const mode = ${encodeLiteral(mode)};
+if (process.argv[2] === 'models') {
+  if (mode !== 'hosted') process.exit(1);
+  console.log(JSON.stringify({models: [
+    {name: 'local:model'},
+    {name: 'anthropic/claude-opus-5-5'},
+    {name: 'openai/gpt-6.1-sol'}
+  ]}));
+  process.exit(0);
+}
 if (mode === 'old') { console.log('Usage: coral [options]'); process.exit(0); }
 require('node:readline').createInterface({input: process.stdin}).on('line', line => {
   const request = JSON.parse(line);
@@ -111,6 +120,21 @@ it.effect(
         expect(f.requests).toEqual([]);
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+);
+
+it.effect("discovers configured hosted models before creating a Coral session", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture("hosted");
+    const ready = yield* f.check();
+    expect(ready.status).toBe("ready");
+    expect(ready.models.map((model) => model.slug)).toEqual([
+      "local:model",
+      "anthropic/claude-opus-5-5",
+      "openai/gpt-6.1-sol",
+    ]);
+    expect(f.requests).toEqual([]);
+    expect(yield* f.log).toBe("initialize\n");
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
 );
 
 it.effect("times out an unresponsive probe and releases its process", () =>

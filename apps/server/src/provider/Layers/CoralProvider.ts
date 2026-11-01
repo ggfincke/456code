@@ -10,6 +10,8 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
 import * as Schema from "effect/Schema";
 import * as ByteSize from "effect/ByteSize";
 import * as Crypto from "effect/Crypto";
@@ -17,7 +19,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import { ChildProcessSpawner } from "effect/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   buildCoralAcpEnvironment,
@@ -116,6 +118,7 @@ const OllamaModels = Schema.Struct({
     Schema.Struct({ name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)) }),
   ).check(Schema.isMaxLength(512)),
 });
+const decodeCoralModelInventory = Schema.decodeEffect(Schema.fromJsonString(OllamaModels));
 
 export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(function* (
   coralSettings: CoralSettings,
@@ -190,30 +193,60 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
       message:
         "This Coral agent requires authentication, which the Coral integration does not support.",
     });
-  const inventory = yield* Effect.gen(function* () {
-    const host = yield* Effect.try(() => normalizeCoralOllamaHost(coralSettings.ollamaHost));
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* client
-      .get(`${host}/api/tags`)
-      .pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
-    return yield* HttpClientResponse.schemaBodyJson(OllamaModels)(response);
+  const configuredInventory = yield* Effect.gen(function* () {
+    const command = yield* resolveSpawnCommand(
+      coralSettings.binaryPath || "coral",
+      ["models", "--json", "--host", normalizeCoralOllamaHost(coralSettings.ollamaHost)],
+      { env: runtimeEnvironment, extendEnv: false },
+    );
+    const child = yield* childProcessSpawner.spawn(
+      ChildProcess.make(command.command, command.args, {
+        env: runtimeEnvironment,
+        extendEnv: false,
+        shell: command.shell,
+        stdin: "ignore",
+        stderr: "ignore",
+      }),
+    );
+    const [output, exitCode] = yield* Effect.all(
+      [collectUint8StreamText({ stream: child.stdout, maxBytes: 1_048_576 }), child.exitCode],
+      { concurrency: "unbounded" },
+    );
+    if (exitCode !== 0 || output.truncated || output.invalidUtf8)
+      return yield* Effect.fail({ _tag: "CoralModelInventoryUnavailable" as const });
+    return yield* decodeCoralModelInventory(output.text);
   }).pipe(
-    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(1_048_576)),
-    Effect.timeoutOption(CORAL_PROBE_TIMEOUT_MS),
-    Effect.result,
+    Effect.scoped,
+    Effect.timeoutOption(10_000),
+    Effect.orElseSucceed(() => Option.none()),
   );
-  if (Result.isFailure(inventory) || Option.isNone(inventory.success))
+  // Older Coral binaries have no inventory command; retain their Ollama discovery.
+  const inventory = Option.isSome(configuredInventory)
+    ? configuredInventory
+    : yield* Effect.gen(function* () {
+        const host = yield* Effect.try(() => normalizeCoralOllamaHost(coralSettings.ollamaHost));
+        const client = yield* HttpClient.HttpClient;
+        const response = yield* client
+          .get(`${host}/api/tags`)
+          .pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
+        return yield* HttpClientResponse.schemaBodyJson(OllamaModels)(response);
+      }).pipe(
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(1_048_576)),
+        Effect.timeoutOption(CORAL_PROBE_TIMEOUT_MS),
+        Effect.orElseSucceed(() => Option.none()),
+      );
+  if (Option.isNone(inventory))
     return snapshot({
       version,
       message:
-        "Cannot read models from the configured Ollama endpoint. Check Ollama and refresh; the last known model list is retained.",
+        "Cannot read Coral's local or configured hosted models. Check provider credentials or Ollama and refresh; the last known model list is retained.",
     });
-  const names = [...new Set(inventory.success.value.models.map((model) => model.name))];
+  const names = [...new Set(inventory.value.models.map((model) => model.name))];
   if (names.length === 0)
     return snapshot({
       version,
       models: [],
-      message: "No models are installed on the configured Ollama server.",
+      message: "No local or configured hosted models are available through Coral.",
     });
   return snapshot({
     version,
