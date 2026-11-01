@@ -14,8 +14,8 @@ import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 
 export const WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 
-const json = (status: number, body: Record<string, string>) =>
-  HttpServerResponse.jsonUnsafe(body, { status });
+const json = (status: number, body: Record<string, string>, headers?: Record<string, string>) =>
+  HttpServerResponse.jsonUnsafe(body, headers === undefined ? { status } : { status, headers });
 
 export const layer = HttpApiBuilder.group(
   EnvironmentHttpApi,
@@ -33,6 +33,16 @@ export const layer = HttpApiBuilder.group(
       readonly params: { readonly hookId: string; readonly token: string };
       readonly request: HttpServerRequest.HttpServerRequest;
     }) {
+      // The router answers HEAD with the GET route; link checkers probe with HEAD.
+      if (request.method === "HEAD") {
+        return json(
+          405,
+          { error: "method_not_allowed" },
+          {
+            allow: "GET, POST, PUT, PATCH",
+          },
+        );
+      }
       const contentLength = Number(request.headers["content-length"] ?? "0");
       if (!Number.isFinite(contentLength) || contentLength > WEBHOOK_MAX_BODY_BYTES) {
         return json(413, { error: "body_too_large" });

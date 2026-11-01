@@ -69,11 +69,13 @@ export const runDefaultServerCommand = Effect.fn("server.runDefaultServerCommand
 });
 
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the 456code server."),
+  Command.withDescription("Same as `t3`."),
+  Command.unlisted,
   Command.withHandler((flags) => runServerCommand(flags, { rejectRunningServer: true })),
 );
 
 export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
+  Command.withShortDescription("Run 456code in this terminal, with no browser."),
   Command.withDescription(
     "Run the 456code server without opening a browser and print headless pairing details.",
   ),

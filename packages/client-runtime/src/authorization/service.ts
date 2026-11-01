@@ -83,6 +83,14 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
       readonly expectedEnvironmentId: EnvironmentId;
       readonly rejectedAccessToken?: string;
     }) => Effect.Effect<AuthorizedRemoteHttpEnvironment, ConnectionAttemptError>;
+    /**
+     * Renews a live socket's token before it expires, so the server moves the
+     * socket to the new session instead of closing it. Runs until interrupted.
+     */
+    readonly renewDpopBeforeExpiry: (input: {
+      readonly expectedEnvironmentId: EnvironmentId;
+      readonly expiresAtEpochMs: number;
+    }) => Effect.Effect<void, ConnectionBlockedError>;
   }
 >()("@t3tools/client-runtime/authorization/service/RemoteEnvironmentAuthorization") {}
 
@@ -523,6 +531,29 @@ export const make = Effect.gen(function* () {
     }),
     authorizeDpopHttp: Effect.fn("environment.authorization.http")(function (input) {
       return getDpopToken(input).pipe(Effect.map(({ token }) => httpAuthorization(token)));
+    }),
+    // Untraced: a span here would stay open for the socket's lifetime. Each renewal has its own.
+    renewDpopBeforeExpiry: Effect.fnUntraced(function* (input) {
+      let expiresAtEpochMs = input.expiresAtEpochMs;
+      let now = yield* Clock.currentTimeMillis;
+      // Past expiry the server has closed the socket.
+      while (now < expiresAtEpochMs) {
+        // getDpopToken reuses a cached token until it is within the skew of expiry.
+        // The floor spaces out retries and keeps a wall-clock jump from spinning.
+        yield* Effect.sleep(
+          Math.max(5_000, expiresAtEpochMs - DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS - now),
+        );
+        const renewed = yield* getDpopToken({
+          expectedEnvironmentId: input.expectedEnvironmentId,
+        }).pipe(
+          Effect.map(({ token }) => token.expiresAtEpochMs),
+          Effect.withSpan("environment.authorization.renewSocket"),
+          // A transient failure retries until expiry; a blocked credential ends the loop.
+          Effect.catchTags({ ConnectionTransientError: () => Effect.succeed(expiresAtEpochMs) }),
+        );
+        expiresAtEpochMs = Math.max(expiresAtEpochMs, renewed);
+        now = yield* Clock.currentTimeMillis;
+      }
     }),
   });
 });

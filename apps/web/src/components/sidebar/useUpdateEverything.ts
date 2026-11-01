@@ -74,7 +74,6 @@ export function useUpdateEverything(
   const { targets: skewedServers, skipped: unreachable } = collectServerUpdateTargets(
     machines,
     targetVersion,
-    localUpdateVersion !== null,
   );
   const behindServers = withoutUnstagedDesktopTargets(skewedServers, machines);
   const servers = withHostAppUpdateTargets(

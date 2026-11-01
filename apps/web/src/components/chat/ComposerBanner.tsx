@@ -33,32 +33,39 @@ const variantColors: Record<ComposerBannerVariant, string> = {
     "[--chat-composer-attached-outline:color-mix(in_srgb,var(--warning)_28%,transparent)] [--chat-composer-attached-tint:color-mix(in_srgb,var(--warning)_8%,transparent)]",
 };
 
+/**
+ * An attached surface tucks its bottom under the card below it. A detached one is a whole card
+ * of its own, for a notice that sits apart from the composer.
+ */
 function Surface({
   placement = "attached",
   variant = "default",
+  detached = false,
   className,
   ...props
 }: ComponentProps<"div"> & {
   // fork: the grouped slash menu floats as its own card instead of meeting the composer
   placement?: "attached" | "floating";
   variant?: ComposerBannerVariant;
+  detached?: boolean;
 }) {
+  const attached = placement === "attached" && !detached;
   return (
     <div
-      data-composer-banner-surface={placement}
+      data-composer-banner-surface={detached ? "detached" : placement}
       data-variant={variant}
       className={cn(
         surfaceColors,
         "relative isolate border-0 bg-transparent shadow-none [--chat-composer-attached-tint:transparent]",
         variantColors[variant],
         // Bleed the mask 1px past the seam to cover Chromium's fractional-pixel backdrop loss.
-        placement === "attached"
+        attached
           ? "[--chat-composer-attachment-overlap:calc(1rem+1px)] before:rounded-t-2xl before:mask-t-from-transparent before:mask-t-from-4 before:mask-t-to-black before:mask-t-to-4"
           : "[--chat-composer-attachment-overlap:0px] before:rounded-2xl",
         "before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:border before:border-(--chat-composer-attached-outline)",
         "before:bg-(--chat-composer-attached-surface)/(--glass-opacity) before:bg-linear-to-b before:from-(--chat-composer-attached-tint) before:to-(--chat-composer-attached-tint) before:backdrop-blur-(--glass-blur) before:backdrop-saturate-(--glass-saturation)",
         "before:shadow-composer dark:before:shadow-composer-dark",
-        placement === "attached" &&
+        attached &&
           "dark:supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:before:bg-composer-seam-above",
         "not-supports-[((backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px)))]:before:bg-(--chat-composer-attached-surface)",
         className,
@@ -114,9 +121,8 @@ function Root({
   variant = "default",
   width = "fill",
   ...props
-}: ComponentProps<"div"> & {
+}: ComponentProps<typeof Surface> & {
   density?: "default" | "comfortable" | "spacious";
-  variant?: ComposerBannerVariant;
   width?: "fill" | "content";
 }) {
   return (

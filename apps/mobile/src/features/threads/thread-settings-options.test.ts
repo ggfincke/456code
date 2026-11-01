@@ -27,12 +27,11 @@ const effortDescriptor: Extract<ProviderOptionDescriptor, { type: "select" }> = 
 
 describe("selectableChoices", () => {
   // regression: #21406 bring model controls in line with web
-  it("includes prompt-injected and workflow choices in declared order", () => {
+  it("leaves out prompt-injected choices and keeps workflow choices in declared order", () => {
     expect(selectableChoices(effortDescriptor).map((choice) => choice.id)).toEqual([
       "low",
       "medium",
       "high",
-      "ultrathink",
       "ultracode",
     ]);
   });
@@ -57,10 +56,9 @@ describe("native effort slider", () => {
       "low",
       "medium",
       "high",
-      "ultrathink",
       "ultracode",
     ]);
-    expect(slider?.currentIndex).toBe(4);
+    expect(slider?.currentIndex).toBe(3);
     expect(slider?.defaultIndex).toBe(1);
     expect(
       resolveEffortSlider({
@@ -80,7 +78,8 @@ describe("native effort slider", () => {
     ).toBeNull();
   });
 
-  it("shows prompt-controlled Ultrathink and locks body-controlled reasoning", () => {
+  // Ultrathink is typed, not picked, so the slider rests on the default while it controls effort.
+  it("reports prompt-controlled Ultrathink and locks body-controlled reasoning", () => {
     const input = {
       descriptor: effortDescriptor,
       modelAvailable: true,
@@ -92,39 +91,17 @@ describe("native effort slider", () => {
         ...input,
         promptTraits: getPromptControlledTraits([effortDescriptor], "Ultrathink:\nsolve it"),
       }),
-    ).toMatchObject({ currentValue: "ultrathink", currentIndex: 3, locked: false });
+    ).toMatchObject({ currentValue: "ultrathink", currentIndex: 1, locked: false });
     expect(
       resolveEffortSlider({
         ...input,
         promptTraits: getPromptControlledTraits([effortDescriptor], "please ultrathink about this"),
       }),
-    ).toMatchObject({ currentIndex: 3, locked: true });
+    ).toMatchObject({ currentIndex: 1, locked: true });
   });
 });
 
 describe("prompt-controlled reasoning", () => {
-  it("adds Ultrathink to the prompt without persisting an injected option", () => {
-    const descriptors = [effortDescriptor];
-    const change = getTraitSelectChange(
-      { ...getPromptControlledTraits(descriptors, "solve it"), descriptors },
-      effortDescriptor,
-      "solve it",
-      "ultrathink",
-    );
-    expect(change).toEqual({ prompt: "Ultrathink:\nsolve it" });
-    expect(
-      getPromptControlledTraits(descriptors, change?.prompt ?? "").ultrathinkPromptControlled,
-    ).toBe(true);
-    expect(
-      getTraitSelectChange(
-        { ...getPromptControlledTraits(descriptors, ""), descriptors },
-        effortDescriptor,
-        "",
-        "ultrathink",
-      ),
-    ).toEqual({ prompt: "Ultrathink:\n" });
-  });
-
   it("removes the prefix when choosing a regular effort and saves Ultracode as an option", () => {
     const descriptors = [effortDescriptor];
     const prompt = "Ultrathink:\nsolve it";
@@ -138,19 +115,11 @@ describe("prompt-controlled reasoning", () => {
     ).toEqual({ prompt: "solve it", modelOptions: [{ id: "effort", value: "ultracode" }] });
   });
 
-  it("keeps body-controlled Ultrathink locked and preserves slash commands", () => {
+  it("keeps body-controlled Ultrathink locked", () => {
     const descriptors = [effortDescriptor];
     const prompt = "please ultrathink about this";
     const selected = { ...getPromptControlledTraits(descriptors, prompt), descriptors };
     expect(selected.ultrathinkInBodyText).toBe(true);
     expect(getTraitSelectChange(selected, effortDescriptor, prompt, "low")).toBeNull();
-    expect(
-      getTraitSelectChange(
-        { ...getPromptControlledTraits(descriptors, "/review"), descriptors },
-        effortDescriptor,
-        "/review",
-        "ultrathink",
-      ),
-    ).toEqual({ prompt: "/review" });
   });
 });
