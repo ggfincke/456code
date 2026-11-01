@@ -10,20 +10,15 @@ launch T3 Code and configure providers afterwards.
 
 ## Command line
 
+The desktop app includes the `t3` command ([details](#the-t3-command)). To run a
+server without it, build from source with `vp`, which provides the Node version it
+needs:
+
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+git clone https://github.com/ggfincke/456code
+cd 456code && vp i && vp run build:desktop
+node apps/server/dist/bin.mjs
 ```
-
-On Windows, in PowerShell:
-
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-This installs the `t3` binary to `~/.local/bin`. If your shell reports `command not found`
-afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
-`T3CODE_VERSION` to pin an exact version.
 
 | Task                                  | Command     |
 | ------------------------------------- | ----------- |
@@ -38,23 +33,6 @@ is accepted only if it already exists.
 If `t3` or `t3 start` reports an already running server, connect to that server
 instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
-
-To try T3 Code once without installing it, run `npx t3@latest` instead (needs
-Node.js for `npx`).
-
-### Intel Macs
-
-There is no `t3` executable for Intel Macs (the desktop app is available). To
-run a server there, build it from source with `vp`, which provides the Node version it needs
-([Install vp](https://github.com/pingdotgg/t3code#install-vp)):
-
-```bash
-git clone https://github.com/pingdotgg/t3code
-cd t3code && vp i && vp run build:desktop
-node apps/server/dist/bin.mjs
-```
-
-Update a server run this way with `git pull` and a rebuild.
 
 ## Desktop app
 

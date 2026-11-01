@@ -15,8 +15,7 @@
     "scripts": {
       // knip loads its preprocessor through a cli option; native checks, worktree setup, branding
       // and local packaging helpers run directly. electron-builder loads the macOS signer and
-      // mobile-e2e.ts runs agent-device's CLI by path. release helpers stay for upstream parity
-      // even though this fork drops the release workflows that call them.
+      // mobile-e2e.ts runs agent-device's CLI by path.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
@@ -27,18 +26,13 @@
         // the staged-update timer (infra/fincke-stage-update) runs this directly
         "fincke-stage-update.ts",
         "apply-web-brand-assets.ts",
-        "smoke-cli-archive.ts",
         "sign-macos.ts",
-        "build-cli-archive.ts",
-        "resolve-nightly-release.ts",
         "smoke-desktop-app.ts",
-        "verify-windows-desktop-artifact.ts",
       ],
       "ignoreDependencies": ["agent-device", "esbuild"],
-      // The `t3` npm package's files: copied into the package, never imported.
       // knip-schemas.test.ts writes a throwaway project to .knip-test-*, which a
       // knip run beside it in check:changed must not report.
-      "ignore": ["npm-launcher/**", ".knip-test-*/**"],
+      "ignore": [".knip-test-*/**"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
@@ -110,10 +104,6 @@
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.
       "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
-    },
-    "apps/marketing": {
-      // `astro check` runs from the typecheck task in vite.config.ts, which knip does not read.
-      "ignoreDependencies": ["@astrojs/check"],
     },
     "apps/mobile": {
       // Expo loads plugins and the fingerprint config by string; Metro embeds the browser entry in the native WebView.

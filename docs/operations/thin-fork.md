@@ -20,7 +20,7 @@
 
 Earlier integrations minimized changes to upstream V2 conversation orchestration, provider lifecycle, persistence/migrations, Git implementations, shared client runtime and `apps/mobile`. Those historical boundaries are no longer restrictions on changes needed to meet the guiding principles. Regular upstream merges remain the strategy, with an explicit principles review for each update. Preserve my working setup and report deferred upstream changes when adaptation is too costly. Prefer existing boundaries and tooling where they serve my workflow.
 
-Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. CI retains code/build checks, Windows tests and advisory mobile fingerprints on standard GitHub runners; automated releases, deployments, previews and upstream administration workflows have been removed.
+Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. CI retains code/build checks and advisory mobile fingerprints on standard GitHub runners; automated releases, Windows tests, deployments, previews and upstream administration workflows have been removed.
 
 ## Product and ownership boundaries
 
