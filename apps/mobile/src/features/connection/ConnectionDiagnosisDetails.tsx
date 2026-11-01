@@ -3,8 +3,6 @@ import {
   AVAILABLE_CONNECTION_STATE,
   type ConnectionDiagnosis,
   connectionDiagnosisText,
-  connectionRoutes,
-  hasRelayRoute,
   presentConnectionDiagnosis,
   type EnvironmentPresentation,
 } from "@t3tools/client-runtime/connection";
@@ -34,12 +32,10 @@ export function useConnectionDiagnosis(
   if (presentation === null || !presentation.entry.enabled) return { diagnosis: null, state };
   const phase = presentation.connection.phase;
   if (phase === "connected" || phase === "unsupported") return { diagnosis: null, state };
-  const relayOnly =
-    connectionRoutes(presentation.entry).length === 1 && hasRelayRoute(presentation.entry);
   const diagnosis = presentConnectionDiagnosis({
     hostLabel: presentation.entry.target.label,
     state,
-    via: relayOnly ? "relay" : "direct",
+    via: "direct",
     clientVersion: Constants.expoConfig?.version,
     serverVersion: presentation.serverConfig?.environment.serverVersion,
   });

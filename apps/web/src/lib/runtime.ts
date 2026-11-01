@@ -10,18 +10,16 @@ import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import * as PrimaryEnvironmentHttpClient from "../environments/primary/httpClient";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 
-import * as Dpop from "../cloud/dpop";
-import * as ManagedRelayLayer from "../cloud/managedRelayLayer";
 import * as ClientTracer from "../observability/clientTracer";
+import * as WebCrypto from "./webCrypto";
 
 const layerHttpClient = layerRemoteHttpClient((input, init) => globalThis.fetch(input, init));
 
 type RuntimeLayerSource =
   | typeof layerHttpClient
-  | typeof Dpop.layer
+  | typeof WebCrypto.layer
   | typeof Socket.layerWebSocketConstructorGlobal
-  | typeof ClientTracer.layer
-  | ReturnType<typeof ManagedRelayLayer.layer>;
+  | typeof ClientTracer.layer;
 
 const primaryHttpRuntime = ManagedRuntime.make(
   PrimaryEnvironmentHttpClient.layer.pipe(Layer.provide(PrimaryEnvironmentHttpLayer.layer)),
@@ -46,13 +44,9 @@ export function __setPrimaryHttpRunnerForTests(runner?: PrimaryHttpEffectRunner)
 
 const layerRuntime = Layer.mergeAll(
   layerHttpClient,
-  Dpop.layer,
+  WebCrypto.layer,
   Socket.layerWebSocketConstructorGlobal,
   ClientTracer.layer,
-  // the dormant DPoP authorizer still requires a relay client; an invalid origin yields a disabled one
-  ManagedRelayLayer.layer("http://relay.invalid").pipe(
-    Layer.provide(Layer.mergeAll(layerHttpClient, Dpop.layer)),
-  ),
 );
 
 const runtime: ManagedRuntime.ManagedRuntime<

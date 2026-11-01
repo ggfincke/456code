@@ -56,10 +56,6 @@ const reachOutdatedHost = Effect.fn("clientRuntime.connection.reachOutdatedHost"
   return { entry, prepared, descriptor };
 });
 
-// The normal session cannot read config from a host behind the protocol gate.
-export const describeOutdatedHost = (environmentId: EnvironmentId) =>
-  reachOutdatedHost(environmentId).pipe(Effect.map(({ descriptor }) => descriptor));
-
 /**
  * The normal session refuses to open against such a host, so this opens a bare
  * socket and calls only the self-update RPCs, whose wire shape has not changed

@@ -4,11 +4,11 @@ import * as NodeSqlite from "node:sqlite";
 
 import { migrationManifest } from "./Migrations.ts";
 
-export const BUILD_MIGRATION_HEAD = Math.max(...migrationManifest.map(([id]) => id));
+const BUILD_MIGRATION_HEAD = Math.max(...migrationManifest.map(([id]) => id));
 
 /** Migrations the database records, read-only. A missing or new database records none; one that
  * exists but cannot be read is null, since its history is unknown. */
-export function recordedMigrations(
+function recordedMigrations(
   databasePath: string,
 ): ReadonlyArray<{ readonly id: number; readonly name: string }> | null {
   let db: NodeSqlite.DatabaseSync;

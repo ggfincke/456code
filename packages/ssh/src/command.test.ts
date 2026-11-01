@@ -7,7 +7,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { parseSshResolveOutput, remoteStateKey, runSshCommand } from "./command.ts";
+import { runSshCommand } from "./command.ts";
 import { SshCommandError } from "./errors.ts";
 
 const encoder = new TextEncoder();
@@ -31,23 +31,6 @@ const makeFailedProcess = (input: { readonly stdout: string; readonly stderr?: s
 };
 
 describe("ssh command", () => {
-  it.effect("parses resolved ssh config output into a target", () =>
-    Effect.sync(() => {
-      assert.deepEqual(
-        parseSshResolveOutput(
-          "devbox",
-          ["hostname devbox.example.com", "user julius", "port 2222", ""].join("\n"),
-        ),
-        {
-          alias: "devbox",
-          hostname: "devbox.example.com",
-          username: "julius",
-          port: 2222,
-        },
-      );
-    }),
-  );
-
   it.effect("passes an option-shaped alias to ssh as the destination", () => {
     const spawned: Array<ReadonlyArray<string>> = [];
     const spawner = ChildProcessSpawner.make((command) => {
@@ -70,30 +53,6 @@ describe("ssh command", () => {
       ),
     );
   });
-
-  // Remote servers store state under this key, so it must not change across releases.
-  it.effect("derives a stable remote state key", () =>
-    Effect.gen(function* () {
-      assert.equal(
-        yield* remoteStateKey({
-          alias: "devbox",
-          hostname: "devbox.example.com",
-          username: "julius",
-          port: 2222,
-        }),
-        "711bc738002d72fd",
-      );
-      assert.equal(
-        yield* remoteStateKey({
-          alias: "fixture",
-          hostname: "fixture",
-          username: null,
-          port: null,
-        }),
-        "326264c4f08c8a0c",
-      );
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
 
   it.live.each([
     { name: "default head", keepErrorOutputTail: undefined, exitCode: 1, stderr: "" },

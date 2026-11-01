@@ -42,7 +42,7 @@ const decodeInstallManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(I
  * `T3CODE_NPM_LAUNCHER_PATH` is inherited by child shells, so accept it only for this package
  * version to avoid claiming another `t3` invocation is the npm install.
  */
-export const resolveEntryPath = Effect.gen(function* () {
+const resolveEntryPath = Effect.gen(function* () {
   const npmLauncher = (yield* HostProcess.Environment).T3CODE_NPM_LAUNCHER_PATH?.trim();
   if (npmLauncher) {
     const fs = yield* FileSystem.FileSystem;
@@ -112,7 +112,7 @@ function formatCliCommand(input: {
   return `${runner} ${suggestedPackageSpec(input.version)} ${input.subcommand}`;
 }
 
-export const resolveCliCommand = (subcommand: string) =>
+const resolveCliCommand = (subcommand: string) =>
   Effect.map(resolveEntryPath, (entryPath) =>
     formatCliCommand({ subcommand, entryPath, version: packageJson.version }),
   );

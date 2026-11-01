@@ -1453,7 +1453,6 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
               open={addBackendDialogOpen}
               routeTarget={routeTarget}
               error={savedBackendError}
-              savedEnvironments={savedEnvironments}
               onOpenChange={handleAddBackendDialogOpenChange}
               onErrorChange={setSavedBackendError}
             />

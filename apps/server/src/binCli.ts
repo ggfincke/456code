@@ -1,5 +1,5 @@
 // apps/server/src/binCli.ts
-// composes server commands with disabled fork self-updates
+// composes the server CLI commands
 import { doctorCommand } from "./cli/doctor.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -21,17 +21,10 @@ import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { threadCommand } from "./cli/thread.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
-import { updateCommand } from "./cli/update.ts";
-import { disabled as releaseUpdatesDisabled } from "./fincke/ReleaseUpdates.ts";
-import { uninstallCommand } from "./cli/uninstall.ts";
 import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
 import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
-import { sshHelperCommand } from "./cli/sshHelper.ts";
-import { serviceCommand } from "./cli/service.ts";
-import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { themeCommand } from "./cli/theme.ts";
 import { traceCommand } from "./cli/trace.ts";
-import { triageCommand } from "./cli/triage.ts";
 
 const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -57,18 +50,11 @@ export const makeCli = () =>
       browserCommand,
       projectCommand,
       threadCommand,
-      serviceCommand,
-      updateCommand.pipe(Command.withHandler(releaseUpdatesDisabled)),
-      uninstallCommand,
       serviceLauncherCommand,
       claudeHistoryCommand,
-      sshHelperCommand,
-
-      servicePreflightCommand,
       themeCommand,
       traceCommand,
       doctorCommand,
-      triageCommand,
     ]),
   );
 

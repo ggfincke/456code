@@ -1,4 +1,4 @@
-import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -18,32 +18,23 @@ import {
   BearerConnectionRegistration,
   type ConnectionCatalogEntry,
   type ConnectionCredential,
-  SshConnectionProfile,
-  SshConnectionRegistration,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import { mapRemoteEnvironmentError } from "./errors.ts";
 import {
   BearerConnectionTarget,
   ConnectionBlockedError,
-  SshConnectionTarget,
   type ConnectionAttemptError,
 } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as EnvironmentRegistry from "./registry.ts";
 import { orchestrationProtocolCompatibilityError } from "./compatibility.ts";
-import { connectionRoutes, routeEntry, sshTargetKey } from "./routes.ts";
+import { connectionRoutes, routeEntry } from "./routes.ts";
 
 export interface PairingConnectionInput {
   readonly pairingUrl?: string;
   readonly host?: string;
   readonly pairingCode?: string;
-  readonly expectedEnvironmentId?: EnvironmentId;
-}
-
-export interface SshConnectionInput {
-  readonly target: DesktopSshEnvironmentTarget;
-  readonly label?: string;
   readonly expectedEnvironmentId?: EnvironmentId;
 }
 
@@ -58,12 +49,6 @@ export class ConnectionOnboarding extends Context.Service<
   {
     readonly registerPairing: (
       input: PairingConnectionInput,
-    ) => Effect.Effect<
-      EnvironmentId,
-      ConnectionAttemptError | Persistence.ConnectionPersistenceError
-    >;
-    readonly registerSsh: (
-      input: SshConnectionInput,
     ) => Effect.Effect<
       EnvironmentId,
       ConnectionAttemptError | Persistence.ConnectionPersistenceError
@@ -258,51 +243,11 @@ export const prepareBearerConnectionUpdate = Effect.fn(
   });
 });
 
-export const prepareSshRegistration = Effect.fn(
-  "clientRuntime.connection.onboarding.prepareSshRegistration",
-)(function* (input: SshConnectionInput) {
-  const gateway = yield* ClientCapabilities.SshEnvironmentGateway;
-  const provisioned = yield* gateway.provision(input.target, input.expectedEnvironmentId);
-  const connectionId = `ssh:${provisioned.environmentId}:${sshTargetKey(provisioned.bootstrap.target)}`;
-  const label = input.label?.trim() || provisioned.label || provisioned.bootstrap.target.alias;
-
-  return new SshConnectionRegistration({
-    target: new SshConnectionTarget({
-      environmentId: provisioned.environmentId,
-      label,
-      connectionId,
-    }),
-    profile: new SshConnectionProfile({
-      connectionId,
-      environmentId: provisioned.environmentId,
-      label,
-      target: provisioned.bootstrap.target,
-    }),
-    credential: new BearerConnectionCredential({ token: provisioned.bearerToken }),
-  });
-});
-
-const registerSshConnection = Effect.fn(
-  "clientRuntime.connection.onboarding.registerSshConnection",
-)(function* (input: SshConnectionInput) {
-  const registration = yield* prepareSshRegistration(input);
-  if (
-    input.expectedEnvironmentId !== undefined &&
-    registration.target.environmentId !== input.expectedEnvironmentId
-  ) {
-    return yield* differentMachineError(registration.target.label);
-  }
-  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-  yield* registry.register(registration);
-  return registration.target.environmentId;
-});
-
 /** @public */
 export const make = Effect.gen(function* () {
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   const presentation = yield* ClientCapabilities.ClientPresentation;
   const httpClient = yield* HttpClient.HttpClient;
-  const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
 
   // Provisioning retains the delegated onboarding operation spans.
@@ -314,13 +259,6 @@ export const make = Effect.gen(function* () {
       Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
       Effect.provideService(ClientCapabilities.ClientPresentation, presentation),
       Effect.provideService(HttpClient.HttpClient, httpClient),
-    ),
-    registerSsh: Effect.fnUntraced(
-      function* (input) {
-        return yield* registerSshConnection(input);
-      },
-      Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
-      Effect.provideService(ClientCapabilities.SshEnvironmentGateway, ssh),
     ),
     updateBearer: Effect.fnUntraced(
       function* (input) {

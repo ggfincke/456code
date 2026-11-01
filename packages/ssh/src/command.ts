@@ -1,9 +1,7 @@
 import type { DesktopSshEnvironmentTarget } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -43,47 +41,6 @@ export interface RunSshCommandOptions extends SshAuthOptions {
   readonly keepErrorOutputTail?: boolean;
 }
 
-export function parseSshResolveOutput(alias: string, stdout: string): DesktopSshEnvironmentTarget {
-  const values = new Map<string, string>();
-  for (const line of stdout.split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    const [key, ...rest] = trimmed.split(/\s+/u);
-    if (!key || rest.length === 0 || values.has(key)) {
-      continue;
-    }
-    values.set(key, rest.join(" ").trim());
-  }
-
-  const hostname = values.get("hostname")?.trim() || alias;
-  const username = values.get("user")?.trim() || null;
-  const rawPort = values.get("port")?.trim() ?? "";
-  const parsedPort = Number.parseInt(rawPort, 10);
-
-  return {
-    alias,
-    hostname,
-    username,
-    port: Number.isInteger(parsedPort) ? parsedPort : null,
-  };
-}
-
-export function targetConnectionKey(target: DesktopSshEnvironmentTarget): string {
-  return `${target.alias}\u0000${target.hostname}\u0000${target.username ?? ""}\u0000${target.port ?? ""}`;
-}
-
-export const remoteStateKey = Effect.fn("ssh/command.remoteStateKey")(function* (
-  target: DesktopSshEnvironmentTarget,
-): Effect.fn.Return<string, never, Crypto.Crypto> {
-  const crypto = yield* Crypto.Crypto;
-  const digest = yield* crypto
-    .digest("SHA-256", encoder.encode(targetConnectionKey(target)))
-    .pipe(Effect.orDie);
-  return Hex.encode(digest).slice(0, 16);
-});
-
 function buildSshHostSpec(target: DesktopSshEnvironmentTarget): string {
   const destination = target.alias.trim() || target.hostname.trim();
   if (destination.length === 0) {
@@ -92,7 +49,7 @@ function buildSshHostSpec(target: DesktopSshEnvironmentTarget): string {
   return target.username ? `${target.username}@${destination}` : destination;
 }
 
-export const buildSshHostSpecEffect = (
+const buildSshHostSpecEffect = (
   target: DesktopSshEnvironmentTarget,
 ): Effect.Effect<string, SshInvalidTargetError> =>
   Effect.try({
@@ -114,16 +71,6 @@ export function baseSshArgs(
     "ConnectTimeout=10",
     ...(target.port !== null ? ["-p", String(target.port)] : []),
   ];
-}
-
-export function getLastNonEmptyOutputLine(stdout: string): string | null {
-  return (
-    stdout
-      .trim()
-      .split(/\r?\n/u)
-      .map((entry) => entry.trim())
-      .findLast((entry) => entry.length > 0) ?? null
-  );
 }
 
 const collectProcessOutput = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
@@ -160,7 +107,7 @@ function normalizeSshErrorMessage(input: {
   return cleanedStdout.length > 0 ? cleanedStdout : input.fallbackMessage;
 }
 
-export function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
+function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
   return {
     alias: target.alias,
     hostname: target.hostname,
@@ -330,45 +277,6 @@ export const runSshCommand = Effect.fn("ssh/command.runSshCommand")(function* (
           });
         }),
       }),
-    ),
-  );
-});
-
-export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(function* (
-  alias: string,
-): Effect.fn.Return<
-  DesktopSshEnvironmentTarget,
-  SshCommandError | SshInvalidTargetError,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
-> {
-  const trimmedAlias = alias.trim();
-  if (trimmedAlias.length === 0) {
-    return yield* new SshInvalidTargetError({ message: "SSH host alias is required." });
-  }
-
-  yield* Effect.logDebug("ssh.target.resolve.start", { alias: trimmedAlias });
-  return yield* runSshCommand(
-    {
-      alias: trimmedAlias,
-      hostname: trimmedAlias,
-      username: null,
-      port: null,
-    },
-    { preHostArgs: ["-G"] },
-  ).pipe(
-    Effect.map((result) => parseSshResolveOutput(trimmedAlias, result.stdout)),
-    Effect.tap((target) =>
-      Effect.logDebug("ssh.target.resolve.succeeded", sshTargetLogFields(target)),
-    ),
-    Effect.catch((cause) =>
-      Effect.logDebug("ssh.target.resolve.fallback", { alias: trimmedAlias, cause }).pipe(
-        Effect.as({
-          alias: trimmedAlias,
-          hostname: trimmedAlias,
-          username: null,
-          port: null,
-        }),
-      ),
     ),
   );
 });

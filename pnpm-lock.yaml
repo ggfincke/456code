@@ -398,9 +398,6 @@ importers:
       '@t3tools/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@t3tools/ssh':
-        specifier: workspace:*
-        version: link:../../packages/ssh
       '@t3tools/tailscale':
         specifier: workspace:*
         version: link:../../packages/tailscale
@@ -1104,9 +1101,6 @@ importers:
       html-url-attributes:
         specifier: ^3.0.1
         version: 3.0.1
-      jose:
-        specifier: 'catalog:'
-        version: 6.2.2
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
@@ -1853,9 +1847,6 @@ importers:
       effect:
         specifier: 4.0.5
         version: 4.0.5
-      jose:
-        specifier: 'catalog:'
-        version: 6.2.2
       mdast-util-directive:
         specifier: 'catalog:'
         version: 3.1.0(supports-color@8.1.1)

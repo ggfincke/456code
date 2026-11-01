@@ -1,14 +1,8 @@
-import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import {
-  BearerConnectionTarget,
-  PrimaryConnectionTarget,
-  RelayConnectionTarget,
-  SshConnectionTarget,
-  type ConnectionTarget,
-} from "./model.ts";
+import { BearerConnectionTarget, PrimaryConnectionTarget, type ConnectionTarget } from "./model.ts";
 
 const ConnectionProfileBase = {
   connectionId: Schema.String,
@@ -23,7 +17,6 @@ export class BearerConnectionProfile extends Schema.TaggedClass<BearerConnection
     httpBaseUrl: Schema.String,
     wsBaseUrl: Schema.String,
     learned: Schema.optionalKey(Schema.Literal(true)),
-    authorization: Schema.optionalKey(Schema.Literal("t3-connect")),
     /**
      * "tailscale" on a learned route the server found on its Tailscale
      * interface. A bare 100.64.0.0/10 address could belong to any VPN.
@@ -32,15 +25,7 @@ export class BearerConnectionProfile extends Schema.TaggedClass<BearerConnection
   },
 ) {}
 
-export class SshConnectionProfile extends Schema.TaggedClass<SshConnectionProfile>()(
-  "SshConnectionProfile",
-  {
-    ...ConnectionProfileBase,
-    target: DesktopSshEnvironmentTargetSchema,
-  },
-) {}
-
-export const ConnectionProfile = Schema.Union([BearerConnectionProfile, SshConnectionProfile]);
+export const ConnectionProfile = Schema.Union([BearerConnectionProfile]);
 export type ConnectionProfile = typeof ConnectionProfile.Type;
 
 export interface ConnectionRoute {
@@ -74,13 +59,6 @@ export class PrimaryConnectionRegistration extends Schema.TaggedClass<PrimaryCon
   },
 ) {}
 
-export class RelayConnectionRegistration extends Schema.TaggedClass<RelayConnectionRegistration>()(
-  "RelayConnectionRegistration",
-  {
-    target: RelayConnectionTarget,
-  },
-) {}
-
 export class BearerConnectionRegistration extends Schema.TaggedClass<BearerConnectionRegistration>()(
   "BearerConnectionRegistration",
   {
@@ -90,21 +68,7 @@ export class BearerConnectionRegistration extends Schema.TaggedClass<BearerConne
   },
 ) {}
 
-export class SshConnectionRegistration extends Schema.TaggedClass<SshConnectionRegistration>()(
-  "SshConnectionRegistration",
-  {
-    target: SshConnectionTarget,
-    profile: SshConnectionProfile,
-    /** The token from pairing over SSH, which later connects reuse. */
-    credential: BearerConnectionCredential,
-  },
-) {}
-
-export const ConnectionRegistration = Schema.Union([
-  RelayConnectionRegistration,
-  BearerConnectionRegistration,
-  SshConnectionRegistration,
-]);
+export const ConnectionRegistration = Schema.Union([BearerConnectionRegistration]);
 export type ConnectionRegistration = typeof ConnectionRegistration.Type;
 
 /**
@@ -124,14 +88,12 @@ export function connectionRegistrationCatalogEntry(
 ): ConnectionCatalogEntry {
   switch (registration._tag) {
     case "PrimaryConnectionRegistration":
-    case "RelayConnectionRegistration":
       return {
         target: registration.target,
         profile: Option.none(),
         enabled: true,
       };
     case "BearerConnectionRegistration":
-    case "SshConnectionRegistration":
       return {
         target: registration.target,
         profile: Option.some(registration.profile),

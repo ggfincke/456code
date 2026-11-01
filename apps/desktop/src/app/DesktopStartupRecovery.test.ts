@@ -15,12 +15,9 @@ const updateState = (patch: Partial<DesktopUpdateState>): DesktopUpdateState => 
 });
 
 describe("resolveStartupRecoveryOffer", () => {
-  it("offers a newer version before going back", () => {
+  it("offers a newer staged build", () => {
     expect(
-      resolveStartupRecoveryOffer(
-        updateState({ status: "available", availableVersion: "0.1.4" }),
-        "0.1.2",
-      ),
+      resolveStartupRecoveryOffer(updateState({ status: "available", availableVersion: "0.1.4" })),
     ).toEqual({ _tag: "Update", version: "0.1.4" });
   });
 
@@ -28,21 +25,13 @@ describe("resolveStartupRecoveryOffer", () => {
     expect(
       resolveStartupRecoveryOffer(
         updateState({ status: "error", errorContext: "check", downloadedVersion: "0.1.4" }),
-        null,
       ),
     ).toEqual({ _tag: "Update", version: "0.1.4" });
   });
 
-  it("waits for the update check before offering to go back", () => {
-    expect(resolveStartupRecoveryOffer(updateState({ status: "checking" }), "0.1.2")).toEqual({
+  it("waits for the update check", () => {
+    expect(resolveStartupRecoveryOffer(updateState({ status: "checking" }))).toEqual({
       _tag: "Checking",
-    });
-  });
-
-  it("offers the last version that started when no update exists", () => {
-    expect(resolveStartupRecoveryOffer(updateState({ status: "up-to-date" }), "0.1.2")).toEqual({
-      _tag: "Reinstall",
-      version: "0.1.2",
     });
   });
 
@@ -54,17 +43,16 @@ describe("resolveStartupRecoveryOffer", () => {
           downloadedVersion: "0.1.4",
           notAppliedVersion: "0.1.4",
         }),
-        "0.1.2",
       ),
-    ).toEqual({ _tag: "Reinstall", version: "0.1.2" });
+    ).toEqual({ _tag: "NoUpdate" });
   });
 
-  it("falls back to the releases page when this version never started", () => {
-    expect(resolveStartupRecoveryOffer(updateState({ status: "disabled" }), "0.1.3")).toEqual({
-      _tag: "Releases",
+  it("offers nothing when no newer build is staged", () => {
+    expect(resolveStartupRecoveryOffer(updateState({ status: "disabled" }))).toEqual({
+      _tag: "NoUpdate",
     });
-    expect(resolveStartupRecoveryOffer(updateState({ status: "up-to-date" }), null)).toEqual({
-      _tag: "Releases",
+    expect(resolveStartupRecoveryOffer(updateState({ status: "up-to-date" }))).toEqual({
+      _tag: "NoUpdate",
     });
   });
 });

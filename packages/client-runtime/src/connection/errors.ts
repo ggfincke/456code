@@ -1,7 +1,4 @@
 import type { ClientConnectionMethod, EnvironmentId } from "@t3tools/contracts";
-import type { RelayProtectedError } from "@t3tools/contracts/relay";
-import type { ManagedRelayClientError } from "../relay/managedRelay.ts";
-import { dpopFailureMessage, relayProtectedErrorMessage } from "../relay/errorPresentation.ts";
 import type { RemoteEnvironmentAuthError } from "../authorization/remote.ts";
 import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 import {
@@ -34,128 +31,6 @@ export function environmentMismatchError(input: {
     reason: "configuration",
     detail: `Connected environment ${input.actual} does not match ${input.expected}.`,
   });
-}
-
-function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError {
-  const detail = relayProtectedErrorMessage(error);
-  const traceId = error.traceId;
-  switch (error._tag) {
-    case "RelayAuthInvalidError":
-      return new ConnectionBlockedError({
-        reason: "authentication",
-        detail,
-        traceId,
-        hop: "relay",
-        ...(error.dpopFailureReason === "time_window" ? { failureCause: "clock_skew" } : {}),
-      });
-    case "RelayEnvironmentConnectNotAuthorizedError":
-      // A host swapping in a new tunnel leaves its allocation unready until
-      // the tunnel is up, and nothing on the client changes when it is.
-      if (error.reason === "managed_endpoint_allocation_not_ready") {
-        return new ConnectionTransientError({
-          reason: "endpoint-unavailable",
-          detail,
-          traceId,
-          hop: "tunnel",
-          failureCause: "tunnel_pending",
-        });
-      }
-      if (error.reason === "endpoint_provider_not_managed") {
-        return new ConnectionBlockedError({
-          reason: "permission",
-          detail,
-          traceId,
-          hop: "tunnel",
-          failureCause: "tunnel_not_enabled",
-        });
-      }
-      return new ConnectionBlockedError({
-        reason: "permission",
-        detail,
-        traceId,
-        hop: "relay",
-        ...(error.reason === "environment_link_not_found" ? { failureCause: "not_linked" } : {}),
-      });
-    case "RelayEnvironmentEndpointTimedOutError":
-      return new ConnectionTransientError({
-        reason: "timeout",
-        detail,
-        traceId,
-        hop: "tunnel",
-        failureCause: "timeout",
-      });
-    case "RelayEnvironmentEndpointUnavailableError": {
-      const endpointFailure =
-        error.endpointFailure ??
-        (error.reason === "endpoint_response_invalid" ? "invalid_response" : undefined);
-      return new ConnectionTransientError({
-        reason: "endpoint-unavailable",
-        detail,
-        traceId,
-        // The tunnel carried the request when T3 Code is what failed to answer.
-        hop:
-          endpointFailure === "origin_unreachable" || endpointFailure === "invalid_response"
-            ? "server"
-            : "tunnel",
-        via: "relay",
-        ...(endpointFailure ? { failureCause: endpointFailure } : {}),
-        ...(error.endpointStatus ? { httpStatus: error.endpointStatus } : {}),
-      });
-    }
-    case "RelayInternalError":
-      return new ConnectionTransientError({
-        reason: "relay-unavailable",
-        detail,
-        traceId,
-        hop: "relay",
-        failureCause: "relay_error",
-      });
-  }
-}
-
-export function mapManagedRelayError(error: ManagedRelayClientError): ConnectionAttemptError {
-  switch (error._tag) {
-    case "ManagedRelayRequestFailedError":
-      if (error.relayError) {
-        return relayProtectedError(error.relayError);
-      }
-      return new ConnectionTransientError({
-        reason: "relay-unavailable",
-        detail: error.message,
-        hop: "relay",
-        // A status means the relay answered, so this device did reach it.
-        ...(error.status !== undefined
-          ? { httpStatus: error.status, failureCause: "relay_error" }
-          : {}),
-        ...(error.traceId ? { traceId: error.traceId } : {}),
-      });
-    case "ManagedRelayRequestTimeoutError":
-      return new ConnectionTransientError({
-        reason: "timeout",
-        detail: error.message,
-        hop: "relay",
-      });
-    case "ManagedRelayUrlInvalidError":
-      return new ConnectionBlockedError({
-        reason: "configuration",
-        detail: error.message,
-        hop: "relay",
-      });
-    case "ManagedRelayAccessTokenScopesUnexpectedError":
-      return new ConnectionBlockedError({
-        reason: "permission",
-        detail: error.message,
-        hop: "relay",
-      });
-    case "ManagedRelayDpopKeyLoadError":
-    case "ManagedRelayTokenProofCreationError":
-    case "ManagedRelayRequestProofCreationError":
-      return new ConnectionBlockedError({
-        reason: "authentication",
-        detail: error.message,
-        hop: "device",
-      });
-  }
 }
 
 export function mapRemoteEnvironmentError(
@@ -232,25 +107,4 @@ export function mapRemoteEnvironmentError(
         via,
       });
   }
-}
-
-/**
- * An older environment server reports a DPoP clock failure as the same generic
- * invalid-credential response as other failures, so keep the compatibility hint
- * cautious when the server omits the category.
- */
-export function mapRemoteDpopEnvironmentError(
-  error: RemoteEnvironmentAuthError,
-): ConnectionAttemptError {
-  if (error._tag === "EnvironmentAuthInvalidError" && error.reason === "invalid_credential") {
-    return new ConnectionBlockedError({
-      reason: "authentication",
-      detail: dpopFailureMessage("The environment credential is invalid.", error.dpopFailureReason),
-      traceId: error.traceId,
-      hop: "server",
-      via: "relay",
-      ...(error.dpopFailureReason === "time_window" ? { failureCause: "clock_skew" } : {}),
-    });
-  }
-  return mapRemoteEnvironmentError(error, "relay");
 }

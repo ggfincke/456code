@@ -18,7 +18,6 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   type ConnectionCatalogEntry,
-  SshConnectionProfile,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import {
@@ -27,20 +26,13 @@ import {
   mapRemoteEnvironmentError,
   profileMissingError,
 } from "./errors.ts";
-import {
-  PullRequestRoutingPermissions,
-  pullRequestRoutingConnectionKey,
-} from "./pullRequestRoutingPermissions.ts";
 import type {
   BearerConnectionTarget,
   ConnectionTarget,
   PreparedConnection,
   PrimaryConnectionTarget,
-  RelayConnectionTarget,
-  SshConnectionTarget,
 } from "./model.ts";
 import { ConnectionBlockedError, type ConnectionAttemptError } from "./model.ts";
-import * as ConnectionProfileStore from "./profileStore.ts";
 import {
   appendOrchestrationProtocol,
   orchestrationProtocolCompatibilityError,
@@ -69,7 +61,6 @@ export class ConnectionResolver extends Context.Service<
 >()("@t3tools/client-runtime/connection/resolver/ConnectionResolver") {}
 
 const isBearerProfile = Schema.is(BearerConnectionProfile);
-const isSshProfile = Schema.is(SshConnectionProfile);
 const isBearerCredential = Schema.is(BearerConnectionCredential);
 
 function primarySocketUrl(
@@ -141,13 +132,6 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         actual: profile.environmentId,
       });
     }
-    if (profile.authorization === "t3-connect") {
-      const authorized = yield* remote.authorizeDpop({
-        expectedEnvironmentId: target.environmentId,
-        directEndpoint: { httpBaseUrl: profile.httpBaseUrl, wsBaseUrl: profile.wsBaseUrl },
-      });
-      return { ...authorized, target } satisfies PreparedConnection;
-    }
     const credential = yield* credentials.get(credentialConnectionId(target.connectionId)).pipe(
       Effect.flatMap(
         Option.match({
@@ -173,91 +157,10 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
   });
 });
 
-const makeRelayBroker = Effect.fn("clientRuntime.connection.broker.makeRelay")(function* () {
-  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
-
-  return Effect.fnUntraced(function* (target: RelayConnectionTarget) {
-    const authorized = yield* remote.authorizeDpop({
-      expectedEnvironmentId: target.environmentId,
-    });
-    return { ...authorized, target } satisfies PreparedConnection;
-  }, Effect.withSpan("clientRuntime.connection.broker.relay"));
-});
-
-const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(function* () {
-  const profiles = yield* ConnectionProfileStore.ConnectionProfileStore;
-  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
-  const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
-  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
-
-  return Effect.fn("clientRuntime.connection.broker.ssh")(function* (
-    entry: ConnectionCatalogEntry & { readonly target: SshConnectionTarget },
-  ) {
-    const target = entry.target;
-    const profile = yield* Effect.fromOption(entry.profile, () =>
-      profileMissingError(target.connectionId),
-    );
-    if (!isSshProfile(profile)) {
-      return yield* new ConnectionBlockedError({
-        reason: "configuration",
-        detail: `Connection profile ${target.connectionId} is not an SSH connection.`,
-      });
-    }
-    if (profile.environmentId !== target.environmentId) {
-      return yield* environmentMismatchError({
-        expected: target.environmentId,
-        actual: profile.environmentId,
-      });
-    }
-    // Each pairing adds a session on the host, so connects reuse the saved token.
-    const saved = Option.getOrUndefined(yield* credentials.get(target.connectionId));
-    const savedToken = saved !== undefined && isBearerCredential(saved) ? saved.token : undefined;
-    const prepared = yield* ssh.prepare({
-      connectionId: target.connectionId,
-      expectedEnvironmentId: target.environmentId,
-      target: profile.target,
-      ...(savedToken === undefined ? {} : { bearerToken: savedToken }),
-    });
-    if (prepared.bearerToken !== savedToken) {
-      yield* credentials.put(
-        target.connectionId,
-        new BearerConnectionCredential({ token: prepared.bearerToken }),
-      );
-    }
-    const preparedProfile = new SshConnectionProfile({
-      connectionId: profile.connectionId,
-      environmentId: profile.environmentId,
-      label: profile.label,
-      target: prepared.bootstrap.target,
-    });
-    if (
-      pullRequestRoutingConnectionKey(entry) !==
-      pullRequestRoutingConnectionKey({ ...entry, profile: Option.some(preparedProfile) })
-    ) {
-      const permissions = yield* PullRequestRoutingPermissions;
-      yield* permissions.forget(target.environmentId);
-    }
-    yield* profiles.put(preparedProfile);
-    const authorized = yield* remote.authorizeBearer({
-      expectedEnvironmentId: target.environmentId,
-      httpBaseUrl: prepared.bootstrap.httpBaseUrl,
-      wsBaseUrl: prepared.bootstrap.wsBaseUrl,
-      bearerToken: prepared.bearerToken,
-      connectionMethod: "ssh",
-    });
-    return {
-      ...authorized,
-      target,
-    } satisfies PreparedConnection;
-  });
-});
-
 /** @public */
 export const make = Effect.gen(function* () {
   const primary = yield* makePrimaryBroker();
   const bearer = yield* makeBearerBroker();
-  const relay = yield* makeRelayBroker();
-  const ssh = yield* makeSshBroker();
   const httpClient = yield* HttpClient.HttpClient;
 
   const authorize = Effect.fn("clientRuntime.connection.broker.authorize")(function* (
@@ -276,10 +179,6 @@ export const make = Effect.gen(function* () {
           return primary(target);
         case "BearerConnectionTarget":
           return bearer({ ...entry, target });
-        case "RelayConnectionTarget":
-          return relay(target);
-        case "SshConnectionTarget":
-          return ssh({ ...entry, target });
       }
     })();
     const { descriptor: authorizedDescriptor, ...prepared } = authorized;

@@ -1,8 +1,11 @@
 import * as DateTime from "effect/DateTime";
 
-import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@t3tools/shared/remote";
-import { readHostedPairingRequest } from "../../hostedPairing";
+import { resolveDesktopPairingUrl } from "./pairingUrls";
+import {
+  getPairingTokenFromUrl,
+  readHostedPairingRequest,
+  setPairingTokenOnUrl,
+} from "@t3tools/shared/remote";
 import {
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
@@ -16,7 +19,6 @@ import {
   AuthTerminalReadScope,
   type DesktopBridge,
   type DesktopServerExposureState,
-  type DesktopSshEnvironmentTarget,
   type DesktopUpdateState,
   type DesktopWslState,
 } from "@t3tools/contracts";
@@ -171,64 +173,6 @@ export function formatAccessTimestamp(value: string): string {
   return accessTimestampFormatter.format(parsed);
 }
 
-export function parseManualDesktopSshTarget(input: {
-  readonly host: string;
-  readonly username: string;
-  readonly port: string;
-}): DesktopSshEnvironmentTarget {
-  const rawHost = input.host.trim();
-  if (rawHost.length === 0) {
-    throw new Error("SSH host or alias is required.");
-  }
-
-  let hostname = rawHost;
-  let username = input.username.trim() || null;
-  let port: number | null = null;
-
-  const atIndex = hostname.lastIndexOf("@");
-  if (atIndex > 0) {
-    const inlineUsername = hostname.slice(0, atIndex).trim();
-    hostname = hostname.slice(atIndex + 1).trim();
-    if (!username && inlineUsername.length > 0) {
-      username = inlineUsername;
-    }
-  }
-
-  const bracketedHostMatch = /^\[([^\]]+)\](?::(\d+))?$/u.exec(hostname);
-  if (bracketedHostMatch) {
-    hostname = bracketedHostMatch[1]!.trim();
-    if (bracketedHostMatch[2]) {
-      port = Number.parseInt(bracketedHostMatch[2], 10);
-    }
-  } else {
-    const colonSegments = hostname.split(":");
-    if (colonSegments.length === 2 && /^\d+$/u.test(colonSegments[1] ?? "")) {
-      hostname = colonSegments[0]!.trim();
-      port = Number.parseInt(colonSegments[1]!, 10);
-    }
-  }
-
-  const rawPort = input.port.trim();
-  if (rawPort.length > 0) {
-    port = Number.parseInt(rawPort, 10);
-  }
-
-  if (hostname.length === 0) {
-    throw new Error("SSH host or alias is required.");
-  }
-
-  if (port !== null && (!Number.isInteger(port) || port <= 0 || port > 65_535)) {
-    throw new Error("SSH port must be between 1 and 65535.");
-  }
-
-  return {
-    alias: hostname,
-    hostname,
-    username,
-    port,
-  };
-}
-
 export function parsePairingUrlFields(
   input: string,
 ): { readonly host: string; readonly pairingCode: string } | null {
@@ -279,17 +223,6 @@ export function parseRemotePairingFields(input: {
     throw new Error("Enter a pairing code.");
   }
   return { host, pairingCode };
-}
-
-export function formatDesktopSshConnectionError(error: unknown): string {
-  const fallback = "Failed to connect SSH host.";
-  const rawMessage = error instanceof Error ? error.message : fallback;
-  const withoutIpcPrefix = rawMessage.replace(
-    /^Error invoking remote method 'desktop:ensure-ssh-environment':\s*/u,
-    "",
-  );
-  const withoutTaggedErrorPrefix = withoutIpcPrefix.replace(/^Ssh[A-Za-z]+Error:\s*/u, "");
-  return withoutTaggedErrorPrefix.trim() || fallback;
 }
 
 export function sortDesktopPairingLinks(links: ReadonlyArray<ServerPairingLinkRecord>) {
@@ -363,7 +296,6 @@ export function selectPairingEndpoint(
   return (
     availableEndpoints.find((endpoint) => endpoint.isDefault) ??
     availableEndpoints.find((endpoint) => endpoint.reachability !== "loopback") ??
-    availableEndpoints.find((endpoint) => endpoint.compatibility.hostedHttpsApp === "compatible") ??
     null
   );
 }
@@ -398,12 +330,6 @@ export function resolveAdvertisedEndpointPairingUrl(
   endpoint: AdvertisedEndpoint,
   credential: string,
 ): string {
-  if (endpoint.compatibility.hostedHttpsApp === "compatible") {
-    return (
-      resolveHostedPairingUrl(endpoint.httpBaseUrl, credential) ??
-      resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential)
-    );
-  }
   return resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential);
 }
 
@@ -412,19 +338,7 @@ export function resolveCurrentOriginPairingUrl(credential: string): string {
   return setPairingTokenOnUrl(url, credential).toString();
 }
 
-export function isHostedAppPairingUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.pathname === "/pair" && url.searchParams.has("host");
-  } catch {
-    return false;
-  }
-}
-
-export function endpointShareHint(endpoint: AdvertisedEndpoint, url: string): string {
-  if (isHostedAppPairingUrl(url)) {
-    return "Opens the hosted app, no install needed";
-  }
+export function endpointShareHint(endpoint: AdvertisedEndpoint): string {
   switch (endpoint.reachability) {
     case "lan":
       return "Devices on the same network";

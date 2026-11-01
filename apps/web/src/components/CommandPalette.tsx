@@ -52,7 +52,6 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
-  BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -112,8 +111,6 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useScratchProject } from "../hooks/useScratchProject";
-import { useStartTriage } from "../hooks/useStartTriage";
-import { pickTriageEnvironment } from "../lib/triageTarget";
 import { useNewProject } from "../hooks/useNewProject";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { reportProjectFailure, useProjectPin } from "../hooks/useProjectGroupUpdate";
@@ -410,7 +407,6 @@ function OpenCommandPaletteDialog(props: {
     label: "project unarchive",
   });
   const { scratchEnvironmentId, scratchWorkspaceRootFor, startScratchThread } = useScratchProject();
-  const startTriage = useStartTriage();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
@@ -635,20 +631,6 @@ function OpenCommandPaletteDialog(props: {
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
   const scratchTargetEnvironmentId = scratchEnvironmentId(currentProjectEnvironmentId);
-  const supportsTriage = (environmentId: EnvironmentId | null) =>
-    environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
-      ?.environment.capabilities.triage === true;
-  const triageEnvironmentId = pickTriageEnvironment({
-    onScreen: currentProjectEnvironmentId,
-    primary: primaryEnvironmentId,
-    connected: environments
-      .filter((environment) => environment.connection.phase === "connected")
-      .map((environment) => environment.environmentId),
-    supportsTriage,
-  });
-  const canTriage =
-    useAtomValue(serverEnvironment.prepareTriage.permissionAtom(triageEnvironmentId)) &&
-    supportsTriage(triageEnvironmentId);
   const currentProject = resolveCommandPaletteProject(
     projectByKey,
     currentProjectEnvironmentId,
@@ -1244,18 +1226,6 @@ function OpenCommandPaletteDialog(props: {
       icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.newWithoutProject",
       run: () => startScratchThread(scratchTargetEnvironmentId),
-    });
-  }
-
-  if (triageEnvironmentId !== null && canTriage) {
-    actionItems.push({
-      kind: "action",
-      value: "action:triage",
-      searchTerms: ["triage", "bug", "issue", "report", "broken", "debug", "help", "support"],
-      title: "Triage an issue",
-      description: "An agent investigates a T3 Code problem and helps file an issue",
-      icon: <BugIcon className={ITEM_ICON_CLASS} />,
-      run: () => startTriage(triageEnvironmentId),
     });
   }
 

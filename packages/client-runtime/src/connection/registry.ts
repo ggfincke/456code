@@ -12,7 +12,6 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   type ConnectionCatalogEntry,
   type ConnectionCredential,
@@ -20,7 +19,6 @@ import {
   type ConnectionRegistration,
   type ConnectionRoute,
   type PlatformConnectionRegistration,
-  SshConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
@@ -54,8 +52,6 @@ import {
   upsertRoute,
   type ReportedEndpoint,
 } from "./routes.ts";
-
-const isSshConnectionProfile = Schema.is(SshConnectionProfile);
 
 function unsupportedState(
   entry: ConnectionCatalogEntry,
@@ -212,14 +208,13 @@ export const make = Effect.gen(function* () {
   const connectivity = yield* Connectivity.Connectivity;
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
-  const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const persistedTargets = yield* storage.list;
   const disabledEnvironmentIds = new Set(yield* storage.listDisabled);
   const loadRoute = Effect.fn("EnvironmentRegistry.loadRoute")(function* (
     target: ConnectionTarget,
   ) {
     const profile: Option.Option<ConnectionProfile> =
-      target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+      target._tag === "BearerConnectionTarget"
         ? yield* profiles.get(target.connectionId)
         : Option.none();
     return { target, profile } satisfies ConnectionRoute;
@@ -851,7 +846,7 @@ export const make = Effect.gen(function* () {
         environmentId,
       });
     }
-    const entry = yield* getEntry(environmentId);
+    yield* getEntry(environmentId);
 
     yield* pullRequestRoutingPermissions.forget(environmentId);
     yield* registrations.remove(environmentId);
@@ -880,29 +875,11 @@ export const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded", discard: true },
     );
-
-    for (const route of connectionRoutes(entry)) {
-      const profile = Option.getOrNull(route.profile);
-      if (profile !== null && isSshConnectionProfile(profile)) {
-        yield* disconnectSsh(environmentId, profile);
-      }
-    }
   });
 
   const remove = Effect.fn("EnvironmentRegistry.remove")(function* (environmentId: EnvironmentId) {
     return yield* withLeaseLock(environmentId, removeLocked(environmentId));
   });
-
-  const disconnectSsh = (environmentId: EnvironmentId, profile: SshConnectionProfile) =>
-    ssh.disconnect(profile.target).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning("Could not disconnect the managed SSH environment.", {
-          environmentId,
-          error,
-        }),
-      ),
-      Effect.ignore,
-    );
 
   // Plain HTTP routes are unusable from an HTTPS page, which blocks mixed content.
   const allowInsecureRoutes =
@@ -987,10 +964,6 @@ export const make = Effect.gen(function* () {
         const remaining = routesAfterRemoving(routes, routeId);
         if (remaining.length === 0) return yield* removeLocked(environmentId);
         yield* replaceRoutesLocked(entry, remaining);
-        const profile = Option.getOrNull(route.profile);
-        if (profile !== null && isSshConnectionProfile(profile)) {
-          yield* disconnectSsh(environmentId, profile);
-        }
       }),
     );
   });
@@ -1067,16 +1040,6 @@ export const make = Effect.gen(function* () {
           yield* enabled ? lease.supervisor.connect : lease.supervisor.disconnect;
         } else if (enabled) {
           yield* createServiceScope(next);
-        }
-        // The supervisor only owns the RPC session. A managed SSH backend and
-        // its tunnel outlive it, so switching off tears those down as well.
-        if (!enabled) {
-          for (const route of connectionRoutes(entry)) {
-            const profile = Option.getOrNull(route.profile);
-            if (profile !== null && isSshConnectionProfile(profile)) {
-              yield* disconnectSsh(environmentId, profile);
-            }
-          }
         }
       }),
     );

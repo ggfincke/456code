@@ -4,7 +4,6 @@ import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
 // name is spelled out instead of imported from ../branding
 const APP_BASE_NAME = "456code";
 
-const FALLBACK_TRIAGE_COMMAND = "npx t3 triage";
 const ISSUE_URL = "https://github.com/ggfincke/456code/issues/new";
 const LAST_FAILURE_KEY = "t3code:boot-failed-at";
 const REPEAT_FAILURE_MS = 5 * 60_000;
@@ -13,32 +12,6 @@ const MAX_ERROR_CHARS = 6_000;
 const COPY_BLOCKED = "Copy was blocked. The text is selected so you can copy it manually.";
 const UPDATE_DOWNLOAD_FAILED = "The update download failed. Try Download update again.";
 const UPDATE_INSTALL_FAILED = "The update install failed. Try Restart to update again.";
-
-/** The Windows launcher is a `.cmd` run from PowerShell, which needs `&` to run a quoted path. */
-function launcherCommand(launcherPath: string) {
-  if (launcherPath.endsWith(".cmd")) {
-    return /^[\w:\\.-]+$/.test(launcherPath)
-      ? launcherPath
-      : `& '${launcherPath.replace(/['\u2018\u2019\u201A\u201B]/g, "$&$&")}'`;
-  }
-  return /^[\w@%+=:,./-]+$/.test(launcherPath)
-    ? launcherPath
-    : `'${launcherPath.replaceAll("'", `'"'"'`)}'`;
-}
-
-/** Desktop can run its bundled launcher without Node; everything else falls back to npx. */
-export async function resolveTriageCommand(bridge: DesktopBridge | undefined) {
-  try {
-    const state = await bridge?.cliCommand.getState();
-    // Windows reports onPath from its PATH entry alone; only an existing launcher proves it runs.
-    if (state?.launcherPath) {
-      return state.onPath ? "t3 triage" : `${launcherCommand(state.launcherPath)} triage`;
-    }
-  } catch (error) {
-    console.warn("Could not read the desktop CLI state.", error);
-  }
-  return FALLBACK_TRIAGE_COMMAND;
-}
 
 /** The update button only appears when the desktop updater has a newer build to offer. */
 export function updateActionFor(state: DesktopUpdateState | null | undefined) {
@@ -153,13 +126,6 @@ function isRepeatFailure(now: number) {
     return false;
   }
 }
-
-const icon = (paths: string) =>
-  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-const COPY_ICON = icon(
-  '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
-);
-const CHECK_ICON = icon('<path d="M20 6 9 17l-5-5"/>');
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -296,33 +262,6 @@ export function showBootError(error: unknown) {
   const updateNote = element("p", { id: "boot-error-update-note", hidden: true });
   if (bridge) mountUpdateButton(bridge, update, updateNote, announce);
 
-  const command = element("code", { textContent: FALLBACK_TRIAGE_COMMAND });
-  const copyCommand = element("button", {
-    className: "boot-error-icon",
-    type: "button",
-    title: "Copy command",
-    innerHTML: COPY_ICON,
-  });
-  copyCommand.setAttribute("aria-label", "Copy command");
-  copyCommand.addEventListener("click", () =>
-    copyText(
-      command,
-      () => {
-        copyCommand.innerHTML = CHECK_ICON;
-        copyCommand.title = "Copied";
-        copyCommand.setAttribute("aria-label", "Copied");
-        announce("Copied to clipboard.");
-      },
-      (hint) => {
-        copyCommand.textContent = hint;
-        copyCommand.title = hint;
-        copyCommand.setAttribute("aria-label", hint);
-        announce(COPY_BLOCKED);
-      },
-    ),
-  );
-  void resolveTriageCommand(bridge).then((value) => (command.textContent = value));
-
   let report = "(no error message)";
   try {
     report = buildErrorReport(error, environment);
@@ -356,12 +295,6 @@ export function showBootError(error: unknown) {
 
   const more = element("details", { open: isRepeatFailure(Date.now()) }, [
     element("summary", { textContent: "More options if it keeps failing" }),
-    element("div", {}, [
-      element("p", {
-        textContent: `Run this on the computer that runs ${APP_BASE_NAME}. Your agent can check the local logs and help you file a bug report.`,
-      }),
-      element("div", { id: "boot-error-command" }, [command, copyCommand]),
-    ]),
     element("div", {}, [
       details,
       element("p", {

@@ -23,7 +23,6 @@ const LISTED_OVERLAY_ROUTES: ReadonlySet<string> = new Set([
   "AddProjectNew",
   "NewTaskEnvironment",
   "NewTaskBranch",
-  "SettingsLegal",
   "ThreadAgents",
   "ThreadBackgroundWork",
   "ThreadPullRequests",

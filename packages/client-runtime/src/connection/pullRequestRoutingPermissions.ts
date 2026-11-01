@@ -42,14 +42,7 @@ function routeConnectionKey(
   routeProfile: ConnectionCatalogEntry["profile"],
 ): string | null {
   const entry = { profile: routeProfile };
-  if (target._tag === "RelayConnectionTarget")
-    return JSON.stringify([target._tag, target.environmentId]);
   const profile = Option.getOrNull(entry.profile);
-  if (target._tag === "SshConnectionTarget") {
-    if (profile?._tag !== "SshConnectionProfile") return null;
-    const { alias, hostname, username, port } = profile.target;
-    return JSON.stringify([target._tag, target.environmentId, alias, hostname, username, port]);
-  }
   const baseUrls =
     target._tag === "PrimaryConnectionTarget"
       ? [target.httpBaseUrl, target.wsBaseUrl]

@@ -11,10 +11,9 @@ On a desktop host, open **Settings → Sharing & access**, enable **Network acce
 then create a pairing link using an address the other device can reach. Changing
 network access restarts the desktop app. You can turn it off in the same place.
 
-A command-line host's [background service](./background-service.md#local-network-access)
-listens on private networks by default. For a server in a terminal, run
-`t3 serve --lan`. Either way, T3 Code then accepts connections from your local network and tailnet, so a pairing code is
-all that keeps other devices on them out.
+For a server in a terminal, run `t3 serve --lan`. Either way, T3 Code then accepts
+connections from your local network and tailnet, so a pairing code is all that keeps
+other devices on them out.
 
 If a server is already running, generate a fresh link without restarting it:
 
@@ -43,8 +42,8 @@ another link to share.
 
 ### Reach one machine several ways
 
-A machine can have more than one route: LAN, Tailscale, another VPN, a public
-URL, or SSH. Tailscale shares its `100.64.0.0/10` address range with
+A machine can have more than one route: LAN, Tailscale, another VPN, or a public
+URL. Tailscale shares its `100.64.0.0/10` address range with
 other VPNs such as Cloudflare WARP, so an address in that range shows as VPN
 unless the machine confirms it is on Tailscale. To add a route, choose **Add
 route** in the machine's route list.
@@ -58,8 +57,8 @@ current LAN and Tailscale addresses and adds them as routes, so pairing once
 over Tailscale is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
-address to be learned: **Network access** in the desktop app, or the
-[background service](./background-service.md#local-network-access), which allows it by default.
+address to be learned: **Network access** in the desktop app, or `--lan` for a
+server started in a terminal.
 You can reorder a learned route, but not remove it; it
 goes away with the route it was learned through, or when the machine stops
 reporting that address.
@@ -127,47 +126,6 @@ tailscale serve --https=443 off
 If that port is already in use, choose another with
 `--tailscale-serve-port`. See `t3 pair --help` for other pairing options.
 
-### Hosted web app
-
-[app.t3.codes](https://app.t3.codes) needs an HTTPS endpoint. It connects directly
-to your server; a hosted pairing link does not make an unreachable backend
-reachable or convert HTTP to HTTPS.
-
-For a plain HTTP LAN endpoint, use the direct pairing URL in a browser that can
-open it, or pair from the desktop app. On mobile, an IP address entered without a
-scheme uses HTTP, so include `https://` when your server uses HTTPS.
-
-## Desktop-managed SSH
-
-In the desktop app, open **Settings → Environments → Add environment**, choose
-**SSH**, and enter a host or SSH alias such as `user@example.com`. T3 Code starts
-or reuses a server there and opens the port forward for you. Projects, provider
-credentials, and agent work stay on the remote machine.
-
-The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
-`tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
-The first launch downloads T3 Code's server to `~/.t3/runtime` on the host, so
-it takes longer than later ones.
-Provider CLIs must be on the `PATH` of a non-interactive login shell there;
-check with:
-
-```bash
-ssh user@example.com 'sh -lc "command -v claude codex"'
-```
-
-If SSH reconnecting fails after an app update, retry the launch once. Removing
-the connection stops a server that T3 Code launched; a server that was already
-running is left alone.
-
-Each desktop app keeps one session on the host for its SSH connection and reuses
-it when it reconnects. Revoke sessions you no longer use in **Settings →
-Sharing & access** on the host, or on a headless host with `t3 auth session list` and
-`t3 auth session revoke <id>`. A desktop that can still sign in over SSH pairs
-again on its next connect.
-
-For Antigravity's Google callback on a remote host, see
-[remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
-
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same
@@ -204,9 +162,7 @@ an HTTPS server or a specific path, set the **Preview URL** on the project
 script that starts it; T3 Code checks that address and opens it as written.
 
 To stop listing ports, set `T3CODE_PORT_DISCOVERY=0` in the environment that
-starts the T3 Code server, such as
-[`service.env`](./background-service.md#configure-the-service-environment) for
-the background service, and restart it. Script preview URLs still appear.
+starts the T3 Code server, and restart it. Script preview URLs still appear.
 
 ### Browser host setup
 
@@ -265,7 +221,7 @@ off, its result arrives once it is back on.
 
 On the machine you will work from, open **Settings → Environments → Linked environments**,
 choose **Link**, and pick the other machine or enter its address. The list
-holds the machines this app knows and those on your T3 Connect account. If this
+holds the machines this app knows. If this
 app is connected to that machine with a session that manages access there, it
 makes the pairing code itself; otherwise paste one from that machine's
 **Settings → Sharing & access**. From a terminal, use
@@ -356,7 +312,7 @@ If a computer should only drive work running elsewhere, turn off its local envir
 desktop app, open **Settings → Environments** and switch off **Local
 environment**. T3 Code restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
-history, and saved connections are kept, and you keep working through pairing or SSH.
+history, and saved connections are kept, and you keep working through paired machines.
 
 Switch **Local environment** back on in the same place to restart with your previous local
 settings.

@@ -4,7 +4,6 @@ import {
   isSharedAddressSpaceHost,
   isTailnetHost,
 } from "@t3tools/shared/hostClassification";
-import type { DesktopSshEnvironmentTarget } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 
 import {
@@ -14,25 +13,13 @@ import {
 } from "./catalog.ts";
 import { BearerConnectionTarget, type ConnectionTarget } from "./model.ts";
 
-export type ConnectionRouteKind =
-  | "relay"
-  | "loopback"
-  | "lan"
-  | "tailnet"
-  | "vpn"
-  | "public"
-  | "ssh";
-
-const RELAY_ROUTE_ID = "relay";
+export type ConnectionRouteKind = "loopback" | "lan" | "tailnet" | "vpn" | "public";
 
 export function connectionRouteId(target: ConnectionTarget): string {
   switch (target._tag) {
     case "PrimaryConnectionTarget":
       return "primary";
-    case "RelayConnectionTarget":
-      return RELAY_ROUTE_ID;
     case "BearerConnectionTarget":
-    case "SshConnectionTarget":
       return target.connectionId;
   }
 }
@@ -83,10 +70,6 @@ function routeHostname(route: ConnectionRoute): string | null {
 
 export function connectionRouteKind(route: ConnectionRoute): ConnectionRouteKind {
   switch (route.target._tag) {
-    case "RelayConnectionTarget":
-      return "relay";
-    case "SshConnectionTarget":
-      return "ssh";
     case "PrimaryConnectionTarget":
     case "BearerConnectionTarget": {
       const hostname = routeHostname(route);
@@ -108,8 +91,6 @@ const ROUTE_KIND_RANK: Record<ConnectionRouteKind, number> = {
   tailnet: 2,
   vpn: 2,
   public: 3,
-  ssh: 4,
-  relay: 5,
 };
 
 export function insertRoute(
@@ -148,8 +129,6 @@ function routeAddressKey(route: ConnectionRoute): string | null {
   switch (profile?._tag) {
     case "BearerConnectionProfile":
       return `bearer:${profile.httpBaseUrl.replace(/\/+$/, "")}`;
-    case "SshConnectionProfile":
-      return `ssh:${sshTargetKey(profile.target)}`;
     default:
       return null;
   }
@@ -157,8 +136,6 @@ function routeAddressKey(route: ConnectionRoute): string | null {
 
 export function connectionRouteLabel(route: ConnectionRoute): string {
   switch (connectionRouteKind(route)) {
-    case "relay":
-      return "Relay";
     case "loopback":
       return "This device";
     case "lan":
@@ -167,36 +144,18 @@ export function connectionRouteLabel(route: ConnectionRoute): string {
       return "Tailscale";
     case "vpn":
       return "VPN";
-    case "ssh": {
-      const profile = Option.getOrNull(route.profile);
-      return profile?._tag === "SshConnectionProfile"
-        ? `SSH ${profile.target.username ? `${profile.target.username}@` : ""}${profile.target.hostname}`
-        : "SSH";
-    }
     case "public":
       return routeHostname(route) ?? "Remote link";
   }
 }
 
 export function connectionRouteAddress(route: ConnectionRoute): string | null {
-  if (route.target._tag === "SshConnectionTarget") {
-    const profile = Option.getOrNull(route.profile);
-    return profile?._tag === "SshConnectionProfile" ? profile.target.alias : null;
-  }
   return routeHttpBaseUrl(route);
 }
 
-/** Learned routes alone must not make relay environments manually retryable. */
+/** Learned routes alone must not make an environment manually retryable. */
 export const hasSavedBearerRoute = (entry: ConnectionCatalogEntry) =>
   connectionRoutes(entry).some((r) => !isLearned(r) && r.target._tag === "BearerConnectionTarget");
-
-export function hasRelayRoute(
-  entry: Pick<ConnectionCatalogEntry, "target" | "alternateRoutes">,
-): boolean {
-  return [entry.target, ...(entry.alternateRoutes ?? []).map((route) => route.target)].some(
-    (target) => target._tag === "RelayConnectionTarget",
-  );
-}
 
 export function mergeLearnedRoutes(input: {
   readonly entry: ConnectionCatalogEntry;
@@ -208,20 +167,10 @@ export function mergeLearnedRoutes(input: {
   const { entry } = input;
   const active = input.activeRoute.target;
   const saved = connectionRoutes(entry);
-  if (active._tag !== "RelayConnectionTarget" && active._tag !== "BearerConnectionTarget") {
+  if (active._tag !== "BearerConnectionTarget") {
     return null;
   }
-  const activeProfile = Option.getOrNull(input.activeRoute.profile);
-  const authorization =
-    active._tag === "RelayConnectionTarget" ||
-    (activeProfile?._tag === "BearerConnectionProfile" &&
-      activeProfile.authorization === "t3-connect")
-      ? ("t3-connect" as const)
-      : undefined;
-  const sharedCredential =
-    authorization === undefined && active._tag === "BearerConnectionTarget"
-      ? credentialConnectionId(active.connectionId)
-      : undefined;
+  const sharedCredential = credentialConnectionId(active.connectionId);
   const reported = new Map<string, URL>();
   const tailscaleOrigins = new Set<string>();
   for (const endpoint of input.reported) {
@@ -264,7 +213,6 @@ export function mergeLearnedRoutes(input: {
     if (known.has(url.origin)) continue;
     if (
       url.protocol === "http:" &&
-      sharedCredential !== undefined &&
       !tailscaleOrigins.has(url.origin) &&
       !tokenAllowsPlainHttp(saved, sharedCredential)
     ) {
@@ -290,7 +238,6 @@ export function mergeLearnedRoutes(input: {
           httpBaseUrl,
           wsBaseUrl: `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}/`,
           learned: true,
-          ...(authorization === undefined ? {} : { authorization }),
           ...(tailscaleOrigins.has(url.origin) ? { network: "tailscale" as const } : {}),
         }),
       ),
@@ -333,7 +280,7 @@ export function sendsTokenInClear(
   tailscale?: boolean,
 ): boolean {
   const profile = Option.getOrNull(route.profile);
-  if (profile?._tag !== "BearerConnectionProfile" || profile.authorization === "t3-connect") {
+  if (profile?._tag !== "BearerConnectionProfile") {
     return false;
   }
   if ((tailscale ?? profile.network === "tailscale") || !profile.httpBaseUrl.startsWith("http:")) {
@@ -370,7 +317,6 @@ function withNetwork(route: ConnectionRoute, tailscale: boolean): ConnectionRout
         httpBaseUrl: profile.httpBaseUrl,
         wsBaseUrl: profile.wsBaseUrl,
         ...(profile.learned === undefined ? {} : { learned: profile.learned }),
-        ...(profile.authorization === undefined ? {} : { authorization: profile.authorization }),
         ...(tailscale ? { network: "tailscale" as const } : {}),
       }),
     ),
@@ -380,11 +326,9 @@ function withNetwork(route: ConnectionRoute, tailscale: boolean): ConnectionRout
 function learnedConnectionId(
   environmentId: string,
   origin: string,
-  sharedCredential: string | undefined,
+  sharedCredential: string,
 ): string {
-  return sharedCredential === undefined
-    ? `learned:${environmentId}:${origin}`
-    : `learned:${environmentId}:${origin}@${sharedCredential}`;
+  return `learned:${environmentId}:${origin}@${sharedCredential}`;
 }
 
 export function credentialConnectionId(connectionId: string): string {
@@ -414,10 +358,6 @@ export function routesAfterRemoving(
   return routes.filter((route) => {
     if (route === removed) return false;
     if (!isLearned(route)) return true;
-    const profile = Option.getOrNull(route.profile);
-    if (profile?._tag === "BearerConnectionProfile" && profile.authorization === "t3-connect") {
-      return removed.target._tag !== "RelayConnectionTarget";
-    }
     return credentialConnectionId(connectionRouteId(route.target)) !== removedId;
   });
 }
@@ -436,8 +376,4 @@ export function pendingRouteOrder(
   const saved = new Set(savedIds);
   if (!pending.every((id) => saved.has(id))) return null;
   return pending.some((id, index) => id !== savedIds[index]) ? pending : null;
-}
-
-export function sshTargetKey(target: DesktopSshEnvironmentTarget): string {
-  return JSON.stringify([target.alias, target.hostname, target.username, target.port]);
 }

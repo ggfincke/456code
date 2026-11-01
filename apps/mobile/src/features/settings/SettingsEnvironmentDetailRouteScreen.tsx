@@ -1,5 +1,5 @@
 import * as Dialog from "../../components/ui/Dialog";
-import { useAtom, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import {
   AuthProvidersManageScope,
@@ -9,8 +9,6 @@ import {
 } from "@t3tools/contracts";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { sessionPermissionsUnavailableMessage } from "@t3tools/shared/authScopeOptions";
-import * as Cause from "effect/Cause";
-import * as Exit from "effect/Exit";
 import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
 import { View } from "react-native";
@@ -27,7 +25,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import { ConnectionEnvironmentRow } from "../connection/ConnectionEnvironmentRow";
 import { EnvironmentRoutesSection } from "./EnvironmentRoutesSection";
-import { OutdatedServerUpdateSection } from "./OutdatedServerUpdateSection";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
@@ -36,7 +33,6 @@ import {
   canUpdateEnvironmentProvider,
   supportsEnvironmentUpdate,
 } from "./environment-maintenance";
-import { environmentReleaseCheckAtom, releaseCheckValue } from "./environmentUpdateCheck";
 
 export function SettingsEnvironmentDetailRouteScreen({
   route,
@@ -73,10 +69,6 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
   const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [releaseCheck, checkRelease] = useAtom(environmentReleaseCheckAtom(environmentId), {
-    mode: "promiseExit",
-  });
-  const release = releaseCheckValue(releaseCheck);
 
   const connected = environment?.isEnabled === true && environment.connectionState === "connected";
   const allowed =
@@ -92,14 +84,12 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
   const busy = !connected || pending !== null || running || providerBusy;
   const disabled = !allowed || busy;
   const version = config?.environment.serverVersion;
-  // fincke: a host announcing a newer staged desktop build offers it w/o a release lookup
+  // fincke: a host announcing a newer staged desktop build offers it; there is no release lookup
   const hostAppUpdate = config?.hostAppUpdate ?? null;
   const checkedRelease =
     hostAppUpdate !== null && version !== undefined
       ? { fromVersion: version, targetVersion: hostAppUpdate.availableVersion }
-      : release?.fromVersion === version
-        ? release
-        : null;
+      : null;
   const capabilities = config?.environment.capabilities;
 
   async function run(label: string, action: () => Promise<void>) {
@@ -206,10 +196,15 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
               }
             />
             {outdated ? (
-              <OutdatedServerUpdateSection
-                environmentId={environmentId}
-                label={environment.environmentLabel}
-              />
+              <SettingsSection title="456code">
+                <View className="gap-1 p-4">
+                  <Text className="text-base text-foreground">Update required</Text>
+                  <Text className="text-sm text-foreground-muted">
+                    This app needs a newer version of 456code on this machine. Update the desktop
+                    app there.
+                  </Text>
+                </View>
+              </SettingsSection>
             ) : !connected ? (
               <Text className="px-2 text-sm text-foreground-muted">
                 Connect this environment to manage it.
@@ -264,21 +259,6 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                       </Text>
                     ) : null}
                   </View>
-                  <SettingsActionRow
-                    icon="arrow.clockwise"
-                    label="Check for updates"
-                    disabled={disabled}
-                    loading={pending === "check"}
-                    onPress={() => {
-                      if (disabled) return;
-                      const fromVersion = config.environment.serverVersion;
-                      void run("check", async () => {
-                        const exit = await checkRelease(async () => fromVersion);
-                        // `run` owns the error message, so a failed lookup rethrows to it.
-                        if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);
-                      });
-                    }}
-                  />
                   {checkedRelease?.targetVersion &&
                   supportsEnvironmentUpdate(config.environment.capabilities) ? (
                     <SettingsActionRow

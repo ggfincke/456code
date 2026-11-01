@@ -56,10 +56,8 @@
         "graphql.config.ts",
       ],
       // The generated operations export every selection's class.
-      // preserve upstream update source while fork self-updates are disabled
       "ignoreIssues": {
         "**/*.graphql.ts": ["exports", "types", "namespaceMembers"],
-        "src/cloud/selfUpdate.ts": ["exports"],
       },
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // the web build prerequisite and native runtime packages stay external

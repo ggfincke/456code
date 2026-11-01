@@ -3,7 +3,7 @@ import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 
 import { BearerConnectionProfile } from "./connection/catalog.ts";
-import { BearerConnectionTarget, RelayConnectionTarget } from "./connection/model.ts";
+import { BearerConnectionTarget } from "./connection/model.ts";
 import type { EnvironmentPresentation } from "./connection/presentation.ts";
 import {
   linkableMachines,
@@ -119,7 +119,7 @@ const presentation = (
     environmentId,
     entry: {
       ...(first ?? {
-        target: new RelayConnectionTarget({ environmentId, label }),
+        target: new BearerConnectionTarget({ environmentId, label, connectionId: `${id}-none` }),
         profile: Option.none(),
       }),
       ...(rest.length === 0 ? {} : { alternateRoutes: rest }),

@@ -9,10 +9,13 @@ change your permission mode, branch, or worktree. Your own defaults apply.
 ## Write a link
 
 ```
-https://app.t3.codes/new?prompt=Rate%20my%20swearing
-https://app.t3.codes/new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
-https://app.t3.codes/new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
+code456-thin://new?prompt=Rate%20my%20swearing
+code456-thin://new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
+code456-thin://new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
 ```
+
+These open in the desktop app. The same `/new?…` path opens in a browser on the address of
+your own 456code server.
 
 | Parameter  | Meaning                                                                       |
 | ---------- | ----------------------------------------------------------------------------- |
@@ -37,7 +40,7 @@ Encode the prompt for a URL. In JavaScript, use `encodeURIComponent`.
   worktree. T3 Code checks the code out only after you confirm, because the checkout runs your
   setup script on it.
 
-A thread link with a prompt, such as `https://app.t3.codes/<environment>/<thread>?prompt=…`,
+A thread link with a prompt, such as `code456-thin://threads/<environment>/<thread>?prompt=…`,
 puts the prompt in that thread's composer. If you already typed a draft there, T3 Code asks
 before it replaces it.
 
