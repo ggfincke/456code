@@ -41,19 +41,13 @@ projections, and platform-owned state such as drafts.
 
 ## HTTP authorization
 
-RPC sessions authenticate at socket upgrade, while HTTP requests need current
-credentials from the
-[authorization service](../../packages/client-runtime/src/authorization/service.ts).
-Replacing a healthy socket for HTTP renewal would interrupt conversations and
-change the transport generation without a transport failure. Refresh failure
-belongs to the HTTP operation.
+RPC sessions authenticate at socket upgrade, while HTTP requests send the
+prepared connection's bearer token or browser cookie. An HTTP failure belongs to
+the HTTP operation; replacing a healthy socket for it would interrupt
+conversations and change the transport generation without a transport failure.
 
-The server closes a socket when its session is revoked or expires. For
-short-lived access tokens, the driver renews a live socket's token in its last
-minute. The server then moves the socket to the newer session for the same
-DPoP key, subject, and scopes
-([`SessionStore.awaitInvalidation`](../../apps/server/src/auth/SessionStore.ts)).
-If renewal fails, the socket closes at expiry and the supervisor reconnects.
+The server closes a socket when its session is revoked or expires, and the
+supervisor reconnects.
 
 Session listings must retain unrevoked connected sessions after credential expiry
 so an open connection does not disappear from connection management. This does

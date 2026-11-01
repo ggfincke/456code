@@ -1,14 +1,11 @@
 # Environment authentication
 
-The environment issues its own sessions and enforces their capabilities. Relay
-credentials belong to a separate trust boundary. A relay token is never an
-environment login.
+The environment issues its own sessions and enforces their capabilities.
 
 ## Authority survives transport changes
 
 Pairing delegates a set of scopes. Exchanging a bootstrap credential can narrow
-that grant but cannot widen it. The default grant includes access and relay
-management: `terminal:operate` is a shell as the server's user and
+that grant but cannot widen it. The default grant includes access management: `terminal:operate` is a shell as the server's user and
 `orchestration:operate` can start a full-access agent, and either can mint a
 session with every scope through `t3 auth session issue`, so withholding
 management from the default would not be a boundary. A narrower client gets
@@ -23,8 +20,9 @@ access to the connections list would become a way to acquire another client's
 authority.
 
 Browser cookies, bearer tokens, and DPoP tokens adapt the same scoped session
-model. DPoP binds a token to a client's proof key; an invalid proof must fail
-rather than fall back to bearer authentication. The OAuth token-exchange
+model. 456code's clients use cookies and bearer tokens; the server still verifies
+DPoP proofs for clients that send them. DPoP binds a token to a client's proof key;
+an invalid proof must fail rather than fall back to bearer authentication. The OAuth token-exchange
 vocabulary gives these grants a familiar meaning.
 
 ### MCP clients are a separate audience
