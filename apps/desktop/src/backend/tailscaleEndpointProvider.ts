@@ -102,7 +102,6 @@ const resolveTailscaleMagicDnsAdvertisedEndpoint = Effect.fn(
       label: "Tailscale HTTPS",
       httpBaseUrl,
       reachability: "private-network",
-      hostedHttpsCompatibility: isReachable ? "compatible" : "requires-configuration",
       status: isReachable ? "available" : "unavailable",
       description: isReachable
         ? "HTTPS endpoint served by Tailscale Serve."

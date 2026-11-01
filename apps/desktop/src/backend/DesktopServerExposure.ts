@@ -195,7 +195,6 @@ const resolveDesktopCoreAdvertisedEndpoints = (
           label: isHttpsEndpoint ? "Custom HTTPS" : "Custom endpoint",
           httpBaseUrl: customEndpointUrl,
           reachability: "public",
-          ...(isHttpsEndpoint ? ({ hostedHttpsCompatibility: "compatible" } as const) : {}),
           status: "unknown",
           description: isHttpsEndpoint
             ? "User-configured HTTPS endpoint for this desktop backend."

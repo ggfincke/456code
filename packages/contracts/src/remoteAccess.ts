@@ -18,15 +18,6 @@ export const AdvertisedEndpointReachability = Schema.Literals([
 ]);
 export type AdvertisedEndpointReachability = typeof AdvertisedEndpointReachability.Type;
 
-export const AdvertisedEndpointHostedHttpsCompatibility = Schema.Literals([
-  "compatible",
-  "mixed-content-blocked",
-  "requires-configuration",
-  "unknown",
-]);
-export type AdvertisedEndpointHostedHttpsCompatibility =
-  typeof AdvertisedEndpointHostedHttpsCompatibility.Type;
-
 export const AdvertisedEndpointStatus = Schema.Literals(["available", "unavailable", "unknown"]);
 export type AdvertisedEndpointStatus = typeof AdvertisedEndpointStatus.Type;
 
@@ -47,7 +38,6 @@ export const AdvertisedEndpointProvider = Schema.Struct({
 export type AdvertisedEndpointProvider = typeof AdvertisedEndpointProvider.Type;
 
 export const AdvertisedEndpointCompatibility = Schema.Struct({
-  hostedHttpsApp: AdvertisedEndpointHostedHttpsCompatibility,
   desktopApp: Schema.Literals(["compatible", "unknown"]),
 });
 export type AdvertisedEndpointCompatibility = typeof AdvertisedEndpointCompatibility.Type;

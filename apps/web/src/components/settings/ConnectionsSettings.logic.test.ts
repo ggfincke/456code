@@ -1,7 +1,8 @@
-import type { DesktopWslState } from "@t3tools/contracts";
+import type { AdvertisedEndpoint, DesktopWslState } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
+  resolveAdvertisedEndpointPairingUrl,
   resolveTailscaleServeBaseUrl,
   selectQrEndpointOption,
   togglePairingScopeSelection,
@@ -141,6 +142,26 @@ describe("selectQrEndpointOption", () => {
   it("skips non-QR-shareable options in the fallback so the panel never opens on loopback", () => {
     expect(selectQrEndpointOption(options, "tailscale-ip:gone", "nope")?.id).toBe(
       "tailscale-ip:http://100.84.12.7:4780",
+    );
+  });
+});
+
+describe("resolveAdvertisedEndpointPairingUrl", () => {
+  it("pairs a Tailscale HTTPS endpoint directly on its own origin", () => {
+    const endpoint: AdvertisedEndpoint = {
+      id: "tailscale-magicdns:https://furnace.tail.ts.net/",
+      label: "Tailscale HTTPS",
+      provider: { id: "tailscale", label: "Tailscale", kind: "private-network", isAddon: true },
+      httpBaseUrl: "https://furnace.tail.ts.net/",
+      wsBaseUrl: "wss://furnace.tail.ts.net/",
+      reachability: "private-network",
+      compatibility: { desktopApp: "compatible" },
+      source: "desktop-addon",
+      status: "available",
+    };
+
+    expect(resolveAdvertisedEndpointPairingUrl(endpoint, "PAIRCODE")).toBe(
+      "https://furnace.tail.ts.net/pair#token=PAIRCODE",
     );
   });
 });
