@@ -2,7 +2,7 @@ import type { ProviderInteractionMode } from "@t3tools/contracts";
 
 // Codex truncates entries over 4,000 bytes; keep each section self-contained and below that limit.
 export const T3_CODE_ORCHESTRATION_SECTIONS: ReadonlyArray<string> = [
-  `## T3 Code orchestration
+  `## 456code orchestration
 
 Ordinary coding tasks need no T3 tools.
 
@@ -31,14 +31,14 @@ ${T3_CODE_ORCHESTRATION_SECTIONS.join("\n\n")}
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
-## T3 Code browser
+## 456code browser
 
 When browser work was asked, \`preview_*\` is the browser you share with the user: \`preview_status\` first, then \`preview_open\` if no tab can be automated. Prefer snapshot locators over coordinates. Switch browsers only if the tools are absent or \`preview_open\` says unsupported, the user asks, or two preview calls fail on one step. Then quote the error and switch.
 `;
 
 const T3_CODE_DEVICE_TOOLS = ["device_list", "device_open", "device_screenshot", "device_close"];
 
-const deviceToolInstructions = (loadTools: string) => `## T3 Code devices
+const deviceToolInstructions = (loadTools: string) => `## 456code devices
 
 When a task needs an iOS Simulator or Android Emulator, on this machine or on an SSH device host such as a remote Mac, use the device tools so the user can watch it in the Device panel.${loadTools}
 1. Call \`device_list\` unless you already have the device's \`hostId\` and \`id\`.
@@ -59,13 +59,13 @@ export const T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH = deviceToolInstr
 // its tools, so they need the terminal transport other harnesses never use.
 const T3_CODE_ACP_MCP_FALLBACK_INSTRUCTIONS = `ACP fallback: if the T3 tools are absent and \`T3_ACP_MCP_NODE\` is present, call them through the terminal: \`ELECTRON_RUN_AS_NODE=1 "$T3_ACP_MCP_NODE" \${T3_ACP_MCP_ENTRYPOINT:+"$T3_ACP_MCP_ENTRYPOINT"} acp-mcp-call orchestrator_capabilities '{}'\` (\`T3_ACP_MCP_ENTRYPOINT\` is unset for a standalone executable). Delegate with \`acp-mcp-call delegate_task '{"task":"...","target":{"providerInstanceId":"...","model":"..."},"mode":"async","clientRequestId":"..."}'\`.`;
 
-const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Default
+const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## 456code interaction mode: Default
 
-Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
+Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until 456code supplies a different interaction-mode instruction.`;
 
-const T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Plan
+const T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS = `## 456code interaction mode: Plan
 
-Investigate with read-only actions and do not edit files or otherwise execute the implementation. Resolve discoverable facts before asking questions. When the requirements are decision complete, return a concrete implementation plan and do not start implementing it. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
+Investigate with read-only actions and do not edit files or otherwise execute the implementation. Resolve discoverable facts before asking questions. When the requirements are decision complete, return a concrete implementation plan and do not start implementing it. Treat this mode as active until 456code supplies a different interaction-mode instruction.`;
 
 export interface T3AcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
@@ -101,7 +101,7 @@ export function t3AcpPromptWithInstructions(input: {
         ]
       : []),
   ];
-  return `<t3_code_instructions>\n${instructions.join("\n\n")}\n</t3_code_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
+  return `<456code_instructions>\n${instructions.join("\n\n")}\n</456code_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
 }
 
 const orchestrationInstructions = (hasDeviceTools: boolean) =>
@@ -110,7 +110,7 @@ const orchestrationInstructions = (hasDeviceTools: boolean) =>
     : T3_CODE_ORCHESTRATION_INSTRUCTIONS;
 
 function prependT3OrchestrationInstructions(prompt: string, instructions: string): string {
-  return `<t3_code_orchestration_instructions>${instructions.trim()}</t3_code_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
+  return `<456code_orchestration_instructions>${instructions.trim()}</456code_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
 }
 
 /** For providers whose instructions ride on the prompt, so a compacted conversation loses them. */

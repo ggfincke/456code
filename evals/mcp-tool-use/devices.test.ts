@@ -173,11 +173,11 @@ it.effect("gives a native subagent T3's SubagentStart context instead of T3's ap
     );
     assert.include(reminders, subagentContext);
     // Claude Code 2.1.310 records the hook's context after the task, and sends it that way.
-    const blocks = shown({ ...native, subagentContext: "## T3 Code devices" }) ?? [];
+    const blocks = shown({ ...native, subagentContext: "## 456code devices" }) ?? [];
     assert.equal(blocks.at(-2), testCase.prompt);
     assert.equal(
       blocks.at(-1),
-      "<system-reminder>\nSubagentStart hook additional context: ## T3 Code devices\n</system-reminder>",
+      "<system-reminder>\nSubagentStart hook additional context: ## 456code devices\n</system-reminder>",
     );
   }),
 );
@@ -656,7 +656,7 @@ it.effect("denies every device tool with T3's own error when agent device access
       );
     }
     // T3 drops its device text for a thread without the capability, on refs that have it.
-    assert.notInclude(t3SystemAppend(model, false), "## T3 Code devices");
+    assert.notInclude(t3SystemAppend(model, false), "## 456code devices");
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
