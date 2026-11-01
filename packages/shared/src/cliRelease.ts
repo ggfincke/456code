@@ -1,5 +1,5 @@
 // packages/shared/src/cliRelease.ts
-// shares archive naming and checksum handling across cli installers
+// shares cli archive naming and release channel helpers
 
 // local packaging and upstream installers derive the same archive names
 // changing them breaks compatibility with existing release assets
@@ -7,9 +7,6 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { compareSemverVersions } from "./semver.ts";
-
-const CLI_RELEASE_REPOSITORY = "pingdotgg/t3code";
-export const CLI_RELEASES_PAGE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
 
 // keep local archives compatible with the upstream release assets consumed by installers
 // node single-executables do not support darwin-x64 and segfault at startup
@@ -46,17 +43,6 @@ export function cliArchiveFileName(version: string, platformKey: CliArchivePlatf
   return `t3-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
 }
 
-export function parseChecksums(text: string): ReadonlyMap<string, string> {
-  const checksums = new Map<string, string>();
-  for (const line of text.split(/\r?\n/)) {
-    const match = /^([0-9a-fA-F]{64})\s+\*?(\S.*)$/.exec(line.trim());
-    if (match?.[1] !== undefined && match[2] !== undefined) {
-      checksums.set(match[2], match[1].toLowerCase());
-    }
-  }
-  return checksums;
-}
-
 export type CliReleaseChannel = "stable" | "nightly" | "preview";
 
 export function cliReleaseChannelOf(version: string): CliReleaseChannel {
@@ -88,28 +74,6 @@ export function acceptsTrackSwitchRelease(
     cliReleaseChannelOf(found) === (channel === "nightly" ? "nightly" : "stable") &&
     compareSemverVersions(found, checked) >= 0
   );
-}
-
-/** Page until the channel matches; nightlies can push preview/stable releases past the first page. */
-export function cliReleaseIndexPageUrl(page: number): string {
-  return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
-}
-
-/** Draft assets are not downloadable. */
-export function newestCliReleaseVersion(
-  releases: ReadonlyArray<{
-    readonly tag_name: string;
-    readonly draft?: boolean | undefined;
-  }>,
-  channel: CliReleaseChannel,
-): string | undefined {
-  for (const release of releases) {
-    if (release.draft) continue;
-    const version = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(release.tag_name)?.[1];
-    if (version === undefined) continue;
-    if (cliReleaseChannelOf(version) === channel) return version;
-  }
-  return undefined;
 }
 
 const NpmReleaseMigrationManifest = Schema.Struct({

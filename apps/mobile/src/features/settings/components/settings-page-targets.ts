@@ -24,5 +24,3 @@ export const SETTINGS_PAGE_TARGETS = [
 ] as const;
 
 export type SettingsPageTarget = (typeof SETTINGS_PAGE_TARGETS)[number];
-
-export type SettingsLegalDocumentTarget = "SettingsLegal";

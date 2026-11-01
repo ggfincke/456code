@@ -25,7 +25,7 @@ const home = { key: "home", name: "Home" };
 const thread = { key: "thread", name: "Thread", params: { threadId: "draft-thread" } };
 const files = { key: "files", name: "ThreadFiles", params: thread.params };
 const settings = { key: "settings", name: "Settings" };
-const legal = { key: "legal", name: "SettingsLegal" };
+const addProject = { key: "add-project", name: "AddProject" };
 
 function history(
   routes: StackNavigationState<ParamListBase>["routes"],
@@ -35,7 +35,7 @@ function history(
     type: "stack",
     stale: false,
     index: routes.length - 1,
-    routeNames: ["Home", "Thread", "ThreadFiles", "Settings", "SettingsLegal"],
+    routeNames: ["Home", "Thread", "ThreadFiles", "Settings", "AddProject"],
     routes,
     preloadedRoutes: [],
   };
@@ -104,16 +104,16 @@ describe("workspace router projection", () => {
   it("keeps workspace flows beside Home and restores them after a modal closes", () => {
     const draft = { key: "draft", name: "Thread", params: { draft: {} } };
     const modal = { key: "connections", name: "Connections" };
-    const routes = [home, thread, draft, legal];
+    const routes = [home, thread, draft, addProject];
     const isOverlay = (route: { name: string }) => route.name === "Connections";
     expect(projectWorkspaceStack(history([...routes, modal]), isOverlay)).toEqual({
       primary: home,
-      detail: [thread, draft, legal],
+      detail: [thread, draft, addProject],
       overlays: [modal],
     });
     expect(projectWorkspaceStack(history(routes), isOverlay)).toEqual({
       primary: home,
-      detail: [thread, draft, legal],
+      detail: [thread, draft, addProject],
       overlays: [],
     });
   });
@@ -147,7 +147,7 @@ describe("workspace router projection", () => {
 
 describe("native workspace dismissal", () => {
   it("dismisses a sheet and its pushed pages without removing the underlying draft", () => {
-    const state = history([home, thread, settings, legal]);
+    const state = history([home, thread, settings, addProject]);
     const action = nativeWorkspacePopAction(state, settings.key)!;
     const next = StackRouter({}).getStateForAction(state, action, {
       routeNames: state.routeNames,
@@ -160,9 +160,9 @@ describe("native workspace dismissal", () => {
   });
 
   it("does not dismiss retained sheets beyond the active index", () => {
-    const state = { ...history([home, thread, settings, legal]), index: 1 };
+    const state = { ...history([home, thread, settings, addProject]), index: 1 };
     expect(nativeWorkspacePopAction(state, settings.key)).toBeNull();
-    expect(nativeWorkspacePopAction(state, legal.key)).toBeNull();
+    expect(nativeWorkspacePopAction(state, addProject.key)).toBeNull();
   });
 
   it("removes the descendants when UIKit dismisses their parent conversation", () => {
@@ -405,9 +405,9 @@ describe("v5 stack handoff", () => {
     const secondModal = { ...settings, key: "another-settings" };
     expect(
       partitionStackPresentations(
-        [home, thread, settings, legal, secondModal],
+        [home, thread, settings, addProject, secondModal],
         (route) => route.name === "Settings",
       ),
-    ).toEqual([[home, thread], [settings, legal], [secondModal]]);
+    ).toEqual([[home, thread], [settings, addProject], [secondModal]]);
   });
 });
