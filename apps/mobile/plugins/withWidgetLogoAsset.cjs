@@ -1,5 +1,5 @@
 // apps/mobile/plugins/withWidgetLogoAsset.cjs
-// installs the shared ocean artwork in the ios widget asset catalog
+// installs ocean artwork and provider marks in the ios widget asset catalog
 
 "use strict";
 
@@ -44,6 +44,26 @@ function withAssetFiles(config) {
       fs.writeFileSync(path.join(catalogDir, "Contents.json"), CATALOG_CONTENTS);
       fs.writeFileSync(path.join(imageSetDir, "Contents.json"), IMAGE_SET_CONTENTS);
       fs.copyFileSync(source, path.join(imageSetDir, IMAGE_NAME));
+      const providerAssets = path.join(cfg.modRequest.projectRoot, "assets", "widget-providers");
+      for (const [name, files] of [
+        ["WidgetCodex", ["codex-light.png", "codex-dark.png"]],
+        ["WidgetClaude", ["claude.png"]],
+        ["WidgetCoral", ["coral.png"]],
+      ]) {
+        const directory = path.join(catalogDir, `${name}.imageset`);
+        fs.mkdirSync(directory, { recursive: true });
+        const images = files.map((filename, index) => ({
+          idiom: "universal",
+          filename,
+          ...(index === 1 ? { appearances: [{ appearance: "luminosity", value: "dark" }] } : {}),
+        }));
+        fs.writeFileSync(
+          path.join(directory, "Contents.json"),
+          JSON.stringify({ images, info: { author: "expo", version: 1 } }, null, 2) + "\n",
+        );
+        for (const filename of files)
+          fs.copyFileSync(path.join(providerAssets, filename), path.join(directory, filename));
+      }
       return cfg;
     },
   ]);
