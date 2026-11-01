@@ -63,7 +63,7 @@ function chipSurfaces(theme: MobileThemeVariables) {
   }));
 }
 
-const BUILT_IN_THEMES = MOBILE_THEME_IDS.filter((id) => id !== "material-you").flatMap((id) =>
+const BUILT_IN_THEMES = MOBILE_THEME_IDS.flatMap((id) =>
   (["light", "dark"] as const).map((appearance) => ({
     name: `${id} ${appearance}`,
     theme: getMobileThemeVariables(id, appearance),

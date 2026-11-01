@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  alignListPaneToHinge,
   deriveLayout,
   deriveThreadFeedInitialContentInset,
   deriveThreadArrangementSizing,
@@ -177,26 +176,5 @@ describe("deriveWorkspacePaneLayout", () => {
       primarySidebarSuppressedByAuxiliary: false,
       auxiliaryPaneVisible: true,
     });
-  });
-});
-
-describe("alignListPaneToHinge", () => {
-  const layout = deriveLayout({ width: 852, height: 880 });
-
-  it("keeps the default split when either side of the hinge would be too narrow", () => {
-    const narrowList = {
-      layout,
-      hinge: { x: 300, width: 0 },
-      viewportWidth: 852,
-      leadingWidth: 96,
-    };
-    const narrowDetail = {
-      layout,
-      hinge: { x: 600, width: 0 },
-      viewportWidth: 852,
-      leadingWidth: 0,
-    };
-    expect(alignListPaneToHinge(narrowList)).toBe(layout);
-    expect(alignListPaneToHinge(narrowDetail)).toBe(layout);
   });
 });

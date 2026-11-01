@@ -24,8 +24,6 @@ import { useSavedRemoteConnections } from "../../state/use-remote-environment-re
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { useDeviceType, useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { WorkspaceEmptyDetail } from "../layout/WorkspaceEmptyDetail";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
-import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
@@ -185,7 +183,6 @@ export function HomeRouteScreen() {
             />
           </Toolbar>
         ) : null}
-        {Platform.OS === "android" ? <AndroidScreenHeader title="Threads" /> : null}
         <WorkspaceEmptyDetail
           onAddConnection={
             Platform.OS === "android" && !catalogState.hasConnections
@@ -201,86 +198,81 @@ export function HomeRouteScreen() {
   }
 
   return (
-    <AndroidHomeFabLayout
-      disabled={workspace !== null && Platform.OS !== "android"}
-      onStartNewTask={startNewTask}
-    >
-      <>
-        {/* Screen options merge shallowly; restore the header after split view. */}
-        {workspace !== null && Platform.OS === "ios" ? null : (
-          <NativeStackScreenOptions
-            optionsVersion={headerWidth}
-            options={{
-              ...getConnectionAwareBrandHeaderOptions({
-                headerWidth,
-                trailingItemCount: nativePrimaryColumn && deviceType === "pad" ? 2 : 1,
-                onOpenEnvironments: () => openSettings(navigation, "SettingsEnvironments"),
-              }),
-              headerShown: Platform.OS !== "android",
-            }}
-          />
-        )}
-        <HomeHeader
-          environments={environments}
-          projects={projectFilterOptions}
-          searchQuery={searchQuery}
-          selectedEnvironmentId={selectedEnvironmentId}
-          selectedProjectKey={selectedProjectKey}
-          onEnvironmentChange={setSelectedEnvironmentId}
-          onProjectChange={setSelectedProjectKey}
-          onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
-          onOpenSettings={() => selectTab("settings")}
-          onSearchQueryChange={setSearchQuery}
-          onStartNewTask={startNewTask}
-        />
-
-        <HomeScreen
-          catalogState={catalogState}
-          environments={environments}
-          onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
-          onArchiveThread={archiveThread}
-          onDeleteThread={confirmDeleteThread}
-          onSettleThread={settleThread}
-          onSnoozeThread={snoozeThread}
-          onUnsnoozeThread={unsnoozeThread}
-          onUnsettleThread={unsettleThread}
-          onPinThread={pinThread}
-          onUnpinThread={unpinThread}
-          onSetThreadAutoSettle={setThreadAutoSettle}
-          onMoveThread={moveThread}
-          onRenameThread={renameThread}
-          onRegenerateThreadTitle={regenerateThreadTitle}
-          onEnvironmentChange={setSelectedEnvironmentId}
-          onProjectChange={setSelectedProjectKey}
-          onOpenSettings={() => selectTab("settings")}
-          onSearchQueryChange={setSearchQuery}
-          onSelectThread={handleSelectThread}
-          onSelectPendingTask={openPendingTask}
-          onDeletePendingTask={confirmDeletePendingTask}
-          onNewThreadOnBranch={handleNewThreadOnBranch}
-          onNewThreadInProject={(project) => {
-            selectThreadRoute({
-              draft: {
-                requestId: uuidv4(),
-                environmentId: String(project.environmentId),
-                projectId: String(project.id),
-                title: project.title,
-              },
-            });
+    <>
+      {/* Screen options merge shallowly; restore the header after split view. */}
+      {workspace !== null && Platform.OS === "ios" ? null : (
+        <NativeStackScreenOptions
+          optionsVersion={headerWidth}
+          options={{
+            ...getConnectionAwareBrandHeaderOptions({
+              headerWidth,
+              trailingItemCount: nativePrimaryColumn && deviceType === "pad" ? 2 : 1,
+              onOpenEnvironments: () => openSettings(navigation, "SettingsEnvironments"),
+            }),
+            headerShown: Platform.OS !== "android",
           }}
-          onStartNewTask={startNewTask}
-          pendingTasks={pendingTasks}
-          projectGroupingMode={listOptions.projectGroupingMode}
-          projects={projects}
-          projectSortOrder={listOptions.projectSortOrder}
-          savedConnectionsById={savedConnectionsById}
-          searchQuery={searchQuery}
-          selectedEnvironmentId={selectedEnvironmentId}
-          selectedProjectKey={selectedProjectKey}
-          threads={threads}
         />
-        <ThreadUndoNotice visible={visible} />
-      </>
-    </AndroidHomeFabLayout>
+      )}
+      <HomeHeader
+        environments={environments}
+        projects={projectFilterOptions}
+        searchQuery={searchQuery}
+        selectedEnvironmentId={selectedEnvironmentId}
+        selectedProjectKey={selectedProjectKey}
+        onEnvironmentChange={setSelectedEnvironmentId}
+        onProjectChange={setSelectedProjectKey}
+        onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
+        onOpenSettings={() => selectTab("settings")}
+        onSearchQueryChange={setSearchQuery}
+        onStartNewTask={startNewTask}
+      />
+
+      <HomeScreen
+        catalogState={catalogState}
+        environments={environments}
+        onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
+        onArchiveThread={archiveThread}
+        onDeleteThread={confirmDeleteThread}
+        onSettleThread={settleThread}
+        onSnoozeThread={snoozeThread}
+        onUnsnoozeThread={unsnoozeThread}
+        onUnsettleThread={unsettleThread}
+        onPinThread={pinThread}
+        onUnpinThread={unpinThread}
+        onSetThreadAutoSettle={setThreadAutoSettle}
+        onMoveThread={moveThread}
+        onRenameThread={renameThread}
+        onRegenerateThreadTitle={regenerateThreadTitle}
+        onEnvironmentChange={setSelectedEnvironmentId}
+        onProjectChange={setSelectedProjectKey}
+        onOpenSettings={() => selectTab("settings")}
+        onSearchQueryChange={setSearchQuery}
+        onSelectThread={handleSelectThread}
+        onSelectPendingTask={openPendingTask}
+        onDeletePendingTask={confirmDeletePendingTask}
+        onNewThreadOnBranch={handleNewThreadOnBranch}
+        onNewThreadInProject={(project) => {
+          selectThreadRoute({
+            draft: {
+              requestId: uuidv4(),
+              environmentId: String(project.environmentId),
+              projectId: String(project.id),
+              title: project.title,
+            },
+          });
+        }}
+        onStartNewTask={startNewTask}
+        pendingTasks={pendingTasks}
+        projectGroupingMode={listOptions.projectGroupingMode}
+        projects={projects}
+        projectSortOrder={listOptions.projectSortOrder}
+        savedConnectionsById={savedConnectionsById}
+        searchQuery={searchQuery}
+        selectedEnvironmentId={selectedEnvironmentId}
+        selectedProjectKey={selectedProjectKey}
+        threads={threads}
+      />
+      <ThreadUndoNotice visible={visible} />
+    </>
   );
 }

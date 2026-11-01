@@ -47,9 +47,7 @@ export function getMobileUniwindThemeName(
   appearance: MobileThemeAppearance,
 ): MobileUniwindThemeName {
   if (themeId === "fincke-ocean") return "fincke-ocean-dark";
-  return themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you"
-    ? appearance
-    : `${themeId}-${appearance}`;
+  return themeId === DEFAULT_MOBILE_THEME_ID ? appearance : `${themeId}-${appearance}`;
 }
 
 export function createMobileThemeRuntimeOperations(

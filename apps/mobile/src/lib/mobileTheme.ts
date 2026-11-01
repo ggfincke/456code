@@ -24,12 +24,8 @@ export const FINCKE_OCEAN_INLINE_CODE = {
   color: "#89ddff",
   background: "rgba(137, 221, 255, 0.07)",
 } as const;
-export const MOBILE_THEME_IDS = [
-  ...SHARED_MOBILE_THEME_IDS,
-  "material-you",
-  FINCKE_OCEAN_THEME_ID,
-] as const;
-export type MobileThemeId = SharedMobileThemeId | "material-you" | typeof FINCKE_OCEAN_THEME_ID;
+export const MOBILE_THEME_IDS = [...SHARED_MOBILE_THEME_IDS, FINCKE_OCEAN_THEME_ID] as const;
+export type MobileThemeId = SharedMobileThemeId | typeof FINCKE_OCEAN_THEME_ID;
 export type MobileThemeAppearance = ThemeAppearance;
 export type MobileThemeMode = MobileThemeAppearance | "system";
 export type MobileThemeIds = Readonly<Record<MobileThemeAppearance, MobileThemeId>>;
@@ -39,7 +35,6 @@ export const MOBILE_THEME_OPTIONS: ReadonlyArray<{
   readonly label: string;
 }> = [
   { id: DEFAULT_MOBILE_THEME_ID, label: "T3 Classic" },
-  { id: "material-you", label: "Material You" },
   { id: FINCKE_OCEAN_THEME_ID, label: finckeOcean.name },
   ...BUILT_IN_THEMES.map((theme) => ({ id: theme.id as MobileThemeId, label: theme.label })),
 ];
@@ -490,7 +485,7 @@ export function createMobileThemeVariables(
 }
 
 export function getMobileThemeColors(
-  themeId: Exclude<MobileThemeId, "material-you">,
+  themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
 ): ThemeColors {
   if (themeId === FINCKE_OCEAN_THEME_ID) {
@@ -515,7 +510,7 @@ export function getMobileThemeColors(
 }
 
 export function getMobileThemeVariables(
-  themeId: Exclude<MobileThemeId, "material-you">,
+  themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
   overrides: Partial<MobileThemeVariables> | null = null,
 ): MobileThemeVariables {
@@ -570,8 +565,7 @@ export function getMobileThemePreviewColors(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
 ): ThemePreviewColors {
-  if (themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you")
-    return STANDARD_THEME_PREVIEW_COLORS[appearance];
+  if (themeId === DEFAULT_MOBILE_THEME_ID) return STANDARD_THEME_PREVIEW_COLORS[appearance];
   const colors = getMobileThemeColors(themeId, appearance);
   return {
     canvas: themeColorToNativeColor(colors.canvas),

@@ -17,7 +17,7 @@ export function getMobileThemeRuntimeVariables(
   appearance: MobileThemeAppearance,
   platform: string,
 ): MobileThemeVariables {
-  const usesDefaultPalette = themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you";
+  const usesDefaultPalette = themeId === DEFAULT_MOBILE_THEME_ID;
   const variables = usesDefaultPalette
     ? defaults[appearance]
     : getMobileThemeVariables(themeId, appearance);

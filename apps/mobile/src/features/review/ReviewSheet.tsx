@@ -28,7 +28,6 @@ import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { cn } from "../../lib/cn";
 import { environmentCatalog } from "../../connection/catalog";
@@ -397,22 +396,14 @@ function ReviewFileNavigator({
         Platform.OS === "android" ? "flex-1 bg-header" : "flex-1 border-l border-border bg-sheet"
       }
     >
-      {Platform.OS === "android" ? (
-        <AndroidScreenHeader
-          title="Changed files"
-          subtitle={`${files.length} ${files.length === 1 ? "file" : "files"}`}
-          hideBottomBorder
-        />
-      ) : (
-        <View className="border-b border-border" style={{ paddingTop: headerInset }}>
-          <View className="px-4 py-3">
-            <Text className="text-sm font-t3-bold text-foreground">Changed files</Text>
-            <Text className="text-xs text-foreground-muted">
-              {files.length} {files.length === 1 ? "file" : "files"}
-            </Text>
-          </View>
+      <View className="border-b border-border" style={{ paddingTop: headerInset }}>
+        <View className="px-4 py-3">
+          <Text className="text-sm font-t3-bold text-foreground">Changed files</Text>
+          <Text className="text-xs text-foreground-muted">
+            {files.length} {files.length === 1 ? "file" : "files"}
+          </Text>
         </View>
-      )}
+      </View>
       <ScreenContent insetHorizontal>{fileList}</ScreenContent>
     </View>
   );

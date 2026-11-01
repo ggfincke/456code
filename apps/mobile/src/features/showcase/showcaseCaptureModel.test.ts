@@ -43,7 +43,7 @@ describe("isShowcaseThemeApplied", () => {
       isShowcaseThemeApplied({
         launchRequestRead: true,
         requestedTheme: "t3-code",
-        themeIds: { light: "t3-code", dark: "material-you" },
+        themeIds: { light: "t3-code", dark: "fincke-ocean" },
       }),
     ).toBe(false);
   });
@@ -64,7 +64,7 @@ describe("showcaseReadinessKey", () => {
     expect(
       showcaseReadinessKey({
         ...review,
-        renderSignal: { scene: "review", themeId: "material-you" },
+        renderSignal: { scene: "review", themeId: "fincke-ocean" },
       }),
     ).toBeNull();
     const drawn = { ...review, renderSignal: { scene: "review", themeId: "t3-code" } } as const;

@@ -4,10 +4,9 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 import { useNavigation } from "@react-navigation/native";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
-import { Platform, View } from "react-native";
+import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import { LocalEnvironmentList } from "./LocalEnvironmentList";
 import { PullRequestRoutingSettings } from "./PullRequestRoutingSettings";
@@ -30,27 +29,13 @@ export function ConnectionsRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === "android" ? (
-        <AndroidScreenHeader
-          title="Environments"
-          onBack={() => navigation.goBack()}
-          actions={[
-            {
-              accessibilityLabel: "Add environment",
-              icon: "plus",
-              onPress: () => navigation.navigate("ConnectionsNew"),
-            },
-          ]}
+      <Toolbar placement="right">
+        <Toolbar.Button
+          icon="plus"
+          onPress={() => navigation.navigate("ConnectionsNew")}
+          separateBackground
         />
-      ) : (
-        <Toolbar placement="right">
-          <Toolbar.Button
-            icon="plus"
-            onPress={() => navigation.navigate("ConnectionsNew")}
-            separateBackground
-          />
-        </Toolbar>
-      )}
+      </Toolbar>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}

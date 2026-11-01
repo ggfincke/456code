@@ -2,7 +2,6 @@ import type { RefObject } from "react";
 import { Pressable, TextInput, type TextInputInstance, View } from "react-native";
 
 import { SymbolView } from "./AppSymbol";
-import { useAndroidControlSizing } from "./useAndroidControlSizing";
 
 export interface SearchFieldProps {
   readonly autoFocus?: boolean;
@@ -23,21 +22,16 @@ export function SearchField({
   value,
   onChangeText,
 }: SearchFieldProps) {
-  const { scale, mediumIconSize } = useAndroidControlSizing();
   return (
     <View
       className="min-w-0 flex-1 flex-row items-center rounded-full border border-input-border bg-input"
       style={{
-        minHeight: Math.max(48, 42 * scale),
-        gap: 7 * scale,
-        paddingHorizontal: 10.5 * scale,
+        minHeight: 48,
+        gap: 7,
+        paddingHorizontal: 10.5,
       }}
     >
-      <SymbolView
-        name="magnifyingglass"
-        size={mediumIconSize}
-        tintColorClassName="accent-foreground-muted"
-      />
+      <SymbolView name="magnifyingglass" size={18} tintColorClassName="accent-foreground-muted" />
       <TextInput
         ref={inputRef}
         accessibilityLabel={accessibilityLabel}
@@ -51,7 +45,7 @@ export function SearchField({
         cursorColorClassName="accent-focus"
         selectionHandleColorClassName="accent-focus"
         className="min-w-0 flex-1 font-sans text-base text-foreground"
-        style={{ paddingVertical: 7 * scale }}
+        style={{ paddingVertical: 7 }}
         value={value}
         onChangeText={onChangeText}
       />
@@ -67,7 +61,7 @@ export function SearchField({
         >
           <SymbolView
             name="xmark.circle.fill"
-            size={mediumIconSize}
+            size={18}
             tintColorClassName="accent-foreground-muted"
           />
         </Pressable>

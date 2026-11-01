@@ -1,17 +1,17 @@
 import type { MenuAction } from "@react-native-menu/menu";
 import type { AppBarMenuItem } from "./AppBar.types";
 
-export function androidHeaderMenuActions(items: ReadonlyArray<AppBarMenuItem>): MenuAction[] {
+export function headerMenuActions(items: ReadonlyArray<AppBarMenuItem>): MenuAction[] {
   return items.flatMap((item): MenuAction[] =>
     "items" in item
       ? item.inline && !item.title
-        ? androidHeaderMenuActions(item.items)
+        ? headerMenuActions(item.items)
         : [
             {
               id: item.id,
               title: item.title ?? "",
               image: item.icon,
-              subactions: androidHeaderMenuActions(item.items),
+              subactions: headerMenuActions(item.items),
             },
           ]
       : [
@@ -40,17 +40,4 @@ export function findHeaderMenuAction(
     }
   }
   return undefined;
-}
-
-export function splitAndroidHeaderActions<Action extends { readonly overflowOnly?: boolean }>(
-  actions: ReadonlyArray<Action>,
-  wide: boolean,
-) {
-  const inline = actions.filter((action) => !action.overflowOnly);
-  const directCount = actions.length > 2 ? (wide ? 3 : 1) : inline.length;
-  const visibleActions = inline.slice(0, directCount);
-  return {
-    visibleActions,
-    overflowActions: actions.filter((action) => !visibleActions.includes(action)),
-  };
 }

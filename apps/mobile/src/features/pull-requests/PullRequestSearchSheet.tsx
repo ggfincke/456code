@@ -1,9 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
-import { useRef, type ReactNode } from "react";
-import { Platform, View, type TextInputInstance } from "react-native";
+import { type ReactNode } from "react";
+import { View } from "react-native";
 
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
-import { SearchField } from "../../components/ui/SearchField";
 import { SheetHeader } from "../../components/ui/SheetHeader";
 import { Toolbar } from "../../components/ui/Toolbar";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
@@ -30,32 +28,9 @@ export function PullRequestSearchSheet(props: {
 }) {
   const navigation = useNavigation();
   const integratedSearch = useNativeMailSearchToolbar();
-  const searchRef = useRef<TextInputInstance>(null);
   const list = props.children({
     paddingBottom: integratedSearch ? NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET + 16 : 16,
   });
-  if (Platform.OS === "android") {
-    return (
-      <View className="flex-1 bg-sheet" collapsable={false}>
-        <AndroidScreenHeader
-          title={props.title}
-          hideBottomBorder
-          onBack={() => navigation.goBack()}
-        />
-        <View className="bg-header px-4 pb-3 pt-1">
-          <SearchField
-            inputRef={searchRef}
-            accessibilityLabel={props.placeholder}
-            clearAccessibilityLabel={props.clearAccessibilityLabel}
-            onChangeText={props.onQueryChange}
-            placeholder={props.placeholder}
-            value={props.query}
-          />
-        </View>
-        {list}
-      </View>
-    );
-  }
   return (
     <View className="flex-1 bg-sheet">
       <SheetHeader

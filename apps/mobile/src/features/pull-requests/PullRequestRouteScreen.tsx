@@ -27,8 +27,6 @@ import {
   pullRequestActionLabel,
 } from "./pullRequestActions";
 import * as Clipboard from "expo-clipboard";
-import { Menu } from "../../components/ui/Menu";
-import { IconButton } from "../../components/ui/IconButton";
 import { Button } from "../../components/ui/Button";
 import { usePullRequestReviewDraft } from "./usePullRequestReviewDraft";
 import { usePullRequestFilesViewed } from "./usePullRequestFilesViewed";
@@ -65,12 +63,8 @@ import { NativeScrollViewMarker as ScrollViewMarker } from "../../native/NativeS
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
-import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { AndroidWorkspaceSidebarButton } from "../layout/workspace-sidebar-toolbar";
 import { useWorkspaceSidebarHeaderItem } from "../layout/useWorkspaceSidebarHeaderItem";
-import { useAndroidWorkspaceBack } from "../workspace/useAndroidWorkspaceNavigation";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -331,12 +325,10 @@ function PullRequestOverview(props: {
 }
 
 function usePullRequestToolbarHeight(bottomInset: number) {
-  const { buttonSize } = useAndroidControlSizing();
-  return useState(() => (Platform.OS === "android" ? bottomInset + buttonSize + 40 : 0));
+  return useState(() => (Platform.OS === "android" ? bottomInset + 88 : 0));
 }
 
 export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestParams>) {
-  const returnToList = useAndroidWorkspaceBack("pullRequests");
   const { layout } = useAdaptiveWorkspaceLayout();
   const sidebarHeaderItem = useWorkspaceSidebarHeaderItem();
   const navigation = useNavigation();
@@ -477,100 +469,6 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
           }}
           optionsVersion={[layout.usesSplitView, sidebarHeaderItem]}
         />
-        {Platform.OS === "android" ? (
-          <AndroidScreenHeader
-            title={`#${params.number}${connected ? "" : " · Offline"}`}
-            subtitle={params.repository}
-            onBack={layout.usesSplitView ? undefined : returnToList}
-            leading={layout.usesSplitView ? <AndroidWorkspaceSidebarButton /> : undefined}
-            actions={[
-              ...(permissions.verdicts.length
-                ? [
-                    {
-                      accessibilityLabel: "Submit review",
-                      icon: "text.bubble" as const,
-                      onPress: () =>
-                        navigation.navigate("PullRequestReview", { ...params, mode: "review" }),
-                    },
-                  ]
-                : []),
-              ...(permissions.canComment
-                ? [
-                    {
-                      accessibilityLabel: "Add comment",
-                      icon: "plus.bubble" as const,
-                      onPress: () =>
-                        navigation.navigate("PullRequestReview", { ...params, mode: "comment" }),
-                    },
-                  ]
-                : []),
-              ...(permissions.canEditChangeRequest
-                ? [
-                    {
-                      accessibilityLabel: "Edit title",
-                      icon: "pencil" as const,
-                      overflowOnly: true,
-                      onPress: () =>
-                        navigation.navigate("PullRequestEdit", { ...params, field: "title" }),
-                    },
-                    {
-                      accessibilityLabel: "Edit description",
-                      icon: "doc.text" as const,
-                      overflowOnly: true,
-                      onPress: () =>
-                        navigation.navigate("PullRequestEdit", { ...params, field: "body" }),
-                    },
-                  ]
-                : []),
-              ...(maintainerEdits.visible
-                ? [
-                    {
-                      accessibilityLabel: "Allow edits from maintainers",
-                      icon: "pencil" as const,
-                      selected: maintainerEdits.value,
-                      disabled: maintainerEdits.saving,
-                      subtitle: maintainerEdits.subtitle,
-                      overflowOnly: true,
-                      onPress: maintainerEdits.toggle,
-                    },
-                  ]
-                : []),
-              ...(identity
-                ? [
-                    {
-                      accessibilityLabel: openOnProviderLabel(identity.provider),
-                      icon: "arrow.up.right" as const,
-                      onPress: () => void Linking.openURL(identity.url),
-                    },
-                    {
-                      accessibilityLabel: "Copy link",
-                      icon: "link" as const,
-                      overflowOnly: true,
-                      onPress: () => copyPullRequestLink(identity),
-                    },
-                    {
-                      accessibilityLabel: "Share…",
-                      icon: "square.and.arrow.up" as const,
-                      overflowOnly: true,
-                      onPress: () => sharePullRequestLink(identity),
-                    },
-                  ]
-                : []),
-              ...(showsDeleteBranch
-                ? [
-                    {
-                      accessibilityLabel: pullRequestActionLabel("delete-branch", terminology),
-                      icon: PR_ACTION_ICONS["delete-branch"],
-                      disabled: !action.available("delete-branch"),
-                      destructive: true,
-                      overflowOnly: true,
-                      onPress: confirmDeleteBranch,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        ) : null}
         <Toolbar placement="right">
           <Toolbar.Menu
             title={capitalizeTerm(terminology.singular)}
@@ -922,9 +820,6 @@ export function PullRequestFileRouteScreen(props: PullRequestFileRouteProps) {
   return (
     <View className="flex-1 bg-screen">
       <NativeStackScreenOptions options={{ title, headerTitle: title }} />
-      {Platform.OS === "android" ? (
-        <AndroidScreenHeader title={title} onBack={() => navigation.goBack()} />
-      ) : null}
       <View className="flex-1 items-center justify-center">
         <AppActivityIndicator accessibilityLabel="Loading changes" />
       </View>
@@ -1119,60 +1014,6 @@ function PullRequestFileRouteContent({ route }: PullRequestFileRouteProps) {
           unstable_headerSubtitle: `${commit ? commit.slice(0, 7) : `#${route.params.number}`} · ${data.files.length} ${data.files.length === 1 ? "file" : "files"}${filter.hideTestFiles && filter.hiddenCount ? ` · ${filter.hiddenCount} ${filter.hiddenCount === 1 ? "test" : "tests"} hidden` : ""}`,
         }}
       />
-      {Platform.OS === "android" ? (
-        <AndroidScreenHeader
-          title={title}
-          onBack={() => navigation.goBack()}
-          trailing={
-            <Menu
-              actions={[
-                {
-                  id: "word-wrap",
-                  title: "Word wrap",
-                  image: "text.alignleft",
-                  state: appearance.codeWordBreak ? "on" : "off",
-                },
-                {
-                  id: "hide-tests",
-                  title: "Hide test files",
-                  image: "line.3.horizontal.decrease",
-                  state: filter.hideTestFiles ? "on" : "off",
-                },
-                ...(permissions.verdicts.length
-                  ? [{ id: "submit-review", title: "Submit review", image: "text.bubble" }]
-                  : []),
-                ...(permissions.canComment
-                  ? [{ id: "comment-on-pr", title: "Add comment", image: "plus.bubble" }]
-                  : []),
-                ...(selectedRow && selectedFile
-                  ? [
-                      ...(canCommentOnDiff ? [{ id: "comment", title: "Add review comment" }] : []),
-                      { id: "copy", title: "Copy line" },
-                    ]
-                  : []),
-              ]}
-              onPressAction={({ nativeEvent }) => {
-                if (nativeEvent.event === "word-wrap") setCodeWordBreak(!appearance.codeWordBreak);
-                else if (nativeEvent.event === "hide-tests") toggleTestFiles();
-                else if (
-                  nativeEvent.event === "submit-review" ||
-                  nativeEvent.event === "comment-on-pr"
-                )
-                  navigation.navigate("PullRequestReview", {
-                    ...route.params,
-                    mode: nativeEvent.event === "submit-review" ? "review" : "comment",
-                  });
-                else if (nativeEvent.event === "comment") commentOnLine();
-                else void Clipboard.setStringAsync(selectedRow?.content ?? "");
-              }}
-            >
-              <View pointerEvents="none">
-                <IconButton icon="ellipsis" accessibilityLabel="Diff options" />
-              </View>
-            </Menu>
-          }
-        />
-      ) : null}
       <Toolbar placement="right">
         <Toolbar.Menu title="Diff options" accessibilityLabel="Diff options" icon="ellipsis">
           {permissions.verdicts.length ? (

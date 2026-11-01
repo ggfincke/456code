@@ -1,5 +1,4 @@
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
-import { SearchField } from "../../components/ui/SearchField";
 import { Button } from "../../components/ui/Button";
 import { Toolbar } from "../../components/ui/Toolbar";
 import * as Dialog from "../../components/ui/Dialog";
@@ -25,7 +24,6 @@ import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -194,13 +192,6 @@ export function NewTaskEnvironmentPickerRouteScreen() {
           title: "Environment",
         }}
       />
-      {Platform.OS === "android" ? (
-        <AndroidScreenHeader
-          title="Environment"
-          hideBottomBorder
-          onBack={() => navigation.goBack()}
-        />
-      ) : null}
       <ScreenContent>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
@@ -369,8 +360,6 @@ export function BranchPickerScreen(props: {
     readonly onChangeStartFromOrigin: (value: boolean) => void;
   };
 }) {
-  const searchRef = useRef<import("react-native").TextInputInstance>(null);
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const usesNativeMailSearchToolbar = useNativeMailSearchToolbar();
   const selectedBranchName =
@@ -480,31 +469,6 @@ export function BranchPickerScreen(props: {
         showsVerticalScrollIndicator={false}
       />
     );
-
-  if (Platform.OS === "android") {
-    return (
-      <View className="flex-1 bg-sheet" collapsable={false}>
-        <NativeStackScreenOptions options={{ headerShown: false }} />
-        <AndroidScreenHeader
-          title={props.title}
-          hideBottomBorder
-          onBack={() => navigation.goBack()}
-        />
-        <View className="bg-header px-4 pb-3 pt-1">
-          <SearchField
-            inputRef={searchRef}
-            autoFocus={false}
-            accessibilityLabel="Find a branch"
-            clearAccessibilityLabel="Clear branch search"
-            onChangeText={props.onQueryChange}
-            placeholder="Find a branch"
-            value={props.query}
-          />
-        </View>
-        <ScreenContent>{branchContent}</ScreenContent>
-      </View>
-    );
-  }
 
   return (
     <>

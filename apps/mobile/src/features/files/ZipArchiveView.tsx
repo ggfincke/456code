@@ -14,13 +14,12 @@ import {
 import { LegendList } from "@legendapp/list/react-native";
 import { fetch } from "expo/fetch";
 import { File } from "expo-file-system";
-import { useNavigation, usePreventRemove } from "@react-navigation/native";
+import { usePreventRemove } from "@react-navigation/native";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Keyboard, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
@@ -292,7 +291,6 @@ function ZipArchiveHeader(props: {
   readonly onSave: () => void;
   readonly onRemove: (() => void) | null;
 }) {
-  const navigation = useNavigation();
   const isAndroid = Platform.OS === "android";
   return (
     <>
@@ -305,48 +303,24 @@ function ZipArchiveHeader(props: {
           unstable_headerSubtitle: isAndroid ? undefined : props.subtitle,
         }}
       />
-      {isAndroid ? (
-        <AndroidScreenHeader
-          title={props.name}
-          subtitle={props.subtitle}
-          onBack={() => {
-            if (navigation.canGoBack()) navigation.goBack();
-          }}
-          actions={[
-            { accessibilityLabel: "Save ZIP", icon: "square.and.arrow.up", onPress: props.onSave },
-            ...(props.onRemove
-              ? [
-                  {
-                    accessibilityLabel: "Remove from draft",
-                    icon: "trash" as const,
-                    onPress: props.onRemove,
-                    destructive: true,
-                    overflowOnly: true,
-                  },
-                ]
-              : []),
-          ]}
-        />
-      ) : (
-        <Toolbar placement="right">
-          {props.onRemove ? (
-            <Toolbar.Menu accessibilityLabel="ZIP actions" icon="ellipsis">
-              <Toolbar.MenuAction icon="square.and.arrow.up" onPress={props.onSave}>
-                Save ZIP
-              </Toolbar.MenuAction>
-              <Toolbar.MenuAction icon="trash" destructive onPress={props.onRemove}>
-                Remove from draft
-              </Toolbar.MenuAction>
-            </Toolbar.Menu>
-          ) : (
-            <Toolbar.Button
-              accessibilityLabel="Save ZIP"
-              icon="square.and.arrow.up"
-              onPress={props.onSave}
-            />
-          )}
-        </Toolbar>
-      )}
+      <Toolbar placement="right">
+        {props.onRemove ? (
+          <Toolbar.Menu accessibilityLabel="ZIP actions" icon="ellipsis">
+            <Toolbar.MenuAction icon="square.and.arrow.up" onPress={props.onSave}>
+              Save ZIP
+            </Toolbar.MenuAction>
+            <Toolbar.MenuAction icon="trash" destructive onPress={props.onRemove}>
+              Remove from draft
+            </Toolbar.MenuAction>
+          </Toolbar.Menu>
+        ) : (
+          <Toolbar.Button
+            accessibilityLabel="Save ZIP"
+            icon="square.and.arrow.up"
+            onPress={props.onSave}
+          />
+        )}
+      </Toolbar>
     </>
   );
 }
@@ -755,61 +729,26 @@ function ZipEntryView(props: {
           unstable_headerSubtitle: isAndroid ? undefined : subtitle,
         }}
       />
-      {isAndroid ? (
-        <AndroidScreenHeader
-          title={entry.name}
-          subtitle={subtitle}
-          onBack={props.onBack}
-          actions={[
-            ...(renderedMode
-              ? [
-                  {
-                    accessibilityLabel: rendered ? "Show source" : "Show preview",
-                    icon: rendered ? ("doc.text" as const) : ("eye" as const),
-                    onPress: () => setRendered((value) => !value),
-                  },
-                ]
-              : []),
-            ...(canAddToChat
-              ? [
-                  {
-                    accessibilityLabel: "Add to chat",
-                    icon: "plus.bubble" as const,
-                    onPress: addToChat,
-                    disabled: busy !== null,
-                  },
-                ]
-              : []),
-            {
-              accessibilityLabel: "Save file",
-              icon: "square.and.arrow.up",
-              onPress: save,
-              loading: busy === "save",
-            },
-          ]}
-        />
-      ) : (
-        <Toolbar placement="right">
-          <Toolbar.Menu accessibilityLabel="File actions" icon="ellipsis">
-            {renderedMode ? (
-              <Toolbar.MenuAction
-                icon={rendered ? "doc.text" : "eye"}
-                onPress={() => setRendered((value) => !value)}
-              >
-                {rendered ? "Show source" : "Show preview"}
-              </Toolbar.MenuAction>
-            ) : null}
-            {canAddToChat ? (
-              <Toolbar.MenuAction icon="plus.bubble" disabled={busy !== null} onPress={addToChat}>
-                Add to chat
-              </Toolbar.MenuAction>
-            ) : null}
-            <Toolbar.MenuAction icon="square.and.arrow.up" disabled={busy !== null} onPress={save}>
-              Save file
+      <Toolbar placement="right">
+        <Toolbar.Menu accessibilityLabel="File actions" icon="ellipsis">
+          {renderedMode ? (
+            <Toolbar.MenuAction
+              icon={rendered ? "doc.text" : "eye"}
+              onPress={() => setRendered((value) => !value)}
+            >
+              {rendered ? "Show source" : "Show preview"}
             </Toolbar.MenuAction>
-          </Toolbar.Menu>
-        </Toolbar>
-      )}
+          ) : null}
+          {canAddToChat ? (
+            <Toolbar.MenuAction icon="plus.bubble" disabled={busy !== null} onPress={addToChat}>
+              Add to chat
+            </Toolbar.MenuAction>
+          ) : null}
+          <Toolbar.MenuAction icon="square.and.arrow.up" disabled={busy !== null} onPress={save}>
+            Save file
+          </Toolbar.MenuAction>
+        </Toolbar.Menu>
+      </Toolbar>
       {content.status === "failed" ? (
         <ScrollView contentContainerClassName="flex-grow items-center justify-center px-6">
           <EmptyState

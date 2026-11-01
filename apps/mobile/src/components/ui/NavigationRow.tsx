@@ -5,7 +5,6 @@ import { useAppearancePreferences } from "../../features/settings/appearance/App
 import { cn } from "../../lib/cn";
 import { AppText } from "./AppText";
 import { SymbolView } from "./AppSymbol";
-import { useAndroidControlSizing } from "./useAndroidControlSizing";
 
 export function NavigationRow({
   title,
@@ -27,7 +26,6 @@ export function NavigationRow({
   readonly trailing?: ReactNode;
 }) {
   const { themeVariables } = useAppearancePreferences();
-  const { smallIconSize } = useAndroidControlSizing();
   return (
     <Pressable
       accessibilityRole="button"
@@ -60,7 +58,7 @@ export function NavigationRow({
       {trailing !== undefined ? (
         trailing
       ) : !props.disabled ? (
-        <SymbolView name="chevron.right" size={smallIconSize} tintColorClassName="accent-chevron" />
+        <SymbolView name="chevron.right" size={16} tintColorClassName="accent-chevron" />
       ) : null}
     </Pressable>
   );

@@ -16,7 +16,6 @@ import { FullWindowOverlay } from "react-native-screens";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { cn } from "../../lib/cn";
 import { CompactVoiceWaveform, DictationElapsedTime } from "./ComposerDictationControl";
 import { useGlobalVoiceInput } from "./VoiceInputProvider";
@@ -68,7 +67,6 @@ function EdgeDictationPill(props: {
   const voice = useGlobalVoiceInput();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { fabSize } = useAndroidControlSizing();
   const { expanded, onExpandedChange: setExpanded } = props;
   const progress = useDerivedValue(() => withTiming(expanded ? 1 : 0, MORPH_TIMING));
 
@@ -85,7 +83,7 @@ function EdgeDictationPill(props: {
 
   const bottom =
     Platform.OS === "android"
-      ? Math.max(insets.bottom, 16) + 16 + fabSize + 12
+      ? Math.max(insets.bottom, 16) + 16 + 56 + 12
       : Math.max(insets.bottom, 12) + IOS_BOTTOM_CHROME_CLEARANCE;
 
   const presentation = resolveVoiceComposerPresentation(voice.state, voice.elapsedSeconds);

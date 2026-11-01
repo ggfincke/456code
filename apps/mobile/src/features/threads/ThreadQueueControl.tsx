@@ -20,14 +20,12 @@ import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-scree
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "../../components/ui/Button";
-import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
-import { ScreenContent } from "../../components/ui/ScreenContent";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
-import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
+import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { useAssetUrl } from "../../state/assets";
 import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
@@ -36,7 +34,6 @@ import { assetImageSource } from "../../lib/assetImageSource";
 import { beginQueuedRunEdit, useQueuedRunEdit } from "../../state/queued-run-edit";
 import { environmentThreadDetails, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import {
   REMOVE_QUEUED_MESSAGE_ACCESSIBILITY_LABEL,
   buildCancelQueuedRunCommand,
@@ -120,7 +117,6 @@ function QueuedRunSender(props: {
 }
 
 export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
-  const { layout } = useAdaptiveWorkspaceLayout();
   const target = route.params;
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -358,45 +354,33 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     </ScrollView>
   );
 
-  if (Platform.OS === "ios") {
-    // Plain formSheets lack stack headers; host one in a nested native stack.
-    return (
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <View collapsable={false} className="flex-1 bg-sheet">
-          <ScreenStack style={{ flex: 1 }}>
-            <Screen
-              activityState={2}
-              enabled
-              isNativeStack
-              screenId="thread-queue-sheet-native"
-              scrollEdgeEffects={HEADER_SCROLL_EDGE_EFFECTS}
-              style={{ backgroundColor: theme["--color-sheet"], flex: 1 }}
-            >
-              {content}
-              <ScreenStackHeaderConfig
-                backgroundColor="rgba(0,0,0,0)"
-                color={theme["--color-foreground"]}
-                hideBackButton
-                hideShadow={false}
-                title="Queued"
-                titleColor={theme["--color-foreground"]}
-                titleFontSize={18}
-                titleFontWeight="800"
-                translucent
-              />
-            </Screen>
-          </ScreenStack>
-        </View>
-      </GestureHandlerRootView>
-    );
-  }
-
+  // Plain formSheets lack stack headers; host one in a nested native stack.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View collapsable={false} className="flex-1 bg-sheet">
-        <NativeStackScreenOptions options={{ sheetCornerRadius: 28 }} />
-        <AndroidSheetHeader title="Queued" onBack={() => navigation.goBack()} />
-        <ScreenContent insetHorizontal={layout.usesSplitView}>{content}</ScreenContent>
+        <ScreenStack style={{ flex: 1 }}>
+          <Screen
+            activityState={2}
+            enabled
+            isNativeStack
+            screenId="thread-queue-sheet-native"
+            scrollEdgeEffects={HEADER_SCROLL_EDGE_EFFECTS}
+            style={{ backgroundColor: theme["--color-sheet"], flex: 1 }}
+          >
+            {content}
+            <ScreenStackHeaderConfig
+              backgroundColor="rgba(0,0,0,0)"
+              color={theme["--color-foreground"]}
+              hideBackButton
+              hideShadow={false}
+              title="Queued"
+              titleColor={theme["--color-foreground"]}
+              titleFontSize={18}
+              titleFontWeight="800"
+              translucent
+            />
+          </Screen>
+        </ScreenStack>
       </View>
     </GestureHandlerRootView>
   );
