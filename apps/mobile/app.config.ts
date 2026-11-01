@@ -98,6 +98,20 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
     enableAndroid: true,
     widgets: [
       {
+        name: "DenseWidget",
+        displayName: "456code Dense",
+        description: "Connected plan limits, pending decisions, and running agents.",
+        android: null,
+        ios: {
+          supportedFamilies: [
+            "systemMedium",
+            "systemLarge",
+            "systemExtraLarge",
+            "accessoryRectangular",
+          ],
+        },
+      },
+      {
         name: "SubscriptionUsage",
         displayName: "Subscription usage",
         description: "Subscription quotas from your connected 456code environments.",
@@ -367,7 +381,13 @@ const config: ExpoConfig = {
     // Compile out the unused pedometer to avoid an iOS motion purpose string.
     ["expo-sensors", { motionPermission: false }],
     // Mods run in reverse order; expo-widgets must create and wipe the target before assets are added.
-    ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
+    ...(!isIosPersonalTeamBuild
+      ? [
+          "./plugins/withWidgetLogoAsset.cjs",
+          "./plugins/withDenseWidgetPortrait.cjs",
+          widgetsPlugin,
+        ]
+      : []),
     "./plugins/withAndroidNetworkSecurityConfig.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",

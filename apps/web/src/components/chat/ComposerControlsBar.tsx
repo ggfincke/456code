@@ -35,7 +35,7 @@ import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
  */
 // The model trigger stays filled while its popup is open.
 const MODEL_TRIGGER_STATES = "data-popup-open:bg-accent data-popup-open:text-foreground";
-// fork: effort sits a word space after the model, so its states brighten text, not a box
+// fincke: effort sits a word space after the model, so its states brighten text, not a box
 const TEXT_CONTROL_STATES =
   "hover:bg-transparent data-pressed:bg-transparent data-popup-open:bg-transparent data-pressed:text-foreground data-popup-open:text-foreground";
 
@@ -140,14 +140,14 @@ export function ComposerControlsBar(props: {
   } = props;
   const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
   const {
-    accessDisplay,
     showModeBlock,
     hiddenBlockCount: restingHiddenBlockCount,
     hiddenBlockIds: hiddenRestingBlockIds,
     overflowShowsPermissions,
     pickerOwnsModeShortcut,
   } = resolveComposerControlsOwnership({
-    matchesDefault: accessMatchesDefault || props.permissionsShownInStrip,
+    // fincke: the permissions chip always shows, so the effort slider row never shifts
+    matchesDefault: false,
     planModeUiEnabled,
     collapsed: composerControlsCollapsed,
     measuredHiddenBlockCount,
@@ -178,7 +178,8 @@ export function ComposerControlsBar(props: {
               runtimeModeOptions={compatibleRuntimeModeOptions}
               size={controlSize}
               hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-              accessDisplay={accessDisplay}
+              // fincke: icon only, so switching modes never shifts the row; the tooltip names it
+              accessDisplay="icon"
               emphasized={!accessMatchesDefault}
               onToggleInteractionMode={toggleInteractionMode}
               onRuntimeModeChange={handleRuntimeModeChange}

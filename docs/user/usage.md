@@ -168,6 +168,12 @@ Claude quotas. Tap it to open **Usage → Limits**; on Android this works while 
 the background, otherwise open the app from the launcher. On iOS, use **Edit Widget** to choose
 Session, Weekly, or both for each provider. Reopen T3 to refresh expired readings.
 
+On iOS, add **456code Dense** for plan limits, threads that need a decision, and running agents
+in one widget. Choose Extra Large Portrait on iOS 27 for more activity and larger text.
+Tap a thread to open it, or a quota to open Usage. Limits follow the windows
+reported by your connected accounts. Activity refreshes while 456code is open; after two
+minutes without an update, the widget labels it as last-known state. Reopen the app to refresh.
+
 ## Keyboard shortcuts
 
 On web and desktop, open Usage from the command palette. While on Usage,

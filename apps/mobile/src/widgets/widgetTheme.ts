@@ -1,3 +1,5 @@
+// apps/mobile/src/widgets/widgetTheme.ts
+// maps app colors to native widget palettes
 import {
   flattenThemeColor,
   themeColorWithAlpha,
@@ -12,6 +14,9 @@ export interface WidgetPalette {
   accent: string;
   track: string;
   danger: string;
+  info?: string;
+  warning?: string;
+  attentionSurface?: string;
 }
 
 export interface WidgetTheme {
@@ -35,6 +40,12 @@ export function createWidgetTheme(
       variables["--color-card"],
     ),
     danger: variables["--color-danger-foreground"],
+    info: variables["--color-update-foreground"],
+    warning: variables["--color-warning-foreground"],
+    attentionSurface: flattenThemeColor(
+      themeColorWithAlpha(variables["--color-warning-foreground"], 0.12),
+      variables["--color-card"],
+    ),
   });
   return { mode, light: palette(palettes.light), dark: palette(palettes.dark) };
 }
