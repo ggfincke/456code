@@ -8,6 +8,8 @@
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
 - Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
 - September 14 upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101`.
+- October 31 upstream base: stable tag `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e` (521 commits after v0.1.5).
+- October 29 upstream base: stable tag `v0.1.5`, `6d450a4284852af137b2f3407fddd89eb76e7644`.
 - October 27 upstream base: stable tag `v0.1.3`, `d2c440312e5f39d59827ed466838a623516454d6`.
 - October 8 upstream base: `a4c9494b0e3606775cc5fc929fc138399288bd43` (303 further commits after October 4).
 - October 4 base: `efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448` (191 further commits after September 30).
@@ -39,6 +41,19 @@ Coral now runs from the current-main ACP finish worktree through the repaired no
 Analysis captures the selected task's actual worktree, resolves comparison commit identities first, and checks the displayed diff hash/root before and after analysis. Source reads come exclusively from the captured base/target. Failed refreshes leave the previous complete capture accessible. A branch-range comparison analyzes the working tree against the merge-base, matching the displayed Changes diff. Returning to the app checks freshness by comparing a file-stat fingerprint of the working tree, not a content hash; explicit Refresh rebuilds. Existing results retain their capture identity and visible stale state.
 
 The extension cache is `userdata/cartographer` beneath that backend home. Work is limited to 8,000 source/config files, 2 MiB/file, 64 MiB/capture, two concurrent analyses and a 90-second worker deadline. Responses cap graph, edge, dependency and source sizes. Captured source is project data. The newest two generations per comparison are kept, plus any generation a pointer still names; the cache is rebuildable and may be removed while the app is stopped. There is no periodic analysis or automatic turn-completion analysis.
+
+## October 31 update (v0.1.6)
+
+Merged stable tag `v0.1.6` (`2359643cff`), 521 commits past `v0.1.5`. Principles review notes:
+
+- T3 Connect, relay, Clerk, guest sharing, mobile push, prompt link copying and release workflows stay removed, including upstream's new `t3 up`/`t3 connect`/`t3 status` commands, `ClerkTokenStore` and the EAS fork preview workflow. A new background service still listens on private networks by default; upstream's `T3CODE_LAN=false` default for new services is not applied, while `--lan` and `T3CODE_LAN` remain as overrides.
+- Analytics stay deleted: the server startup heartbeat, client owner IDs on socket connect and the analytics-only `countThreads` read were dropped.
+- The GitHub App sign-in (upstream marks it internal testing only), the repository star check and the "star us on GitHub" prompt were dropped. Upstream's fix naming which GitHub credential cannot see a repository was ported onto the fork's request policy.
+- Upstream's server-side npm release lookup was dropped; update everything keeps the staged-build flow.
+- Upstream moved effort and permissions into the model picker. The fork's `EffortPicker` is rendered beside the model picker, the picker's effort column is omitted, and its permissions footer stays.
+- Kept: project pin and archive (migration 076), side chats, 1Password secret providers behind upstream's flag, `t3 service protect`, desktop history navigation buttons and upstream's attachment and markdown changes.
+- Ultrathink is typed-only, as upstream made it: the shared model-traits filter hides it from the web `EffortPicker` and the iPhone effort slider, and a typed `Ultrathink:` still controls effort.
+- Replaced components: since `v0.1.5`, upstream's `SidebarThreadRow` gained action tooltips and a remote machine icon layout fix. These are not yet ported to `ActivityThreadRow`.
 
 ## October 27 update (v0.1.3)
 

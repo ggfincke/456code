@@ -61,7 +61,9 @@ function codexSpeedTier(descriptor: SelectDescriptor | undefined) {
  * Owned replacement for the composer's TraitsPicker (components/chat/TraitsPicker.tsx).
  * Models without a reasoning level, or whose catalog entry is missing, fall back to it.
  */
-export const EffortPicker = memo(function EffortPicker(props: ComponentProps<typeof TraitsPicker>) {
+export const EffortPicker = memo(function EffortPicker(
+  props: ComponentProps<typeof TraitsPicker> & { isComposerOwned?: boolean },
+) {
   const {
     provider,
     instanceId,

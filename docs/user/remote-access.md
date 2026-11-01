@@ -11,12 +11,10 @@ On a desktop host, open **Settings → Sharing & access**, enable **Network acce
 then create a pairing link using an address the other device can reach. Changing
 network access restarts the desktop app. You can turn it off in the same place.
 
-For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
-address:
-
-```bash
-t3 serve --host <private-ip>
-```
+A command-line host's [background service](./background-service.md#local-network-access)
+listens on private networks by default. For a server in a terminal, run
+`t3 serve --lan`. Either way, T3 Code then accepts connections from your local network and tailnet, so a pairing code is
+all that keeps other devices on them out.
 
 If a server is already running, generate a fresh link without restarting it:
 
@@ -60,8 +58,9 @@ current LAN and Tailscale addresses and adds them as routes, so pairing once
 over Tailscale is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
-address to be learned. The [background service](./background-service.md#local-network-access)
-allows it on private networks by default. You can reorder a learned route, but not remove it; it
+address to be learned: **Network access** in the desktop app, or the
+[background service](./background-service.md#local-network-access), which allows it by default.
+You can reorder a learned route, but not remove it; it
 goes away with the route it was learned through, or when the machine stops
 reporting that address.
 
@@ -196,6 +195,19 @@ On a phone, tap the floating preview's corner dot to show its controls, then
 **Pop into separate window** to keep watching in picture-in-picture over other
 apps.
 
+### Local servers
+
+The browser lists ports held by processes your terminals and agents started.
+T3 Code reads which process holds each port and never connects to it, so a
+listed port opens as `http://localhost:<port>` and might not be a web page. For
+an HTTPS server or a specific path, set the **Preview URL** on the project
+script that starts it; T3 Code checks that address and opens it as written.
+
+To stop listing ports, set `T3CODE_PORT_DISCOVERY=0` in the environment that
+starts the T3 Code server, such as
+[`service.env`](./background-service.md#configure-the-service-environment) for
+the background service, and restart it. Script preview URLs still appear.
+
 ### Browser host setup
 
 macOS, Windows, and Linux desktops run the browser as is. Some Linux hosts need
@@ -216,8 +228,22 @@ any missing libraries and system fonts with apt; pages that load without text
 can mean the host has no fonts. It is safe to run again. Without `sudo`, it only
 reports what it would change.
 
-The browser always runs in Chrome's sandbox. Where you cannot change the host,
-set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
+The browser runs in Chrome's sandbox by default. Chrome cannot start that sandbox
+as root. If your T3 server runs as root, run it as a nonroot user to keep
+sandboxing enabled. `t3 browser setup` does not fix this root restriction.
+
+If you need to run as root, or cannot enable the sandbox on your host, set
+`T3CODE_SERVER_BROWSER_SANDBOX=0` in the **T3 server's environment** and restart
+the server. This disables Chrome's sandbox. For a manual launch:
+
+```sh
+T3CODE_SERVER_BROWSER_SANDBOX=0 t3 serve
+```
+
+For a systemd service, add `Environment=T3CODE_SERVER_BROWSER_SANDBOX=0` under
+`[Service]` in its configuration, run `sudo systemctl daemon-reload`, then restart
+your T3 service. Setting the variable in an agent's terminal does not change the
+environment of an already running T3 server.
 
 ## Connect an outside agent
 

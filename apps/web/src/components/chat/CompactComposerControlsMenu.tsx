@@ -1,7 +1,7 @@
 // apps/web/src/components/chat/CompactComposerControlsMenu.tsx
 // presents compact provider-aware composer controls
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import { memo, type ReactNode, useRef } from "react";
+import { memo, useRef } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {
   Menu,
@@ -21,7 +21,6 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   showInteractionModeToggle: boolean;
-  traitsMenuContent?: ReactNode;
   showPermissions?: boolean;
   size?: "sm" | "xs";
   /** Close the portaled popup when its trigger hides. */
@@ -47,28 +46,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             size={size}
             className="shrink-0"
             aria-label="More composer controls"
-            data-composer-shortcut={
-              [
-                props.showPermissions !== false ? "composer.mode" : null,
-                props.traitsMenuContent ? "composer.effort" : null,
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined
-            }
+            data-composer-shortcut={props.showPermissions !== false ? "composer.mode" : undefined}
           />
         }
       >
         <ComposerControlIcon icon={EllipsisIcon} size={size} />
       </MenuTrigger>
       <MenuPopup align="start" {...composerFloatingLayerProps}>
-        {props.traitsMenuContent ? (
-          <>
-            {props.traitsMenuContent}
-            {props.showInteractionModeToggle || props.showPermissions !== false ? (
-              <MenuDivider />
-            ) : null}
-          </>
-        ) : null}
         {props.showInteractionModeToggle ? (
           <>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>

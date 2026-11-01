@@ -2896,7 +2896,7 @@ function SidebarNewThreadButton({
       disabled={projectCount === 0}
       onClick={(event) => {
         if (isMobile) setOpenMobile(false);
-        if (shouldCreateNewThreadInCurrentProject(event.shiftKey, projectCount)) {
+        if (shouldCreateNewThreadInCurrentProject(event.shiftKey, projectCount, projectCount)) {
           void startNewThreadFromContext({
             activeDraftThread: newThreadContext.activeDraftThread,
             activeThread: newThreadContext.activeThread ?? undefined,

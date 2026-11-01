@@ -181,7 +181,7 @@ it("app-stream-assistant-turn", async () => {
   const counted = await measure(async () => {
     let text = "";
     for (let delta = 0; delta < STREAM_DELTAS; delta++) {
-      text += `word${delta} `;
+      text += `word${delta}\n\n`;
       await act(() =>
         emitThreadEvent(LIVE, {
           type: "turn-item.updated",
@@ -200,6 +200,13 @@ it("app-stream-assistant-turn", async () => {
       .element(page.getByText(`word${STREAM_DELTAS - 1}`, { exact: false }))
       .toBeVisible();
   });
+  // Only the streaming row changes. The timeline renders for the new item and its layout, not
+  // per delta, and history rows not at all.
+  expect(counted.components.ConversationTimeline).toBeLessThanOrEqual(3);
+  expect(counted.components.UserTimelineRow).toBeUndefined();
+  expect(counted.components.AssistantTimelineRow).toBe(STREAM_DELTAS);
+  // Each delta adds a paragraph; finished blocks keep their render.
+  expect(counted.components.MarkdownParagraph).toBe(STREAM_DELTAS);
   await report("app-stream-assistant-turn", [counted], { commits: false });
 });
 
