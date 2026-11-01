@@ -582,7 +582,7 @@ function codexReplayPreamble(input: {
         id: 1,
         method: "initialize",
         params: {
-          clientInfo: { name: "T3 Code", title: "T3 Code", version: packageJson.version },
+          clientInfo: { name: "456code", title: "456code", version: packageJson.version },
           capabilities: {
             experimentalApi: true,
             optOutNotificationMethods: ["turn/diff/updated"],
