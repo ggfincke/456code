@@ -5,7 +5,6 @@ import { Animated, Platform, Pressable, View } from "react-native";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
-import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import {
   brandTitleOffset,
   CompactBrandTitle,
@@ -108,7 +107,6 @@ export function WorkspaceConnectionTitle(props: {
 }) {
   const status = use(ConnectionStatusContext);
   const size = props.size ?? "navbar";
-  const { scale } = useAndroidControlSizing();
 
   if (status === null) {
     return props.grow ? (
@@ -132,18 +130,18 @@ export function WorkspaceConnectionTitle(props: {
         className="flex-row items-center gap-2"
         style={[
           { flexShrink: 1, marginLeft: props.statusOffset ?? 0 },
-          Platform.OS === "android" && { gap: 7 * scale },
+          Platform.OS === "android" && { gap: 7 },
         ]}
       >
         {status.showsProgress ? (
           <AppActivityIndicator
             colorClassName={"accent-icon-muted"}
-            size={Platform.OS === "android" ? Math.round(20 * scale) : "small"}
+            size={Platform.OS === "android" ? 20 : "small"}
           />
         ) : (
           <SymbolView
             name="wifi.slash"
-            size={Math.round((size === "pageTitle" ? 17 : 15) * scale)}
+            size={size === "pageTitle" ? 17 : 15}
             tintColorClassName={"accent-icon-muted"}
             type="monochrome"
           />
@@ -151,7 +149,7 @@ export function WorkspaceConnectionTitle(props: {
         <Text
           className="font-t3-bold text-foreground-muted"
           numberOfLines={1}
-          style={{ flexShrink: 1, fontSize: (size === "pageTitle" ? 20 : 16) * scale }}
+          style={{ flexShrink: 1, fontSize: size === "pageTitle" ? 20 : 16 }}
         >
           {status.label}
         </Text>

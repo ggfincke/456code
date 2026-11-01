@@ -1,10 +1,7 @@
 {
-  "platforms": ["apple", "android"],
+  "platforms": ["apple"],
   "apple": {
     "modules": ["T3HighlightsModule"],
     "podspecPath": "T3HighlightsNative.podspec"
-  },
-  "android": {
-    "modules": ["expo.modules.t3highlights.T3HighlightsModule"]
   }
 }

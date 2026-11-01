@@ -63,37 +63,14 @@ export class NativeStaticCheckCommandError extends Schema.TaggedError<NativeStat
   }
 }
 
-const kotlinToolCommands = ["ktlint", "detekt"] as const;
-
-export class NativeStaticCheckMissingToolError extends Schema.TaggedError<NativeStaticCheckMissingToolError>()(
-  "NativeStaticCheckMissingToolError",
-  {
-    commands: Schema.Array(Schema.Literals(kotlinToolCommands)),
-  },
-) {
-  override get message(): string {
-    const names = this.commands.join(" and ");
-    const verb = this.commands.length === 1 ? "is" : "are";
-    return `${names} ${verb} not installed; cannot run Kotlin static analysis. Install via \`brew bundle install --file apps/mobile/Brewfile\` or put the JVM tools on PATH.`;
-  }
-}
-
 const tools = [
   {
     command: "swiftlint",
     installHint: "brew install swiftlint",
   },
-  {
-    command: "ktlint",
-    installHint: "brew install ktlint",
-  },
-  {
-    command: "detekt",
-    installHint: "brew install detekt",
-  },
 ] as const satisfies ReadonlyArray<NativeStaticTool>;
 
-const sourceExtensions = new Set([".swift", ".kt", ".kts"]);
+const sourceExtensions = new Set([".swift"]);
 const excludedDirectories = new Set([
   ".expo",
   ".git",
@@ -103,7 +80,7 @@ const excludedDirectories = new Set([
   "Pods",
   "Vendor",
 ]);
-const generatedNativeProjectDirectories = new Set(["android", "ios"]);
+const generatedNativeProjectDirectories = new Set(["ios"]);
 
 const mobileAppRootUrl = new URL("../apps/mobile", import.meta.url);
 const appRoot = Effect.service(Path.Path).pipe(
@@ -131,16 +108,6 @@ const warnMissingTool = (tool: NativeStaticTool, checkName: string) =>
   Effect.logWarning(
     `${tool.command} is not installed; skipping ${checkName}. Install it with '${tool.installHint}' or run 'brew bundle install --file apps/mobile/Brewfile'.`,
   );
-
-export const requireKotlinTools = Effect.fn("requireKotlinTools")(function* (available: {
-  readonly ktlint: boolean;
-  readonly detekt: boolean;
-}) {
-  const missing = kotlinToolCommands.filter((command) => !available[command]);
-  if (missing.length > 0) {
-    return yield* new NativeStaticCheckMissingToolError({ commands: missing });
-  }
-});
 
 export const runCommand = Effect.fn("runCommand")(function* (
   command: string,
@@ -255,19 +222,13 @@ const runNativeStaticChecks = Effect.fn("runNativeStaticChecks")(function* () {
   const root = yield* appRoot;
   const sources = yield* collectSources(root, root);
   const swiftSources = sources.filter((source) => path.extname(source) === ".swift");
-  const kotlinSources = sources.filter((source) => {
-    const extension = path.extname(source);
-    return extension === ".kt" || extension === ".kts";
-  });
   const availableTools = new Map<string, boolean>();
 
   for (const tool of tools) {
     availableTools.set(tool.command, yield* commandExists(tool.command));
   }
 
-  yield* Console.log(
-    `Found ${swiftSources.length} Swift and ${kotlinSources.length} Kotlin native source files.`,
-  );
+  yield* Console.log(`Found ${swiftSources.length} Swift native source files.`);
 
   if (swiftSources.length > 0) {
     if (availableTools.get("swiftlint")) {
@@ -277,35 +238,14 @@ const runNativeStaticChecks = Effect.fn("runNativeStaticChecks")(function* () {
     }
   }
 
-  if (kotlinSources.length > 0) {
-    yield* requireKotlinTools({
-      ktlint: availableTools.get("ktlint") === true,
-      detekt: availableTools.get("detekt") === true,
-    });
-
-    const relativeKotlinSources = kotlinSources.map((source) => path.relative(root, source));
-    yield* runCommand("ktlint", relativeKotlinSources, root);
-    yield* runCommand(
-      "detekt",
-      [
-        "--config",
-        "detekt.yml",
-        "--input",
-        relativeKotlinSources.join(","),
-        "--build-upon-default-config",
-      ],
-      root,
-    );
-  }
-
-  yield* Console.log("Skipping generated native project folders: android/, ios/.");
+  yield* Console.log("Skipping the generated native project folder: ios/.");
 });
 
 export const mobileNativeStaticCheckCommand = Command.make("mobile-native-static-check", {}, () =>
   runNativeStaticChecks(),
 ).pipe(
   Command.withDescription(
-    "Run mobile native static analysis. SwiftLint may be skipped when unavailable; ktlint and detekt are required when Kotlin sources exist.",
+    "Run mobile native static analysis. SwiftLint may be skipped when unavailable.",
   ),
 );
 

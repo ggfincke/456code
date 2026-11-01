@@ -2,15 +2,11 @@
 // shared sidebar thread navigation with native chrome
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
-import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import {
   pickableProjectGroups,
   resolveScratchProjectScopeKey,
 } from "@t3tools/client-runtime/state/project-grouping";
-import {
-  useAppearancePreferences,
-  useAndroidFloatingTabs,
-} from "../settings/appearance/AppearancePreferencesProvider";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -35,8 +31,6 @@ import type { LayoutChangeEvent, TextInputInstance } from "react-native";
 import { Platform, StyleSheet, TextInput, View } from "react-native";
 import { GestureDetector, useNativeGesture } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
-import { useEnabledNavigationTabs } from "../workspace/navigation-tabs";
-import { FLOATING_TABS, floatingTabsMetrics } from "../workspace/floating-workspace-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { SearchBarCommands } from "react-native-screens";
 
@@ -72,7 +66,6 @@ import {
   WorkspaceConnectionTitle,
 } from "../home/WorkspaceConnectionTitle";
 import { SidebarHeaderActions } from "./sidebar-header-actions";
-import { ThreadListToolbar } from "../home/ThreadListToolbar";
 import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import { useFabScroll } from "../home/FabScrollContext";
 import { SidebarFilterButton } from "./sidebar-filter-button";
@@ -165,13 +158,9 @@ function ThreadNavigationSidebarPane(
   const { themeId, themeVariables: materialTheme } = useAppearancePreferences();
   const ocean = themeId === "fincke-ocean";
   const sidebarView = useSidebarView();
-  const floatingTabsEnabled = useAndroidFloatingTabs();
   const drawerColor = materialTheme["--color-drawer"];
 
   const insets = useSafeAreaInsets();
-  const { fabClearance, scale, fabSize } = useAndroidControlSizing();
-  const enabledTabs = useEnabledNavigationTabs();
-  const floatingTabs = floatingTabsMetrics(enabledTabs.length + 1, scale, fabSize, props.width);
   const projects = useProjects();
   const threads = useNavigationThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
@@ -910,14 +899,7 @@ function ThreadNavigationSidebarPane(
                   styles.threadListContent,
                   Platform.OS === "android" ? { paddingHorizontal: 0 } : null,
                   {
-                    paddingBottom:
-                      Platform.OS === "android"
-                        ? floatingTabsEnabled
-                          ? FLOATING_TABS.bottom +
-                            FLOATING_TABS.edge +
-                            Math.max(floatingTabs.height, floatingTabs.fabOffset + fabSize)
-                          : Math.max(insets.bottom, 16) + fabClearance - insets.bottom
-                        : 16 + insets.bottom,
+                    paddingBottom: 16 + insets.bottom,
                     paddingTop: Platform.OS === "android" ? 6 : topListInset,
                   },
                 ]}
@@ -936,71 +918,57 @@ function ThreadNavigationSidebarPane(
         )}
       </View>
 
-      {Platform.OS === "android" ? (
-        <ThreadListToolbar
-          sidebar
-          onLayout={handleStickyHeaderLayout}
-          searchQuery={props.searchQuery}
-          onSearchQueryChange={props.onSearchQueryChange}
-          filterActions={listMenuActions}
-          filterCustomized={filterCustomized}
-          onFilterAction={handleListMenuAction}
-          onOpenEnvironments={props.onOpenEnvironmentSettings}
-          onRequestVisibility={props.onRequestVisibility}
-        />
-      ) : (
-        <View
-          className="absolute inset-x-0 top-0 z-[4] bg-drawer"
-          collapsable={false}
-          onLayout={handleStickyHeaderLayout}
-          pointerEvents="auto"
-          style={{ paddingTop: insets.top }}
-        >
-          <View className="h-[50px] flex-row items-end gap-0.5 pr-2 pl-5">
-            <WorkspaceConnectionTitle
-              grow
-              onPress={props.onOpenEnvironmentSettings}
-              size="pageTitle"
-              brand={
-                <View className="h-11 flex-1 justify-center">
-                  <CompactBrandTitle allowFontScaling={false} />
-                </View>
-              }
-            />
-            <View className="flex-row items-center gap-2.5">
-              <Menu actions={listMenuActions} onPressAction={handleListMenuAction}>
-                <SidebarFilterButton accessibilityLabel="Filter threads" icon={filterIcon} />
-              </Menu>
-              <SidebarHeaderActions onOpenSettings={props.onOpenSettings} />
-            </View>
-          </View>
-
-          <View className="mx-4 mt-[9px] h-[38px] flex-row items-center gap-1.5 rounded-xl bg-sidebar-search pr-2.5 pl-[11px]">
-            <SymbolView
-              name="magnifyingglass"
-              size={15}
-              tintColorClassName="accent-drawer-foreground-muted"
-              type="monochrome"
-            />
-            <TextInput
-              ref={searchInputRef}
-              accessibilityLabel="Search threads"
-              autoCapitalize="none"
-              autoCorrect={false}
-              clearButtonMode="while-editing"
-              onChangeText={props.onSearchQueryChange}
-              placeholder="Search"
-              placeholderTextColorClassName="accent-placeholder"
-              selectionColorClassName={undefined}
-              cursorColorClassName={undefined}
-              selectionHandleColorClassName={undefined}
-              returnKeyType="search"
-              className="h-[34px] flex-1 px-0 py-0 font-sans text-base text-drawer-foreground"
-              value={props.searchQuery}
-            />
+      <View
+        className="absolute inset-x-0 top-0 z-[4] bg-drawer"
+        collapsable={false}
+        onLayout={handleStickyHeaderLayout}
+        pointerEvents="auto"
+        style={{ paddingTop: insets.top }}
+      >
+        <View className="h-[50px] flex-row items-end gap-0.5 pr-2 pl-5">
+          <WorkspaceConnectionTitle
+            grow
+            onPress={props.onOpenEnvironmentSettings}
+            size="pageTitle"
+            brand={
+              <View className="h-11 flex-1 justify-center">
+                <CompactBrandTitle allowFontScaling={false} />
+              </View>
+            }
+          />
+          <View className="flex-row items-center gap-2.5">
+            <Menu actions={listMenuActions} onPressAction={handleListMenuAction}>
+              <SidebarFilterButton accessibilityLabel="Filter threads" icon={filterIcon} />
+            </Menu>
+            <SidebarHeaderActions onOpenSettings={props.onOpenSettings} />
           </View>
         </View>
-      )}
+
+        <View className="mx-4 mt-[9px] h-[38px] flex-row items-center gap-1.5 rounded-xl bg-sidebar-search pr-2.5 pl-[11px]">
+          <SymbolView
+            name="magnifyingglass"
+            size={15}
+            tintColorClassName="accent-drawer-foreground-muted"
+            type="monochrome"
+          />
+          <TextInput
+            ref={searchInputRef}
+            accessibilityLabel="Search threads"
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+            onChangeText={props.onSearchQueryChange}
+            placeholder="Search"
+            placeholderTextColorClassName="accent-placeholder"
+            selectionColorClassName={undefined}
+            cursorColorClassName={undefined}
+            selectionHandleColorClassName={undefined}
+            returnKeyType="search"
+            className="h-[34px] flex-1 px-0 py-0 font-sans text-base text-drawer-foreground"
+            value={props.searchQuery}
+          />
+        </View>
+      </View>
       <ThreadUndoNotice visible={props.visible} />
     </View>
   );

@@ -19,7 +19,6 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { cn } from "../lib/cn";
 import { AppText as Text } from "./ui/AppText";
 import { SymbolView } from "./ui/AppSymbol";
-import { useAndroidControlSizing } from "./ui/useAndroidControlSizing";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { FinckeWaveArt } from "../fincke/FinckeWaveArt";
 import { themeColorWithAlpha } from "../lib/mobileTheme";
@@ -47,10 +46,9 @@ export function ComposerInlineControl(props: {
   readonly chevronDirection?: "down" | "right";
   readonly showChevron?: boolean;
 }) {
-  const { scale, smallIconSize } = useAndroidControlSizing();
   // Keep the picker anchored to its parent while the editor changes height.
   const animatesLabel = props.iconOnly !== undefined;
-  const iconSize = props.size === "large" ? 20 : smallIconSize;
+  const iconSize = props.size === "large" ? 20 : 16;
   return (
     <Animated.View
       style={{
@@ -109,7 +107,7 @@ export function ComposerInlineControl(props: {
         {props.showChevron === false ? null : (
           <SymbolView
             name={props.chevronDirection === "right" ? "chevron.right" : "chevron.down"}
-            size={Math.round((props.size === "large" ? 12 : 10) * scale)}
+            size={props.size === "large" ? 12 : 10}
             tintColorClassName={
               props.emphasized || props.selected ? "accent-icon" : "accent-icon-muted"
             }
@@ -258,12 +256,11 @@ export function ComposerActionButton(props: {
   readonly onLongPress?: PressableProps["onLongPress"];
   readonly onTouchStart?: PressableProps["onTouchStart"];
 }) {
-  const { scale, smallIconSize } = useAndroidControlSizing();
   const { themeId, themeVariables } = useAppearancePreferences();
   const ocean = themeId === "fincke-ocean";
   const quietStop = ocean && props.appearance === "stop";
   const waveSend = ocean && props.appearance === "send";
-  const circleSize = Math.round((props.size === "large" ? 44 : 30) * scale);
+  const circleSize = props.size === "large" ? 44 : 30;
   return (
     <Pressable
       accessibilityLabel={props.accessibilityLabel}
@@ -312,7 +309,7 @@ export function ComposerActionButton(props: {
           ) : null}
           <SymbolView
             name={props.icon}
-            size={props.size === "large" ? Math.round(20 * scale) : smallIconSize}
+            size={props.size === "large" ? 20 : 16}
             weight="semibold"
             tintColor={
               quietStop

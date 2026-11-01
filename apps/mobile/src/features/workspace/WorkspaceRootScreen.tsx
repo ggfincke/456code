@@ -13,7 +13,6 @@ import { useKeyboardState } from "react-native-keyboard-controller";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CompactBrandTitle } from "../../components/CompactBrandTitle";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { HeaderItemsWidthContext } from "../../native/header-items-width";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
@@ -26,7 +25,6 @@ import {
   useNativeLayoutMetrics,
 } from "../../native/native-layout-metrics";
 import { HomeRouteScreen } from "../home/HomeRouteScreen";
-import { dispatchHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import { WorkspaceConnectionTitle } from "../home/WorkspaceConnectionTitle";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { PullRequestsScreen } from "../pull-requests/PullRequestsScreen";
@@ -48,7 +46,6 @@ import {
   useSystemWorkspaceTabBar,
 } from "./useSystemWorkspaceTabBar";
 import { openSettings } from "../settings/settings-navigation";
-import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 
 const TAB_TITLES = WORKSPACE_TAB_LABELS;
 
@@ -77,7 +74,6 @@ function WorkspaceRootTitle(props: {
 
 function WorkspaceRootContent() {
   const navigation = useNavigation();
-  const selectTab = useSelectWorkspaceTab();
   const { width: windowWidth } = useWindowDimensions();
   const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
   const primaryColumn = use(NativePrimaryColumnContext);
@@ -132,65 +128,39 @@ function WorkspaceRootContent() {
   return (
     <WorkspaceTabsContext value={context}>
       <View className={`flex-1 ${sidebarPicker ? "bg-drawer" : surface.className}`}>
-        {Platform.OS === "ios" ? (
-          <NativeStackScreenOptions
-            optionsVersion={[
-              settingsOpen,
-              state.selectedTab,
-              state.selectionRevision,
-              width,
-              sidebarNavigation,
-              enabled.length,
-            ]}
-            options={{
-              title: settingsOpen
-                ? "Settings"
-                : enabled.length
-                  ? TAB_TITLES[state.selectedTab]
-                  : "Navigation",
-              headerShown: true,
-              headerTransparent: NATIVE_LIQUID_GLASS_SUPPORTED,
-              headerStyle: NATIVE_LIQUID_GLASS_SUPPORTED
-                ? { backgroundColor: "transparent" }
+        <NativeStackScreenOptions
+          optionsVersion={[
+            settingsOpen,
+            state.selectedTab,
+            state.selectionRevision,
+            width,
+            sidebarNavigation,
+            enabled.length,
+          ]}
+          options={{
+            title: settingsOpen
+              ? "Settings"
+              : enabled.length
+                ? TAB_TITLES[state.selectedTab]
+                : "Navigation",
+            headerShown: true,
+            headerTransparent: NATIVE_LIQUID_GLASS_SUPPORTED,
+            headerStyle: NATIVE_LIQUID_GLASS_SUPPORTED
+              ? { backgroundColor: "transparent" }
+              : undefined,
+            contentStyle: undefined,
+            ...(enabled.length === 0
+              ? { headerSearchBarOptions: undefined, unstable_headerRightItems: () => [] }
+              : {}),
+            unstable_headerLeftItems: () => [],
+            // Beside a detail column the tab bar names the tab and the detail header the page,
+            // so the sidebar keeps the brand.
+            headerTitle:
+              sidebarNavigation || (!settingsOpen && state.selectedTab !== "usage")
+                ? renderHeaderTitle
                 : undefined,
-              contentStyle: undefined,
-              ...(enabled.length === 0
-                ? { headerSearchBarOptions: undefined, unstable_headerRightItems: () => [] }
-                : {}),
-              unstable_headerLeftItems: () => [],
-              // Beside a detail column the tab bar names the tab and the detail header the page,
-              // so the sidebar keeps the brand.
-              headerTitle:
-                sidebarNavigation || (!settingsOpen && state.selectedTab !== "usage")
-                  ? renderHeaderTitle
-                  : undefined,
-            }}
-          />
-        ) : (
-          <AndroidScreenHeader
-            title="456code"
-            titleContent={renderHeaderTitle()}
-            actions={[
-              ...(state.selectedTab === "threads" || state.selectedTab === "pullRequests"
-                ? [
-                    {
-                      accessibilityLabel:
-                        state.selectedTab === "threads" ? "Search threads" : "Search pull requests",
-                      icon: "magnifyingglass" as const,
-                      onPress: () => {
-                        dispatchHardwareKeyboardCommand("focusSearch");
-                      },
-                    },
-                  ]
-                : []),
-              {
-                accessibilityLabel: "Settings",
-                icon: "gearshape",
-                onPress: () => selectTab("settings"),
-              },
-            ]}
-          />
-        )}
+          }}
+        />
         <SafeAreaInsetsContext value={compactTabs ? { ...insets, bottom: 0 } : insets}>
           {settingsOpen ? (
             <SettingsRouteScreen />

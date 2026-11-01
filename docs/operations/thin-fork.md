@@ -73,7 +73,19 @@ Upstream distribution and community tooling with no role in this fork was remove
 - Community and review bots: `CONTRIBUTING.md`, the bug report template and issue chooser, `.github/SECURITY.md`, `.github/TRIAGE_EXEMPTIONS.td`, the `contribution-triage` skill, CodeRabbit config and its dependency, Macroscope config, `.cursor/` and `.devcontainer/`. The Effect service checklist now lives at `docs/internals/effect-service-review.md`, and the test-signal check at `evals/test-signal/check.md`.
 - The pull request template now follows the fork's PR rules. The issue-21397 seed script and fixture, the CI web test's upstream release repository override and `.gitignore` entries for removed tooling were also dropped.
 
-Kept: `build-desktop-artifact.ts` with its Windows internals, `update-release-package-versions.ts`, `sign-macos.ts`, `smoke-desktop-app.ts`, the mock update server, the staged-update tooling, the GNOME extension (bundled for SnapShot), mobile scripts, evals, CI and mobile fingerprint workflows, and the `test-t3-app` and `test-t3-mobile` skills. Android tooling is left for a separate change.
+Kept: `build-desktop-artifact.ts` with its Windows internals, `update-release-package-versions.ts`, `sign-macos.ts`, `smoke-desktop-app.ts`, the mock update server, the staged-update tooling, the GNOME extension (bundled for SnapShot), mobile scripts, evals, CI and mobile fingerprint workflows, and the `test-t3-app` and `test-t3-mobile` skills.
+
+## November 1 Android client removal
+
+456code no longer ships an Android client (principles §3, amended with Garrett's approval). Removed:
+
+- The Expo Android platform: `platforms` is `["ios"]`; the `android` config block, package IDs, adaptive icon and splash assets, Android plugin options and the seven `withAndroid*` config plugins are gone.
+- The Kotlin, JNI and resource trees of the composer, highlights, native controls, review diff and terminal modules, the libghostty-vt Android libraries and build script, the Android-only widget expiry and subscription widget resource modules. Module configs list only `apple`; the highlights C sources stay for iOS.
+- Every `.android.ts(x)` file and the Android-only UI: header, anchored menu, floating tabs, navigation rail, home FAB, hinge observer, control sizing, the One UI navigation style preference and the Material You theme. Stored `material-you` or navigation-style preferences fall back to the default theme and are ignored. Shared helpers that lived in Android-named files moved to `lib/linked-thread-navigation.ts`, `features/workspace/useWorkspaceBackNavigation.ts` and `components/ui/headerMenu.ts`.
+- `react-native-pdf-jsi` and its peers, `@material/material-color-utilities`, and the Android-only patches for `react-native-pdf-jsi`, `react-native-webview`, `expo-modules-core`, `@expo/fingerprint` and `@expo/ui`. Their version overrides stay so iOS native code does not drift.
+- Android build, e2e, showcase and Kotlin lint tooling, the `android*`, `eas:android:*` and `icons:export:android` scripts, the EAS Android profiles, and the Android fingerprint check.
+
+Remaining: the Device panel's Android emulator support for agent testing (`DevicePlatform` `"android"`, the server's adb/AVD code, fold controls and the iOS app's display of remote Android streams), `ClientOs` `"Android"` for Android browsers, the inline `Platform.OS === "android"` ternaries in shared mobile files (kept to limit upstream conflicts), and mixed patches such as `expo-audio`, `expo-video`, `expo-sharing` and `react-native-image-viewing`. Upstream updates must not restore the removed Android client files. The iOS native fingerprint changed, so the next OTA needs a fresh `ios:release` build first.
 
 ## October 31 update (v0.1.6)
 

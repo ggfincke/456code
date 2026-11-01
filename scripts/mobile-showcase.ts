@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Host-side simulator and emulator automation uses Node subprocess and timing APIs directly.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Host-side simulator automation uses Node subprocess and timing APIs directly.
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
@@ -13,7 +13,6 @@ import { PNG } from "pngjs";
 
 import showcaseConfig, {
   type ShowcaseAppearance,
-  type ShowcaseAndroidDevice,
   type ShowcaseConfig,
   type ShowcaseDevice,
   type ShowcaseIosDevice,
@@ -31,8 +30,7 @@ import {
 
 const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const MOBILE_ROOT = NodePath.join(REPO_ROOT, "apps/mobile");
-const ANDROID_PACKAGE = "com.t3tools.t3code";
-const APP_SCHEME = "t3code";
+const APP_ID = "com.t3tools.t3code";
 // Manifest flags update expo-dev-launcher preferences before loading, hiding dev chrome in captures.
 const DEV_CLIENT_LAUNCH_FLAGS = "disableOnboarding=1&disableFab=1&disableAutoLaunch=1";
 const IOS_READY_FILENAME = "T3ShowcaseReadyScene";
@@ -42,34 +40,12 @@ const IOS_APP_PATH = NodePath.join(
   MOBILE_ROOT,
   ".showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app",
 );
-const ANDROID_APK_PATH = NodePath.join(
-  MOBILE_ROOT,
-  "android/app/build/outputs/apk/debug/app-debug.apk",
-);
-export function resolveAndroidSdkRoot(
-  environment: Readonly<Record<string, string | undefined>>,
-  platform: NodeJS.Platform = NodeProcess.platform,
-): string {
-  const configured = environment.ANDROID_HOME ?? environment.ANDROID_SDK_ROOT;
-  if (configured) return configured;
-  const home = environment.HOME ?? environment.USERPROFILE ?? "";
-  const path = platform === "win32" ? NodePath.win32 : NodePath.posix;
-  return path.join(home, platform === "darwin" ? "Library/Android/sdk" : "Android/Sdk");
-}
-
-const ANDROID_SDK_ROOT = resolveAndroidSdkRoot(NodeProcess.env);
 const MOBILE_BUILD_ENV = {
   ...NodeProcess.env,
-  ANDROID_HOME: ANDROID_SDK_ROOT,
   APP_VARIANT: "production",
   EXPO_NO_GIT_STATUS: "1",
   // iPad self-rotation needs the capture build's fullscreen mode (app.config.ts).
   T3_SHOWCASE_CAPTURE_BUILD: "1",
-  JAVA_HOME:
-    NodeProcess.env.JAVA_HOME ??
-    (NodeProcess.platform === "darwin"
-      ? "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-      : undefined),
   NODE_ENV: "development",
 };
 
@@ -97,12 +73,6 @@ interface IosCaptureCleanup {
   readonly udid: string;
   readonly startedByRunner: boolean;
   readonly createdByRunner: boolean;
-}
-
-interface AndroidCaptureCleanup {
-  readonly device: ShowcaseAndroidDevice;
-  readonly serial: string;
-  readonly startedByRunner: boolean;
 }
 
 interface NetworkAddress {
@@ -187,23 +157,6 @@ export function validateStoreAsset(
     throw new Error(
       `${label} must be an 8-bit, 24-bit RGB PNG without alpha (found bit depth ${metadata.bitDepth}, color type ${metadata.colorType}).`,
     );
-  }
-  if (spec.maximumFileSizeBytes && bytes.byteLength > spec.maximumFileSizeBytes) {
-    throw new Error(
-      `${label} is ${bytes.byteLength} bytes; ${spec.store} allows at most ${spec.maximumFileSizeBytes} bytes.`,
-    );
-  }
-  if (spec.store === "google-play") {
-    const shortestSide = Math.min(metadata.width, metadata.height);
-    const longestSide = Math.max(metadata.width, metadata.height);
-    if (shortestSide < 320 || longestSide > 3_840 || longestSide > shortestSide * 2) {
-      throw new Error(
-        `${label} does not meet Google Play's 320–3,840 px bounds and 2:1 maximum aspect ratio.`,
-      );
-    }
-    if (metadata.width * 16 !== metadata.height * 9) {
-      throw new Error(`${label} must use Google Play's recommended portrait 9:16 aspect ratio.`);
-    }
   }
   return metadata;
 }
@@ -296,15 +249,10 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
     const argument = args[index];
     if (argument === "--platform") {
       const value = argumentValue(args, index, argument);
-      if (value !== "ios" && value !== "android" && value !== "all") {
-        throw new Error(`Unsupported platform '${value}'. Use ios, android, or all.`);
+      if (value !== "ios" && value !== "all") {
+        throw new Error(`Unsupported platform '${value}'. Use ios or all.`);
       }
-      if (value === "all") {
-        platforms.add("ios");
-        platforms.add("android");
-      } else {
-        platforms.add(value);
-      }
+      platforms.add("ios");
       index += 1;
     } else if (argument === "--device") {
       deviceIds.add(argumentValue(args, index, argument));
@@ -414,13 +362,13 @@ Usage:
   pnpm --filter @t3tools/mobile screenshots [options]
 
 Options:
-  --platform ios|android|all  Capture one platform (repeatable)
+  --platform ios|all         Capture one platform (repeatable)
   --device <id>              Capture one configured device (repeatable)
   --scene <name>             Capture one scene (repeatable)
   --appearance light|dark|both
                              Override the configured appearance
   --theme <id>|all           Override the configured palette (repeatable)
-  --skip-build               Reuse the existing simulator app / debug APK
+  --skip-build               Reuse the existing simulator app
   --skip-metro               Reuse an already running showcase Metro server
   --keep-running             Leave devices and Metro running after capture
   --validate-only            Validate existing upload assets without capturing
@@ -432,8 +380,7 @@ Themes: ${SHOWCASE_THEMES.join(", ")}
 Configured devices:
 ${config.devices
   .map((device) => {
-    const target = device.platform === "ios" ? device.simulator : device.avd;
-    return `  ${device.id.padEnd(18)} ${device.platform.padEnd(8)} ${target} -> ${device.storeAsset.directory}/{light|dark}/<theme> (${device.storeAsset.width}×${device.storeAsset.height}, default ${device.appearance} ${device.theme}) [${device.scenes.join(", ")}]`;
+    return `  ${device.id.padEnd(18)} ${device.platform.padEnd(8)} ${device.simulator} -> ${device.storeAsset.directory}/{light|dark}/<theme> (${device.storeAsset.width}×${device.storeAsset.height}, default ${device.appearance} ${device.theme}) [${device.scenes.join(", ")}]`;
   })
   .join("\n")}
 `);
@@ -725,10 +672,6 @@ export function buildShowcasePairingUrl(host: string, port: number, credential: 
   return url.toString();
 }
 
-export function encodeAndroidPairingUrls(pairingUrls: ReadonlyArray<string>): string {
-  return `json-uri:${encodeURIComponent(JSON.stringify(pairingUrls))}`;
-}
-
 function startMetro(config: ShowcaseConfig): NodeChildProcess.ChildProcess {
   return spawnProcess(
     "pnpm",
@@ -779,25 +722,6 @@ async function buildIos(): Promise<string> {
     { cwd: MOBILE_ROOT, env: MOBILE_BUILD_ENV },
   );
   return IOS_APP_PATH;
-}
-
-async function buildAndroid(abis: ReadonlyArray<string>): Promise<string> {
-  await runCommand("pnpm", ["exec", "expo", "prebuild", "--clean", "--platform", "android"], {
-    cwd: MOBILE_ROOT,
-    env: MOBILE_BUILD_ENV,
-  });
-  await runCommand(
-    "./gradlew",
-    [
-      "app:assembleDebug",
-      ...(abis.length > 0 ? [`-PreactNativeArchitectures=${abis.join(",")}`] : []),
-    ],
-    {
-      cwd: NodePath.join(MOBILE_ROOT, "android"),
-      env: MOBILE_BUILD_ENV,
-    },
-  );
-  return ANDROID_APK_PATH;
 }
 
 async function existingArtifact(path: string): Promise<string | null> {
@@ -971,7 +895,7 @@ async function ensureIosFullScreenAppsMode(udid: string): Promise<void> {
 
 async function iosAppContainer(udid: string): Promise<string> {
   return (
-    await commandOutput("xcrun", ["simctl", "get_app_container", udid, ANDROID_PACKAGE, "data"])
+    await commandOutput("xcrun", ["simctl", "get_app_container", udid, APP_ID, "data"])
   ).trim();
 }
 
@@ -1034,7 +958,7 @@ async function captureIos(
   }
   await normalizeIosSimulator(capture.appearance, simulator.udid);
   if (appPath) {
-    await runCommand("xcrun", ["simctl", "uninstall", simulator.udid, ANDROID_PACKAGE]).catch(
+    await runCommand("xcrun", ["simctl", "uninstall", simulator.udid, APP_ID]).catch(
       () => undefined,
     );
     await runCommand("xcrun", ["simctl", "install", simulator.udid, appPath]);
@@ -1057,7 +981,7 @@ async function captureIos(
       "launch",
       ...(terminateRunningProcess ? ["--terminate-running-process"] : []),
       simulator.udid,
-      ANDROID_PACKAGE,
+      APP_ID,
       "--initialUrl",
       metroUrl,
       "--showcasePairingUrl",
@@ -1118,271 +1042,6 @@ async function captureIos(
   }
 }
 
-function androidSdkTool(relativePath: string): string {
-  return NodePath.join(ANDROID_SDK_ROOT, relativePath);
-}
-
-async function adbOutput(serial: string, args: ReadonlyArray<string>): Promise<string> {
-  return await commandOutput(androidSdkTool("platform-tools/adb"), ["-s", serial, ...args]);
-}
-
-async function runAdb(serial: string, args: ReadonlyArray<string>): Promise<void> {
-  await runCommand(androidSdkTool("platform-tools/adb"), ["-s", serial, ...args]);
-}
-
-async function runningAndroidAvds(): Promise<ReadonlyMap<string, string>> {
-  const adb = androidSdkTool("platform-tools/adb");
-  const devices = (await commandOutput(adb, ["devices"]))
-    .split("\n")
-    .map((line) => line.trim().split(/\s+/u))
-    .filter((parts) => parts[0]?.startsWith("emulator-") && parts[1] === "device")
-    .map((parts) => parts[0] as string);
-  const result = new Map<string, string>();
-  for (const serial of devices) {
-    const avdName = (await adbOutput(serial, ["emu", "avd", "name"])).split("\n")[0]?.trim();
-    if (avdName) result.set(avdName, serial);
-  }
-  return result;
-}
-
-async function waitForAndroidSerial(avd: string, timeoutMs = 120_000): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const serial = (await runningAndroidAvds()).get(avd);
-    if (serial) {
-      await runAdb(serial, ["wait-for-device"]);
-      const bootCompleted = (
-        await adbOutput(serial, ["shell", "getprop", "sys.boot_completed"])
-      ).trim();
-      if (bootCompleted === "1") return serial;
-    }
-    await delay(1_000);
-  }
-  throw new Error(`Android AVD '${avd}' did not finish booting within ${timeoutMs}ms.`);
-}
-
-async function normalizeAndroidEmulator(
-  device: ShowcaseAndroidDevice,
-  appearance: ShowcaseAppearance,
-  serial: string,
-): Promise<void> {
-  await runAdb(serial, ["shell", "settings", "put", "global", "window_animation_scale", "0"]);
-  await runAdb(serial, ["shell", "settings", "put", "global", "transition_animation_scale", "0"]);
-  await runAdb(serial, ["shell", "settings", "put", "global", "animator_duration_scale", "0"]);
-  await runAdb(serial, ["shell", "cmd", "uimode", "night", appearance === "dark" ? "yes" : "no"]);
-  await runAdb(serial, ["shell", "settings", "put", "system", "time_12_24", "12"]);
-  await runAdb(serial, ["emu", "power", "capacity", "100"]);
-  await runAdb(serial, ["shell", "settings", "put", "global", "sysui_demo_allowed", "1"]);
-  await runAdb(serial, [
-    "shell",
-    "am",
-    "broadcast",
-    "-a",
-    "com.android.systemui.demo",
-    "-e",
-    "command",
-    "enter",
-  ]);
-  await runAdb(serial, [
-    "shell",
-    "am",
-    "broadcast",
-    "-a",
-    "com.android.systemui.demo",
-    "-e",
-    "command",
-    "clock",
-    "-e",
-    "hhmm",
-    "0941",
-  ]);
-  await runAdb(serial, [
-    "shell",
-    "am",
-    "broadcast",
-    "-a",
-    "com.android.systemui.demo",
-    "-e",
-    "command",
-    "battery",
-    "-e",
-    "level",
-    "100",
-    "-e",
-    "plugged",
-    "false",
-  ]);
-  if (device.viewport) {
-    await runAdb(serial, [
-      "shell",
-      "wm",
-      "size",
-      `${device.viewport.width}x${device.viewport.height}`,
-    ]);
-    if (device.viewport.density) {
-      await runAdb(serial, ["shell", "wm", "density", String(device.viewport.density)]);
-    }
-  }
-}
-
-async function waitForAndroidShowcaseScene(
-  serial: string,
-  scene: ShowcaseScene,
-  timeoutMs = 90_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const readyScene = await adbOutput(serial, [
-      "shell",
-      "run-as",
-      ANDROID_PACKAGE,
-      "cat",
-      "files/t3-showcase-ready",
-    ]).catch(() => "");
-    if (readyScene.trim() === scene) return;
-    await delay(500);
-  }
-  throw new Error(`Android showcase scene '${scene}' did not render within ${timeoutMs}ms.`);
-}
-
-async function writeAndroidShowcaseScene(serial: string, scene: ShowcaseScene): Promise<void> {
-  await runAdb(serial, [
-    "shell",
-    `run-as ${ANDROID_PACKAGE} sh -c 'mkdir -p files && rm -f files/t3-showcase-ready && printf %s ${scene} > files/t3-showcase-scene'`,
-  ]);
-}
-
-// Gesture/key-command toggles have no URL flags; set preferences separately from DEV_CLIENT_LAUNCH_FLAGS.
-async function prepareAndroidShowcaseApp(serial: string): Promise<void> {
-  const preferences = `<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
-<map>
-  <boolean name="motionGestureEnabled" value="false" />
-  <boolean name="touchGestureEnabled" value="false" />
-  <boolean name="keyCommandsEnabled" value="false" />
-</map>`;
-  const encodedPreferences = Buffer.from(preferences).toString("base64");
-  await runAdb(serial, [
-    "shell",
-    `run-as ${ANDROID_PACKAGE} sh -c 'mkdir -p shared_prefs && printf %s ${encodedPreferences} | base64 -d > shared_prefs/expo.modules.devmenu.sharedpreferences.xml'`,
-  ]);
-}
-
-async function captureAndroid(
-  capture: ShowcaseCapture & { readonly device: ShowcaseAndroidDevice },
-  apkPath: string | null,
-  outputDirectory: string,
-  config: ShowcaseConfig,
-  pairingUrls: ReadonlyArray<string>,
-  registerCleanup: (cleanup: AndroidCaptureCleanup) => void,
-): Promise<void> {
-  const running = await runningAndroidAvds();
-  const existingSerial = running.get(capture.device.avd);
-  const startedByRunner = !existingSerial;
-  let launchedEmulator: NodeChildProcess.ChildProcess | null = null;
-  if (startedByRunner) {
-    const installedAvds = (await commandOutput(androidSdkTool("emulator/emulator"), ["-list-avds"]))
-      .split("\n")
-      .map((value) => value.trim());
-    if (!installedAvds.includes(capture.device.avd)) {
-      throw new Error(
-        `Android AVD '${capture.device.avd}' is not installed. Run emulator -list-avds.`,
-      );
-    }
-    launchedEmulator = spawnProcess(
-      androidSdkTool("emulator/emulator"),
-      ["-avd", capture.device.avd, "-no-snapshot-load", "-no-boot-anim"],
-      { stdio: "ignore", detached: true },
-    );
-    launchedEmulator.unref();
-  }
-  const serial =
-    existingSerial ??
-    (await waitForAndroidSerial(capture.device.avd).catch(async (error: unknown) => {
-      if (launchedEmulator) await stopProcess(launchedEmulator);
-      throw error;
-    }));
-  registerCleanup({ device: capture.device, serial, startedByRunner });
-  await normalizeAndroidEmulator(capture.device, capture.appearance, serial);
-  if (apkPath) {
-    await runAdb(serial, ["install", "-r", apkPath]);
-  }
-  await runAdb(serial, ["shell", "pm", "clear", ANDROID_PACKAGE]);
-  await runAdb(serial, [
-    "shell",
-    "pm",
-    "grant",
-    ANDROID_PACKAGE,
-    "android.permission.POST_NOTIFICATIONS",
-  ]);
-  await prepareAndroidShowcaseApp(serial);
-  await runAdb(serial, ["reverse", `tcp:${config.metroPort}`, `tcp:${config.metroPort}`]);
-  const metroUrl = encodeURIComponent(`http://127.0.0.1:${config.metroPort}?disableOnboarding=1`);
-  const firstScene = capture.scenes[0] ?? "threads";
-  await runAdb(serial, [
-    "shell",
-    "am",
-    "start",
-    "-W",
-    "-a",
-    "android.intent.action.VIEW",
-    "-d",
-    `'${APP_SCHEME}://expo-development-client/?url=${metroUrl}&${DEV_CLIENT_LAUNCH_FLAGS}'`,
-    "--es",
-    "showcasePairingUrl",
-    encodeAndroidPairingUrls(pairingUrls),
-    "--es",
-    "showcaseScene",
-    firstScene,
-    "--es",
-    "showcaseTheme",
-    capture.theme,
-    ANDROID_PACKAGE,
-  ]);
-  for (const [sceneIndex, scene] of capture.scenes.entries()) {
-    if (sceneIndex > 0) await writeAndroidShowcaseScene(serial, scene);
-    await waitForAndroidShowcaseScene(serial, scene);
-    await delay(Math.max(config.settleDelayMs, scene === "review" ? 8_000 : 5_000));
-    const destination = NodePath.join(
-      showcaseCaptureDirectory(outputDirectory, capture),
-      `${scene}.png`,
-    );
-    const png = await new Promise<Buffer>((resolve, reject) => {
-      NodeChildProcess.execFile(
-        androidSdkTool("platform-tools/adb"),
-        ["-s", serial, "exec-out", "screencap", "-p"],
-        { cwd: REPO_ROOT, encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
-        (error, stdout) => {
-          if (error) reject(error);
-          else resolve(stdout);
-        },
-      );
-    });
-    await NodeFSP.writeFile(destination, png);
-    await finalizeCapture(destination, capture.device);
-  }
-}
-
-async function cleanupAndroidViewport(
-  device: ShowcaseAndroidDevice,
-  serial: string,
-): Promise<void> {
-  await runAdb(serial, [
-    "shell",
-    "am",
-    "broadcast",
-    "-a",
-    "com.android.systemui.demo",
-    "-e",
-    "command",
-    "exit",
-  ]);
-  if (!device.viewport) return;
-  await runAdb(serial, ["shell", "wm", "size", "reset"]);
-  if (device.viewport.density) {
-    await runAdb(serial, ["shell", "wm", "density", "reset"]);
-  }
-}
-
 async function main(): Promise<void> {
   const options = parseShowcaseCliArgs(NodeProcess.argv.slice(2));
   if (options.list) {
@@ -1402,7 +1061,6 @@ async function main(): Promise<void> {
     return;
   }
   const hasIos = captures.some((capture) => capture.device.platform === "ios");
-  const hasAndroid = captures.some((capture) => capture.device.platform === "android");
   const metroHost = hasIos ? lanIpv4Address() : "127.0.0.1";
   await NodeFSP.mkdir(outputDirectory, { recursive: true });
   for (const capture of captures) {
@@ -1418,7 +1076,6 @@ async function main(): Promise<void> {
   const showcaseEnvironments: ShowcaseEnvironment[] = [];
   let metro: NodeChildProcess.ChildProcess | null = null;
   const iosCleanups: IosCaptureCleanup[] = [];
-  const androidCleanups: AndroidCaptureCleanup[] = [];
 
   try {
     showcaseEnvironments.push(
@@ -1430,10 +1087,7 @@ async function main(): Promise<void> {
     if (!options.skipMetro) {
       metro = startMetro(showcaseConfig);
       await waitForPort(showcaseConfig.metroPort, "Metro");
-      await Promise.all([
-        hasIos ? warmMetroBundle("ios", metroHost, showcaseConfig) : Promise.resolve(),
-        hasAndroid ? warmMetroBundle("android", "127.0.0.1", showcaseConfig) : Promise.resolve(),
-      ]);
+      if (hasIos) await warmMetroBundle("ios", metroHost, showcaseConfig);
     }
 
     const iosAppPath = hasIos
@@ -1441,43 +1095,23 @@ async function main(): Promise<void> {
         ? await existingArtifact(IOS_APP_PATH)
         : await buildIos()
       : null;
-    const androidAbis = captures.flatMap((capture) =>
-      capture.device.platform === "android" && capture.device.abi ? [capture.device.abi] : [],
-    );
-    const androidApkPath = hasAndroid
-      ? options.skipBuild
-        ? await existingArtifact(ANDROID_APK_PATH)
-        : await buildAndroid([...new Set(androidAbis)])
-      : null;
-
     for (const capture of captures) {
-      const pairingHost = capture.device.platform === "ios" ? "127.0.0.1" : "10.0.2.2";
+      const pairingHost = "127.0.0.1";
       const pairingUrls = await Promise.all(
         showcaseEnvironments.map(async (environment) => {
           const credential = await issuePairingCredential(environment.baseDir);
           return buildShowcasePairingUrl(pairingHost, environment.port, credential);
         }),
       );
-      if (capture.device.platform === "ios") {
-        await captureIos(
-          capture as ShowcaseCapture & { readonly device: ShowcaseIosDevice },
-          iosAppPath,
-          outputDirectory,
-          showcaseConfig,
-          metroHost,
-          pairingUrls,
-          (cleanup) => iosCleanups.push(cleanup),
-        );
-      } else {
-        await captureAndroid(
-          capture as ShowcaseCapture & { readonly device: ShowcaseAndroidDevice },
-          androidApkPath,
-          outputDirectory,
-          showcaseConfig,
-          pairingUrls,
-          (cleanup) => androidCleanups.push(cleanup),
-        );
-      }
+      await captureIos(
+        capture as ShowcaseCapture & { readonly device: ShowcaseIosDevice },
+        iosAppPath,
+        outputDirectory,
+        showcaseConfig,
+        metroHost,
+        pairingUrls,
+        (cleanup) => iosCleanups.push(cleanup),
+      );
       await validateCaptureSet(
         capture,
         outputDirectory,
@@ -1486,7 +1120,7 @@ async function main(): Promise<void> {
     }
 
     NodeProcess.stdout.write(
-      `\nDone. Upload-ready screenshots are in ${NodePath.relative(REPO_ROOT, outputDirectory)}/apple/ and ${NodePath.relative(REPO_ROOT, outputDirectory)}/google-play/.\n`,
+      `\nDone. Upload-ready screenshots are in ${NodePath.relative(REPO_ROOT, outputDirectory)}/apple/.\n`,
     );
     if (options.keepRunning) {
       const serverSummary = showcaseEnvironments
@@ -1501,12 +1135,6 @@ async function main(): Promise<void> {
       metro?.unref();
       for (const server of showcaseServers) server.unref();
     } else {
-      for (const cleanup of androidCleanups) {
-        await cleanupAndroidViewport(cleanup.device, cleanup.serial).catch(() => undefined);
-        if (cleanup.startedByRunner) {
-          await runAdb(cleanup.serial, ["emu", "kill"]).catch(() => undefined);
-        }
-      }
       for (const cleanup of iosCleanups) {
         if (cleanup.startedByRunner || cleanup.createdByRunner) {
           await runCommand("xcrun", ["simctl", "shutdown", cleanup.udid]).catch(() => undefined);

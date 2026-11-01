@@ -166,7 +166,6 @@ import { attachmentVideoPreviewSource } from "../../lib/videoPreviewSource";
 import { CopyTextButton } from "./CopyTextButton";
 import { getReviewSectionIdForCheckpoint } from "../review/reviewModel";
 import { setReviewSelectedSectionId } from "../review/reviewState";
-import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
 import {
   ReviewCommentCard,
@@ -2496,6 +2495,8 @@ function useThreadFeedPresentation(
   );
 }
 
+const REPLY_ACTION_SIZE = { button: 28, icon: 13 } as const;
+
 export const ThreadFeed = memo(function ThreadFeed({
   ref,
   ...props
@@ -2658,15 +2659,6 @@ export const ThreadFeed = memo(function ThreadFeed({
 
   const theme = useUniwindTheme();
   const iconSubtleColor = theme["--color-icon-subtle"];
-  const { buttonSize: androidButtonSize, smallIconSize: androidIconSize } =
-    useAndroidControlSizing();
-  const replyActionSize = useMemo(
-    () =>
-      Platform.OS === "android"
-        ? { button: androidButtonSize, icon: androidIconSize }
-        : { button: 28, icon: 13 },
-    [androidButtonSize, androidIconSize],
-  );
   const screenColor = theme["--color-screen"];
   const userBubbleColor = theme["--color-user-bubble"];
   const openSkillInstructions = (path: string) => {
@@ -3518,7 +3510,7 @@ export const ThreadFeed = memo(function ThreadFeed({
             renderViewedImage,
             renderReasoning,
             iconSubtleColor,
-            replyActionSize,
+            replyActionSize: REPLY_ACTION_SIZE,
             screenColor,
             userBubbleColor,
             markdownStyles,

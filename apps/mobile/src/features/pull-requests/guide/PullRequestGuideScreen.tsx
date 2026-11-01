@@ -4,8 +4,7 @@ import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useEffect } from "react";
-import { Platform, Pressable, View } from "react-native";
-import { AndroidScreenHeader } from "../../../components/ui/AndroidScreenHeader";
+import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   letterStopNotes,
@@ -16,8 +15,6 @@ import { SymbolView } from "../../../components/ui/AppSymbol";
 import { GuideOutline } from "./GuideOutline";
 import { AppText as Text } from "../../../components/ui/AppText";
 import { ScreenScrollView } from "../../../components/ui/ScreenScrollView";
-import { Menu } from "../../../components/ui/Menu";
-import { IconButton } from "../../../components/ui/IconButton";
 import { useAppearancePreferences } from "../../settings/appearance/AppearancePreferencesProvider";
 import { NativeStackScreenOptions } from "../../../native/StackHeader";
 import { PullRequestCardGroup, PullRequestCardRow } from "../PullRequestControls";
@@ -138,29 +135,6 @@ export function PullRequestGuideStopScreen({ route }: StaticScreenProps<GuideSto
           headerTitle: `Stop ${route.params.position + 1} of ${guide?.stops.length ?? "…"}`,
         }}
       />
-      {Platform.OS === "android" ? (
-        <AndroidScreenHeader
-          title={`Stop ${route.params.position + 1}`}
-          onBack={() => navigation.goBack()}
-          trailing={
-            <Menu
-              actions={[
-                {
-                  id: "word-wrap",
-                  title: "Word wrap",
-                  image: "text.alignleft",
-                  state: appearance.codeWordBreak ? "on" : "off",
-                },
-              ]}
-              onPressAction={() => setCodeWordBreak(!appearance.codeWordBreak)}
-            >
-              <View pointerEvents="none">
-                <IconButton icon="ellipsis" accessibilityLabel="Guide options" />
-              </View>
-            </Menu>
-          }
-        />
-      ) : null}
       <Toolbar placement="right">
         <Toolbar.Menu title="Guide options" accessibilityLabel="Guide options" icon="ellipsis">
           <Toolbar.MenuAction

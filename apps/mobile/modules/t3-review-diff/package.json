@@ -7,11 +7,6 @@
       "modules": [
         "T3ReviewDiffModule"
       ]
-    },
-    "android": {
-      "modules": [
-        "expo.modules.t3reviewdiff.T3ReviewDiffModule"
-      ]
     }
   }
 }

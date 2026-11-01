@@ -1,13 +1,7 @@
 // apps/mobile/src/features/settings/appearance/AppearancePreferencesProvider.tsx
 // appearance preferences and native theme synchronization
 import { createContext, startTransition, use, useMemo, type ReactNode } from "react";
-import { AppState, Appearance, Platform, useColorScheme } from "react-native";
-
-import { manufacturer } from "expo-device";
-import {
-  resolveAndroidNavigationStyle,
-  type AndroidNavigationStyle,
-} from "../../../lib/androidNavigationStyle";
+import { Appearance, Platform, useColorScheme } from "react-native";
 
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { Atom, AsyncResult } from "effect/reactivity";
@@ -22,12 +16,6 @@ import {
 import { appAtomRegistry } from "../../../state/atom-registry";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../../state/preferences";
 import type { Preferences } from "../../../persistence/mobile-preferences";
-import {
-  isSystemColorsAvailable,
-  readSystemColorPalettes,
-  type MaterialYouPalettes,
-} from "../../../lib/materialYouPalette";
-import { materialYouPaletteToMobileThemeVariables } from "../../../lib/materialYouTheme";
 import { getMobileThemeRuntimeVariables } from "../../../lib/mobileThemeVariables";
 import type { MobileThemeVariables } from "../../../lib/mobileTheme";
 import {
@@ -52,16 +40,11 @@ interface AppearancePreferencesContextValue {
   readonly themeId: MobileThemeId;
   readonly themeIds: MobileThemeIds;
   readonly themeMode: MobileThemeMode;
-  readonly androidNavigationStyle: AndroidNavigationStyle;
-  readonly setAndroidNavigationStyle: (value: AndroidNavigationStyle) => void;
   readonly themeAppearance: MobileThemeAppearance;
-  readonly systemColorsAvailable: boolean;
-  readonly systemColorsActive: boolean;
   readonly themeVariables: MobileThemeVariables;
   readonly themeVariablesByAppearance: Readonly<
     Record<MobileThemeAppearance, MobileThemeVariables>
   >;
-  readonly systemColorPalettes: ReturnType<typeof readSystemColorPalettes>;
   readonly isReady: boolean;
   readonly setThemeIdForAppearance: (
     appearance: MobileThemeAppearance,
@@ -86,42 +69,13 @@ function storedPreferencesOf<E>(result: AsyncResult.AsyncResult<Preferences, E>)
   return AsyncResult.isSuccess(result) ? result.value : null;
 }
 
-/**
- * Material You palettes follow the system wallpaper, which can change while the
- * app is in the background.
- */
-const systemColorPalettesAtom = Atom.make((get): MaterialYouPalettes | null => {
-  const initial = readSystemColorPalettes();
-  if (!isSystemColorsAvailable) return initial;
-  let current = initial;
-  const refresh = () => {
-    const next = readSystemColorPalettes();
-    if (JSON.stringify(current) === JSON.stringify(next)) return;
-    current = next;
-    get.setSelf(next);
-  };
-  const subscription = AppState.addEventListener("change", (state) => {
-    if (state === "active") refresh();
-  });
-  const focusSubscription = AppState.addEventListener("focus", refresh);
-  get.addFinalizer(() => {
-    subscription.remove();
-    focusSubscription.remove();
-  });
-  return initial;
-}).pipe(Atom.withLabel("mobile:system-color-palettes"));
-
 function resolveThemeVariablesByAppearance(
   themeIds: MobileThemeIds,
-  palettes: MaterialYouPalettes | null,
 ): Readonly<Record<MobileThemeAppearance, MobileThemeVariables>> {
-  const resolve = (appearance: MobileThemeAppearance) => {
-    const base = getMobileThemeRuntimeVariables(themeIds[appearance], appearance, Platform.OS);
-    return themeIds[appearance] === "material-you" && palettes
-      ? materialYouPaletteToMobileThemeVariables(palettes[appearance], appearance, base)
-      : base;
+  return {
+    light: getMobileThemeRuntimeVariables(themeIds.light, "light", Platform.OS),
+    dark: getMobileThemeRuntimeVariables(themeIds.dark, "dark", Platform.OS),
   };
-  return { light: resolve("light"), dark: resolve("dark") };
 }
 
 /** The appearance whose theme is on screen, read from the native scheme. */
@@ -175,20 +129,11 @@ function currentRuntimeState() {
   return appliedRuntimeState ?? appAtomRegistry.get(themeRuntimeStateAtom);
 }
 
-/**
- * App-lifetime: applies theme preferences to the native runtime and holds the
- * system palette listeners. Holding them here instead of `keepAlive` lets the
- * fast-refresh disposer release the replaced module's AppState listeners.
- */
+/** App-lifetime: applies theme preferences to the native runtime. */
 export function installAppearanceRuntime(): () => void {
-  const unsubscribeRuntime = appAtomRegistry.subscribe(themeRuntimeStateAtom, applyThemeRuntime, {
+  return appAtomRegistry.subscribe(themeRuntimeStateAtom, applyThemeRuntime, {
     immediate: true,
   });
-  const releasePalettes = appAtomRegistry.mount(systemColorPalettesAtom);
-  return () => {
-    unsubscribeRuntime();
-    releasePalettes();
-  };
 }
 
 export function AppearancePreferencesProvider(props: { readonly children: ReactNode }) {
@@ -202,11 +147,6 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
     () => resolveAppearancePreferences(storedPreferences),
     [storedPreferences],
   );
-  const androidNavigationStyle = resolveAndroidNavigationStyle(
-    storedPreferences?.androidNavigationStyle,
-    manufacturer,
-    process.env.EXPO_PUBLIC_T3_FLOATING_TABS === "1",
-  );
   const themeMode = normalizeMobileThemeMode(storedPreferences?.themeMode);
   const themeAppearance = themeMode === "system" ? systemColorScheme : themeMode;
   const resolvedThemeIds = resolveMobileThemeIds(storedPreferences ?? {});
@@ -215,12 +155,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
     [resolvedThemeIds.dark, resolvedThemeIds.light],
   );
   const themeId = themeIds[themeAppearance];
-  const systemColorsActive = themeId === "material-you" && isSystemColorsAvailable;
-  const systemColorPalettes = useAtomValue(systemColorPalettesAtom);
-  const themeVariablesByAppearance = resolveThemeVariablesByAppearance(
-    themeIds,
-    systemColorPalettes,
-  );
+  const themeVariablesByAppearance = resolveThemeVariablesByAppearance(themeIds);
   const themeVariables = themeVariablesByAppearance[themeAppearance];
   const activeThemeName = getMobileUniwindThemeName(themeId, themeAppearance);
   const { baseFontSize, codeFontSize, codeWordBreak, terminalFontSize } = preferences;
@@ -282,9 +217,6 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
     updateThemePreferences({ themeMode: value });
   };
 
-  const setAndroidNavigationStyle = (value: AndroidNavigationStyle) =>
-    updatePreferences({ androidNavigationStyle: value });
-
   const setBaseFontSize = (value: number) => {
     applyThemeRuntime({ ...currentRuntimeState(), baseFontSize: value });
     updatePreferences({ baseFontSize: value });
@@ -324,14 +256,9 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       themeId,
       themeIds,
       themeMode,
-      androidNavigationStyle,
-      setAndroidNavigationStyle,
       themeAppearance,
-      systemColorsAvailable: isSystemColorsAvailable,
-      systemColorsActive,
       themeVariables,
       themeVariablesByAppearance,
-      systemColorPalettes,
       isReady,
       setThemeIdForAppearance,
       setThemeIdForBothAppearances,
@@ -351,13 +278,9 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       themeId,
       themeIds,
       themeMode,
-      androidNavigationStyle,
-      setAndroidNavigationStyle,
       themeAppearance,
-      systemColorsActive,
       themeVariables,
       themeVariablesByAppearance,
-      systemColorPalettes,
       isReady,
       setThemeIdForAppearance,
       setThemeIdForBothAppearances,
@@ -389,9 +312,4 @@ export function useAppearancePreferences(): AppearancePreferencesContextValue {
     throw new Error("useAppearancePreferences must be used within AppearancePreferencesProvider");
   }
   return context;
-}
-
-export function useAndroidFloatingTabs() {
-  const { androidNavigationStyle } = useAppearancePreferences();
-  return Platform.OS === "android" && androidNavigationStyle === "one-ui";
 }

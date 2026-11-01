@@ -14,7 +14,6 @@ import {
 } from "react-native-screens";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
-import { FilesHeader } from "./FilesHeader";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useEnvironmentQuery } from "../../state/query";
@@ -172,37 +171,28 @@ export function ThreadFileNavigatorPane(props: {
         className="ios:border-b ios:border-border android:bg-header"
         style={{ paddingTop: Platform.OS === "android" ? 0 : props.headerInset }}
       >
-        {Platform.OS === "android" ? (
-          <FilesHeader
-            projectName={props.projectName}
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            onRefresh={entriesQuery.refresh}
-          />
-        ) : (
-          <View className="h-12 flex-row items-center gap-2 px-3">
-            <View className="min-w-0 flex-1">
-              <Text className="text-sm font-t3-bold text-foreground">Files</Text>
-              <Text className="text-xs text-foreground-muted" numberOfLines={1}>
-                {props.projectName}
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Refresh files"
-              hitSlop={8}
-              className="h-8 w-8 items-center justify-center rounded-full active:bg-subtle"
-              onPress={entriesQuery.refresh}
-            >
-              <SymbolView
-                name="arrow.clockwise"
-                size={14}
-                tintColorClassName="accent-icon-muted"
-                type="monochrome"
-              />
-            </Pressable>
+        <View className="h-12 flex-row items-center gap-2 px-3">
+          <View className="min-w-0 flex-1">
+            <Text className="text-sm font-t3-bold text-foreground">Files</Text>
+            <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+              {props.projectName}
+            </Text>
           </View>
-        )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh files"
+            hitSlop={8}
+            className="h-8 w-8 items-center justify-center rounded-full active:bg-subtle"
+            onPress={entriesQuery.refresh}
+          >
+            <SymbolView
+              name="arrow.clockwise"
+              size={14}
+              tintColorClassName="accent-icon-muted"
+              type="monochrome"
+            />
+          </Pressable>
+        </View>
         {Platform.OS !== "android" ? (
           <View className="flex-row items-center gap-2 border-t border-border px-3 py-2">
             <SymbolView

@@ -26,7 +26,7 @@ The environment running an agent must own its execution, workspace, credentials,
 The Mac desktop app and native iPhone app are primary clients. Browser access must remain available. Starting work, reading progress, answering approvals, interrupting work, and returning to results must work across the primary clients.
 
 - Preserve useful upstream iPad support when practical. A separate iPad feature program or full parity commitment is not required.
-- Android does not drive product decisions or require equal verification effort. This is not a reason to delete working shared mobile code or Android support.
+- 456code does not ship an Android client. The Device panel's Android emulator support for agent testing stays.
 - Core behavior must live in server services and shared contracts so clients and authorized agent tools can reach the same operations.
 - A change must account for reconnects, simultaneous clients, and the destination environment's permissions.
 - Private-network or tailnet access is the primary remote connection path, including away from home through that network. Public self-hosting may remain available but is not a core requirement.

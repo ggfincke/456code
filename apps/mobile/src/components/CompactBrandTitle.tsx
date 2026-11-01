@@ -10,7 +10,6 @@ import { Platform, View } from "react-native";
 import { AppText as Text } from "./ui/AppText";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
-import { useAndroidControlSizing } from "./ui/useAndroidControlSizing";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 
 const BRAND_MAX_FONT_SCALE = 1.4;
@@ -32,7 +31,6 @@ export function CompactBrandTitle(
   // fincke: the ocean wave sits behind the title, so it reads white as on desktop
   const ocean = useAppearancePreferences().themeId === "fincke-ocean";
   const titleOffset = brandTitleOffset();
-  const { scale } = useAndroidControlSizing();
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   // Measured only while the badge shows, so hiding it does not make it look like it fits.
   const [fullWidth, setFullWidth] = useState<number | null>(null);
@@ -51,7 +49,7 @@ export function CompactBrandTitle(
       className="flex-row items-center gap-1.5"
       style={[
         { marginLeft: titleOffset },
-        Platform.OS === "android" && { gap: 5.25 * scale },
+        Platform.OS === "android" && { gap: 5.25 },
         props.fit && { flexShrink: 0 },
       ]}
     >
@@ -61,8 +59,8 @@ export function CompactBrandTitle(
         numberOfLines={1}
         className="font-t3-medium text-foreground-muted"
         style={{
-          fontSize: 21 * scale,
-          letterSpacing: -0.5 * scale,
+          fontSize: 21,
+          letterSpacing: -0.5,
           ...(ocean ? { color: "#ffffff" } : null),
         }}
       >
@@ -73,7 +71,7 @@ export function CompactBrandTitle(
           className="rounded-full bg-subtle px-1.5 py-0.5"
           style={
             Platform.OS === "android"
-              ? { paddingHorizontal: 5.25 * scale, paddingVertical: 1.75 * scale }
+              ? { paddingHorizontal: 5.25, paddingVertical: 1.75 }
               : undefined
           }
         >
@@ -82,7 +80,7 @@ export function CompactBrandTitle(
             maxFontSizeMultiplier={BRAND_MAX_FONT_SCALE}
             numberOfLines={1}
             className="font-t3-bold text-foreground-muted uppercase"
-            style={{ fontSize: 9 * scale, letterSpacing: 0.9 * scale }}
+            style={{ fontSize: 9, letterSpacing: 0.9 }}
           >
             {stageLabel}
           </Text>

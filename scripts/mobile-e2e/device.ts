@@ -89,18 +89,9 @@ export class Device {
   static async lease(pose: Pose, pool: Pool, runId: string): Promise<Device> {
     const device = new Device(pose, `t3-e2e-${runId}-${pose.id}`, pool);
     await device.agent(["connect", "proxy", "--daemon-base-url", pool.agentDeviceUrl]);
-    await device.agent(
-      [
-        "open",
-        "--platform",
-        pose.platform,
-        "--device",
-        pose.device,
-        // A real keyboard, so the layout under it is what people see.
-        ...(pose.platform === "android" ? ["--no-test-ime"] : []),
-      ],
-      { timeoutMs: 420_000 },
-    );
+    await device.agent(["open", "--platform", pose.platform, "--device", pose.device], {
+      timeoutMs: 420_000,
+    });
     return device;
   }
 
@@ -173,8 +164,6 @@ export class Device {
         "open",
         BUNDLE_ID,
         `t3code-dev://expo-development-client/?url=${url}&disableOnboarding=1&disableFab=1&disableAutoLaunch=1`,
-        // A real keyboard, so the layout under it is what people see.
-        ...(this.pose.platform === "android" ? ["--no-test-ime"] : []),
       ],
       { timeoutMs: 180_000 },
     );

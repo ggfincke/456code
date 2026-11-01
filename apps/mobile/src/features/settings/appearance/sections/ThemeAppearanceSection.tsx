@@ -43,12 +43,7 @@ const PreviewOrb = memo(function PreviewOrb(props: {
   const idPrefix = useId().replaceAll(":", "");
   const accentGradientId = `${idPrefix}-accent-glow`;
   const actionGradientId = `${idPrefix}-action-glow`;
-  const { systemColorPalettes } = useAppearancePreferences();
-  const palette = systemColorPalettes?.[props.appearance];
-  const colors =
-    props.themeId === "material-you" && palette
-      ? { canvas: palette.surface, accent: palette.primary, messageAction: palette.tertiary }
-      : getMobileThemePreviewColors(props.themeId, props.appearance);
+  const colors = getMobileThemePreviewColors(props.themeId, props.appearance);
   const spec = THEME_PREVIEW_RENDER_SPECS[props.appearance];
   const accentRadius = Math.hypot(
     Math.max(spec.accent.center[0], 1 - spec.accent.center[0]),
@@ -298,7 +293,6 @@ export function ThemeAppearanceSection() {
     setThemeMode,
     themeIds,
     themeMode,
-    systemColorsAvailable,
     sidebarProjectFolderTint,
     setSidebarProjectFolderTint,
   } = useAppearancePreferences();
@@ -325,9 +319,7 @@ export function ThemeAppearanceSection() {
       <View className="gap-3">
         <SectionLabel>Themes</SectionLabel>
         <View className="flex-row flex-wrap gap-3">
-          {MOBILE_THEME_OPTIONS.filter(
-            (theme) => theme.id !== "material-you" || systemColorsAvailable,
-          ).map((theme) =>
+          {MOBILE_THEME_OPTIONS.map((theme) =>
             theme.id === FINCKE_OCEAN_THEME_ID ? (
               <Pressable
                 key={theme.id}

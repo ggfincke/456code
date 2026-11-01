@@ -22,10 +22,7 @@ import { AppText } from "../../components/ui/AppText";
 import { ControlPill } from "../../components/ui/ControlPill";
 import { Menu } from "../../components/ui/Menu";
 import { GlassSurface } from "../../components/ui/GlassSurface";
-import {
-  androidHeaderMenuActions,
-  findHeaderMenuAction,
-} from "../../components/ui/headerMenu.android";
+import { headerMenuActions, findHeaderMenuAction } from "../../components/ui/headerMenu";
 import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
 import { useAppForeground } from "../../lib/appState";
 import { useHardwareBack } from "../../lib/backHandler";
@@ -370,7 +367,7 @@ export function DevicePreviewScreen({
 function DeviceOptionsMenu({ items }: { readonly items: ReadonlyArray<AppBarMenuItem> }) {
   return (
     <Menu
-      actions={androidHeaderMenuActions(items)}
+      actions={headerMenuActions(items)}
       isAnchoredToRight
       title="Device options"
       onPressAction={({ nativeEvent }) => {

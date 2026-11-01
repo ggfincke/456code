@@ -1,7 +1,6 @@
 import type { MenuAction } from "@react-native-menu/menu";
 import { Pressable } from "react-native";
 
-import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
 
@@ -17,7 +16,6 @@ export function ComposerAttachmentButton(props: {
   readonly onPickMedia: () => Promise<void>;
   readonly onPickFiles: () => Promise<void>;
 }) {
-  const { scale } = useAndroidControlSizing();
   const button = (
     <Pressable
       accessibilityLabel="Add attachment"
@@ -29,7 +27,7 @@ export function ComposerAttachmentButton(props: {
     >
       <SymbolView
         name="plus"
-        size={Math.round((props.size === "large" ? 26 : 20) * scale)}
+        size={props.size === "large" ? 26 : 20}
         weight="regular"
         tintColorClassName="accent-icon"
         type="monochrome"
