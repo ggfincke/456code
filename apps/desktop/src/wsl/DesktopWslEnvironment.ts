@@ -9,10 +9,10 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { buildRemoteNodeEnvScript } from "@t3tools/ssh/tunnel";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { buildNodeEnvScript } from "./wslNodeEnvScript.ts";
 import { parseWslDistroList, type WslDistro } from "./wslPathParsing.ts";
 import { DESKTOP_APP_NAME } from "../fincke/build.ts";
 
@@ -168,7 +168,7 @@ const formatWslShellTransportFailureReason = (
 
 const buildWslNodeEnvPreamble = (
   nodeEngineRange?: string | null,
-): string => `${buildRemoteNodeEnvScript({ nodeEngineRange: nodeEngineRange ?? null })}
+): string => `${buildNodeEnvScript(nodeEngineRange ?? null)}
 ensure_remote_node_path || true
 `;
 

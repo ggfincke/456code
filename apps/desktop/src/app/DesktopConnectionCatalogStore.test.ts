@@ -123,7 +123,7 @@ describe("DesktopConnectionCatalogStore", () => {
     ),
   );
 
-  it.effect("migrates legacy relay, SSH, bearer profile, and credential data", () =>
+  it.effect("migrates legacy relay, bearer profile, and credential data and skips SSH", () =>
     withStore(
       Effect.gen(function* () {
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
@@ -192,31 +192,15 @@ describe("DesktopConnectionCatalogStore", () => {
           environmentId: EnvironmentId.make("relay-environment"),
           label: "Relay",
         });
+        assert.equal(catalog.targets.length, 2);
         assert.deepInclude(catalog.targets[1], {
-          _tag: "SshConnectionTarget",
-          environmentId: EnvironmentId.make("ssh-environment"),
-          label: "SSH",
-          connectionId: "ssh:ssh-environment",
-        });
-        assert.deepInclude(catalog.targets[2], {
           _tag: "BearerConnectionTarget",
           environmentId: EnvironmentId.make("bearer-environment"),
           label: "Bearer",
           connectionId: "bearer:bearer-environment",
         });
+        assert.equal(catalog.profiles.length, 1);
         assert.deepInclude(catalog.profiles[0], {
-          _tag: "SshConnectionProfile",
-          connectionId: "ssh:ssh-environment",
-          environmentId: EnvironmentId.make("ssh-environment"),
-          label: "SSH",
-          target: {
-            alias: "devbox",
-            hostname: "devbox.example.com",
-            username: "julius",
-            port: 22,
-          },
-        });
-        assert.deepInclude(catalog.profiles[1], {
           _tag: "BearerConnectionProfile",
           connectionId: "bearer:bearer-environment",
           environmentId: EnvironmentId.make("bearer-environment"),

@@ -10,15 +10,12 @@ import {
   BearerConnectionProfile,
   BearerConnectionRegistration,
   RelayConnectionRegistration,
-  SshConnectionProfile,
-  SshConnectionRegistration,
 } from "../connection/catalog.ts";
 import {
   BearerConnectionTarget,
   ConnectionTransientError,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
-  SshConnectionTarget,
 } from "../connection/model.ts";
 import {
   PullRequestRoutingPermissions,
@@ -39,6 +36,7 @@ const decodeConnectionCatalogDocument = Schema.decodeUnknownEffect(ConnectionCat
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const decodeCatalogDocument = Schema.decodeUnknownSync(ConnectionCatalogDocument);
+const encodeCatalogDocument = Schema.encodeSync(ConnectionCatalogDocument);
 
 const RELAY_TARGET = new RelayConnectionTarget({
   environmentId: ENVIRONMENT_ID,
@@ -131,7 +129,7 @@ describe("ConnectionCatalogDocument", () => {
     }),
   );
 
-  it.effect("requires explicit trust for primary, relay, and SSH connections independently", () =>
+  it.effect("requires explicit trust for primary and relay connections independently", () =>
     Effect.gen(function* () {
       const permissions = yield* makePullRequestRoutingPermissions({
         read: Effect.succeed([]),
@@ -149,22 +147,6 @@ describe("ConnectionCatalogDocument", () => {
           enabled: true,
         },
         { target: RELAY_TARGET, profile: Option.none(), enabled: true },
-        {
-          enabled: true,
-          target: new SshConnectionTarget({
-            environmentId: ENVIRONMENT_ID,
-            label: "SSH",
-            connectionId: "ssh-1",
-          }),
-          profile: Option.some(
-            new SshConnectionProfile({
-              environmentId: ENVIRONMENT_ID,
-              label: "SSH",
-              connectionId: "ssh-1",
-              target: { alias: "work", hostname: "work.example.test", username: "maria", port: 22 },
-            }),
-          ),
-        },
       ];
       for (const entry of entries) {
         expect(yield* permissions.get(entry)).toBe("off");
@@ -335,35 +317,49 @@ describe("ConnectionCatalogDocument", () => {
     );
   });
 
-  it("persists the normalized SSH profile and its paired token beside its target", () => {
-    const target = new SshConnectionTarget({
-      environmentId: ENVIRONMENT_ID,
-      label: "SSH",
-      connectionId: "ssh-1",
-    });
-    const profile = new SshConnectionProfile({
-      connectionId: target.connectionId,
-      environmentId: target.environmentId,
-      label: target.label,
-      target: {
-        alias: "devbox",
-        hostname: "devbox.example.test",
-        username: "developer",
-        port: 22,
-      },
-    });
-    const document = registerConnectionInCatalog(
-      EMPTY_CONNECTION_CATALOG_DOCUMENT,
-      new SshConnectionRegistration({ target, profile, credential: BEARER_CREDENTIAL }),
+  it("drops a saved SSH route and its records on read", () => {
+    const bearer = encodeCatalogDocument(
+      registerConnectionInCatalog(
+        EMPTY_CONNECTION_CATALOG_DOCUMENT,
+        new BearerConnectionRegistration({
+          target: BEARER_TARGET,
+          profile: BEARER_PROFILE,
+          credential: BEARER_CREDENTIAL,
+        }),
+      ),
     );
+    const decoded = decodeCatalogDocument({
+      ...bearer,
+      targets: [
+        ...bearer.targets,
+        {
+          _tag: "SshConnectionTarget",
+          environmentId: "environment-ssh",
+          label: "SSH",
+          connectionId: "ssh-1",
+        },
+      ],
+      profiles: [
+        ...bearer.profiles,
+        {
+          _tag: "SshConnectionProfile",
+          connectionId: "ssh-1",
+          environmentId: "environment-ssh",
+          label: "SSH",
+          target: { alias: "devbox", hostname: "devbox.example.test", username: "dev", port: 22 },
+        },
+      ],
+      credentials: [
+        ...bearer.credentials,
+        { connectionId: "ssh-1", credential: { _tag: "BearerConnectionCredential", token: "t" } },
+      ],
+    });
 
-    expect(document.targets).toEqual([target]);
-    expect(document.profiles).toEqual([profile]);
-    expect(document.credentials).toEqual([
-      { connectionId: target.connectionId, credential: BEARER_CREDENTIAL },
+    expect(decoded.targets).toEqual([BEARER_TARGET]);
+    expect(decoded.profiles).toEqual([BEARER_PROFILE]);
+    expect(decoded.credentials).toEqual([
+      { connectionId: BEARER_TARGET.connectionId, credential: BEARER_CREDENTIAL },
     ]);
-    // Removing the route forgets its token too.
-    expect(removeConnectionFromCatalog(document, ENVIRONMENT_ID).credentials).toEqual([]);
   });
 
   it("keeps every route of an environment and drops only a removed route's records", () => {

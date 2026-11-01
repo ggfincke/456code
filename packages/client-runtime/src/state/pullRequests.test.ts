@@ -25,15 +25,12 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import {
   AVAILABLE_CONNECTION_STATE,
-  ConnectionTransientError,
   PrimaryConnectionTarget,
-  SshConnectionTarget,
   type PreparedConnection,
   type SupervisorConnectionState,
 } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
-import { SshConnectionProfile, type ConnectionCatalogEntry } from "../connection/catalog.ts";
-import * as ConnectionProfileStore from "../connection/profileStore.ts";
+import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
@@ -700,123 +697,6 @@ it.effect.each([
         );
       }),
     ),
-);
-
-it.effect.each(
-  (["origin", "destination"] as const).flatMap((side) =>
-    (["matching", "changed", "missing", "unavailable", "failed"] as const).map((stored) => ({
-      side,
-      stored,
-    })),
-  ),
-)("checks the current $side SSH profile before routing with $stored storage", ({ side, stored }) =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const calls: string[] = [];
-      const identity = {
-        host: "github.com",
-        provider: "github",
-        viewer: "maria",
-        accountId: "123",
-      };
-      const client = {
-        [WS_METHODS.pullRequestsRouting]: () =>
-          Effect.sync(() => {
-            calls.push("source-probe");
-            return identity;
-          }),
-        [WS_METHODS.pullRequestsRunAction]: (input: { expectedAccountId?: string }) =>
-          Effect.gen(function* () {
-            if (input.expectedAccountId !== undefined) {
-              return yield* new PullRequestOperationError({
-                operation: "routeIdentity",
-                detail: "Source guard refused.",
-              });
-            }
-            calls.push("source-write");
-          }),
-        [WS_METHODS.pullRequestsInvalidate]: () => Effect.void,
-      } as unknown as WsRpcProtocolClient;
-      const alternate = {
-        [WS_METHODS.pullRequestsRoutingIdentity]: () =>
-          Effect.sync(() => {
-            calls.push("alternate-probe");
-            return identity;
-          }),
-        [WS_METHODS.pullRequestsRunAction]: () =>
-          Effect.sync(() => {
-            calls.push("alternate-write");
-          }),
-        [WS_METHODS.pullRequestsInvalidate]: () => Effect.void,
-      } as unknown as WsRpcProtocolClient;
-      const { environmentRegistry, supervisor } = yield* makeTestRuntime(client, alternate);
-      const environmentId =
-        side === "origin" ? TARGET.environmentId : EnvironmentId.make("local-environment");
-      const profile = new SshConnectionProfile({
-        connectionId: "ssh-1",
-        environmentId,
-        label: "SSH",
-        target: { alias: "work", hostname: "work.example.test", username: "maria", port: 22 },
-      });
-      yield* SubscriptionRef.update(environmentRegistry.entries, (entries) =>
-        new Map(entries).set(environmentId, {
-          target: new SshConnectionTarget({
-            environmentId,
-            connectionId: profile.connectionId,
-            label: "SSH",
-          }),
-          profile: Option.some(profile),
-          enabled: true,
-        }),
-      );
-      const read = Effect.suspend(() =>
-        stored === "failed"
-          ? Effect.fail(
-              new ConnectionTransientError({
-                reason: "remote-unavailable",
-                detail: "Profile storage unavailable.",
-              }),
-            )
-          : Effect.succeed(
-              stored === "missing"
-                ? Option.none()
-                : Option.some(
-                    stored === "changed"
-                      ? new SshConnectionProfile({
-                          ...profile,
-                          target: { ...profile.target, hostname: "replacement.example.test" },
-                        })
-                      : profile,
-                  ),
-            ),
-      );
-      const route = createPullRequestRouter()(WS_METHODS.pullRequestsRunAction, {
-        projectId: ProjectId.make("project-1"),
-        repository: "private/repo",
-        number: 7,
-        action: "merge",
-      }).pipe(
-        Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.provideService(PullRequestRoutingPermissions, trustedRouting),
-        Effect.provideService(RpcPermissionGuard, { authorize: () => Effect.void }),
-      );
-      yield* stored === "unavailable"
-        ? route
-        : route.pipe(
-            Effect.provideService(ConnectionProfileStore.ConnectionProfileStore, {
-              get: () => read,
-              put: () => Effect.die("unused"),
-              remove: () => Effect.die("unused"),
-            }),
-          );
-      expect(calls).toEqual(
-        stored === "matching"
-          ? ["source-probe", "alternate-probe", "alternate-write"]
-          : ["source-write"],
-      );
-    }),
-  ),
 );
 
 it.live.each([undefined, true, false])(

@@ -265,11 +265,6 @@ const prepareDirectBearer = Effect.fn("TestRemoteAuthorization.prepareDirectBear
         Layer.succeed(ClientCapabilities.PrimaryEnvironmentAuth, {
           bearerToken: Effect.succeedNone,
         }),
-        Layer.succeed(ClientCapabilities.SshEnvironmentGateway, {
-          provision: unused,
-          prepare: unused,
-          disconnect: unused,
-        }),
       ),
     ),
   );

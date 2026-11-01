@@ -1,6 +1,7 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import {
   type ConnectionRegistration,
@@ -17,7 +18,7 @@ export const StoredConnectionCredential = Schema.Struct({
 });
 export type StoredConnectionCredential = typeof StoredConnectionCredential.Type;
 
-export const ConnectionCatalogDocument = Schema.Struct({
+const ConnectionCatalogFields = {
   schemaVersion: Schema.Literal(1),
   targets: Schema.Array(PersistedConnectionTarget),
   profiles: Schema.Array(ConnectionProfile),
@@ -29,7 +30,53 @@ export const ConnectionCatalogDocument = Schema.Struct({
   disabledEnvironmentIds: Schema.Array(EnvironmentId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),
+};
+
+// SSH environments were removed; their saved routes are dropped on read so older catalogs load.
+const RemovedConnectionTarget = Schema.TaggedStruct("SshConnectionTarget", {
+  connectionId: Schema.String,
 });
+const RemovedConnectionProfile = Schema.TaggedStruct("SshConnectionProfile", {
+  connectionId: Schema.String,
+});
+const isRemovedConnectionTarget = Schema.is(RemovedConnectionTarget);
+const isRemovedConnectionProfile = Schema.is(RemovedConnectionProfile);
+
+const CurrentConnectionCatalogDocument = Schema.Struct(ConnectionCatalogFields);
+
+const StoredConnectionCatalogDocument = Schema.Struct({
+  ...ConnectionCatalogFields,
+  targets: Schema.Array(Schema.Union([PersistedConnectionTarget, RemovedConnectionTarget])),
+  profiles: Schema.Array(Schema.Union([ConnectionProfile, RemovedConnectionProfile])),
+});
+
+export const ConnectionCatalogDocument = StoredConnectionCatalogDocument.pipe(
+  Schema.decodeTo(
+    Schema.toType(CurrentConnectionCatalogDocument),
+    SchemaTransformation.transform({
+      decode: (stored): typeof CurrentConnectionCatalogDocument.Type => {
+        const removedIds = new Set(
+          stored.targets.flatMap((target) =>
+            isRemovedConnectionTarget(target) ? [target.connectionId] : [],
+          ),
+        );
+        return {
+          ...stored,
+          targets: stored.targets.filter(
+            (target): target is PersistedConnectionTarget => !isRemovedConnectionTarget(target),
+          ),
+          profiles: stored.profiles.filter(
+            (profile): profile is ConnectionProfile => !isRemovedConnectionProfile(profile),
+          ),
+          credentials: stored.credentials.filter(
+            (credential) => !removedIds.has(credential.connectionId),
+          ),
+        };
+      },
+      encode: (document) => document,
+    }),
+  ),
+);
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
 
 export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Object.freeze({
@@ -64,7 +111,6 @@ function connectionIdOf(target: ConnectionTarget): string | null {
     case "RelayConnectionTarget":
       return null;
     case "BearerConnectionTarget":
-    case "SshConnectionTarget":
       return target.connectionId;
   }
 }
@@ -135,7 +181,6 @@ export function registerConnectionInCatalog(
     case "RelayConnectionRegistration":
       return next;
     case "BearerConnectionRegistration":
-    case "SshConnectionRegistration":
       return {
         ...next,
         profiles: replaceCatalogValue(

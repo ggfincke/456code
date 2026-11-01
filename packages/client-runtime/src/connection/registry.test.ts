@@ -1,5 +1,4 @@
 import {
-  type DesktopSshEnvironmentTarget,
   EnvironmentId,
   type OrchestrationV2ShellSnapshot,
   type ServerConfig,
@@ -20,7 +19,6 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Tracer from "effect/Tracer";
 
-import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as TokenStore from "../authorization/tokenStore.ts";
 import {
   BearerConnectionCredential,
@@ -31,8 +29,6 @@ import {
   type ConnectionRoute,
   PrimaryConnectionRegistration,
   RelayConnectionRegistration,
-  SshConnectionProfile,
-  SshConnectionRegistration,
   type ConnectionCredential,
   type ConnectionProfile,
 } from "./catalog.ts";
@@ -47,7 +43,6 @@ import {
   BearerConnectionTarget,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
-  SshConnectionTarget,
   type ConnectionTarget,
   type PreparedConnection,
   type SupervisorConnectionState,
@@ -109,24 +104,6 @@ const BEARER_CREDENTIAL = new BearerConnectionCredential({
   token: "bearer-token",
 });
 
-const SSH_TARGET: DesktopSshEnvironmentTarget = {
-  alias: "test",
-  hostname: "test.example.test",
-  username: "developer",
-  port: 22,
-};
-const SSH_CONNECTION = new SshConnectionTarget({
-  environmentId: EnvironmentId.make("environment-ssh"),
-  label: "SSH environment",
-  connectionId: "ssh-connection",
-});
-const SSH_PROFILE = new SshConnectionProfile({
-  connectionId: SSH_CONNECTION.connectionId,
-  environmentId: SSH_CONNECTION.environmentId,
-  label: SSH_CONNECTION.label,
-  target: SSH_TARGET,
-});
-
 const CACHED_SNAPSHOT: OrchestrationV2ShellSnapshot = {
   ...v2ShellSnapshot,
   snapshotSequence: 1,
@@ -173,25 +150,8 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   const profileReadCount = yield* Ref.make(0);
   const storedCredentials = yield* Ref.make(new Map(initialCredentials));
   const storedRemoteTokens = yield* Ref.make(
-    new Map([
-      [
-        SSH_CONNECTION.environmentId,
-        new TokenStore.RemoteDpopAccessToken({
-          environmentId: SSH_CONNECTION.environmentId,
-          label: SSH_CONNECTION.label,
-          endpoint: {
-            httpBaseUrl: "https://ssh.example.test",
-            wsBaseUrl: "wss://ssh.example.test",
-            providerKind: "cloudflare_tunnel",
-          },
-          accessToken: "cached-token",
-          expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
-          dpopThumbprint: "thumbprint",
-        }),
-      ],
-    ]),
+    new Map<EnvironmentId, TokenStore.RemoteDpopAccessToken>(),
   );
-  const disconnectedSshTargets = yield* Ref.make<ReadonlyArray<DesktopSshEnvironmentTarget>>([]);
 
   const storedDisabled = yield* Ref.make<ReadonlySet<EnvironmentId>>(
     new Set(options?.initialDisabled ?? []),
@@ -211,7 +171,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
           case "RelayConnectionRegistration":
             return;
           case "BearerConnectionRegistration":
-          case "SshConnectionRegistration":
             yield* Ref.update(storedProfiles, (current) => {
               const next = new Map(current);
               next.set(registration.profile.connectionId, registration.profile);
@@ -237,7 +196,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
           current.filter((target) => target.environmentId !== environmentId),
         );
         for (const target of removed) {
-          if (target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget") {
+          if (target._tag === "BearerConnectionTarget") {
             yield* Ref.update(storedProfiles, (current) => {
               const next = new Map(current);
               next.delete(target.connectionId);
@@ -366,11 +325,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         return next;
       }),
   });
-  const sshGateway = ClientCapabilities.SshEnvironmentGateway.of({
-    provision: () => Effect.die(new Error("SSH provisioning is not used.")),
-    prepare: () => Effect.die(new Error("SSH preparation is not used.")),
-    disconnect: (target) => Ref.update(disconnectedSshTargets, (current) => [...current, target]),
-  });
   const connectedRoutes = yield* Ref.make<ReadonlyArray<string>>([]);
   const checkRoute = (route: ConnectionRoute) =>
     Effect.succeed(options?.checkRoute?.(route) ?? "unchecked");
@@ -447,7 +401,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         Layer.succeed(ConnectionProfileStore.ConnectionProfileStore, profileStore),
         Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, credentialStore),
         Layer.succeed(TokenStore.RemoteDpopAccessTokenStore, tokenStore),
-        Layer.succeed(ClientCapabilities.SshEnvironmentGateway, sshGateway),
         Layer.succeed(Connectivity.Connectivity, connectivity),
         Layer.succeed(
           ConnectionWakeups.ConnectionWakeups,
@@ -473,7 +426,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     storedCredentials,
     storedRemoteTokens,
     storedDisabled,
-    disconnectedSshTargets,
     networkStatus,
     connectedRoutes,
   };
@@ -941,34 +893,6 @@ describe("EnvironmentRegistry", () => {
         expect(entry?.target.label).toBe("Renamed");
         expect(entry?.enabled).toBe(false);
         expect(yield* Ref.get(harness.sessions)).toHaveLength(0);
-      }).pipe(Effect.provide(harness.layer));
-    }),
-  );
-
-  it.effect("switching an SSH environment off tears down its managed backend", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness([SSH_CONNECTION], [SSH_PROFILE]);
-
-      yield* Effect.gen(function* () {
-        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-        yield* registry.start;
-        yield* awaitConnectionState(
-          registry,
-          SSH_CONNECTION.environmentId,
-          (state) => state.phase === "connected",
-        );
-
-        yield* registry.setEnabled(SSH_CONNECTION.environmentId, false);
-        yield* awaitConnectionState(
-          registry,
-          SSH_CONNECTION.environmentId,
-          (state) => state.phase === "available",
-        );
-
-        expect(yield* Ref.get(harness.disconnectedSshTargets)).toEqual([SSH_TARGET]);
-        expect(hasRoutes(yield* Ref.get(harness.storedTargets), SSH_CONNECTION.environmentId)).toBe(
-          true,
-        );
       }).pipe(Effect.provide(harness.layer));
     }),
   );
@@ -1687,38 +1611,6 @@ describe("EnvironmentRegistry", () => {
       );
     }),
   );
-
-  it.effect("removes all owned SSH state only on explicit removal", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness(
-        [SSH_CONNECTION],
-        [SSH_PROFILE],
-        [
-          [
-            SSH_CONNECTION.connectionId,
-            new BearerConnectionCredential({ token: "temporary-token" }),
-          ],
-        ],
-      );
-
-      yield* Effect.gen(function* () {
-        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-        yield* registry.start;
-        yield* registry.remove(SSH_CONNECTION.environmentId);
-
-        expect((yield* Ref.get(harness.storedProfiles)).has(SSH_CONNECTION.connectionId)).toBe(
-          false,
-        );
-        expect((yield* Ref.get(harness.storedCredentials)).has(SSH_CONNECTION.connectionId)).toBe(
-          false,
-        );
-        expect((yield* Ref.get(harness.storedRemoteTokens)).has(SSH_CONNECTION.environmentId)).toBe(
-          false,
-        );
-        expect(yield* Ref.get(harness.disconnectedSshTargets)).toEqual([SSH_TARGET]);
-      }).pipe(Effect.provide(harness.layer));
-    }),
-  );
 });
 
 describe("EnvironmentRegistry routes", () => {
@@ -1781,35 +1673,6 @@ describe("EnvironmentRegistry routes", () => {
         ]);
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
-  );
-
-  it.effect(
-    "adding a saved SSH host again replaces its route, whatever id it was saved under",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness([SSH_CONNECTION], [SSH_PROFILE]);
-        yield* Effect.gen(function* () {
-          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-          const again = new SshConnectionTarget({
-            ...SSH_CONNECTION,
-            connectionId: "ssh-connection-new-id",
-          });
-          yield* registry.register(
-            new SshConnectionRegistration({
-              target: again,
-              profile: new SshConnectionProfile({
-                ...SSH_PROFILE,
-                connectionId: again.connectionId,
-              }),
-              credential: BEARER_CREDENTIAL,
-            }),
-          );
-
-          expect(
-            routesOf(yield* Ref.get(harness.storedTargets), SSH_CONNECTION.environmentId),
-          ).toEqual([again]);
-        }).pipe(Effect.provide(harness.layer), Effect.scoped);
-      }),
   );
 
   it.effect("reorders routes and rejects an order that drops one", () =>

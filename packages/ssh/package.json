@@ -11,17 +11,9 @@
       "types": "./src/command.ts",
       "import": "./src/command.ts"
     },
-    "./config": {
-      "types": "./src/config.ts",
-      "import": "./src/config.ts"
-    },
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts"
-    },
-    "./tunnel": {
-      "types": "./src/tunnel.ts",
-      "import": "./src/tunnel.ts"
     }
   },
   "scripts": {

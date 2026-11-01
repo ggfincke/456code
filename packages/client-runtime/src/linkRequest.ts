@@ -67,8 +67,7 @@ export interface LinkableMachine {
   /**
    * Where the client knows it answers, most preferred first: the addresses it
    * reports, then its saved routes. The server
-   * keeps only those that answer as this machine. Empty for a machine reached
-   * only over SSH, whose forward lives in this client.
+   * keeps only those that answer as this machine.
    */
   readonly urls: ReadonlyArray<string>;
 }

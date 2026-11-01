@@ -1,22 +1,11 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Config from "effect/Config";
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Semaphore from "effect/Semaphore";
-
-import { SshPasswordPromptError } from "./errors.ts";
-
-export interface SshPasswordRequest {
-  readonly destination: string;
-  readonly username: string | null;
-  readonly prompt: string;
-  readonly attempt: number;
-}
 
 interface SshAskpassFile {
   readonly path: string;
@@ -33,27 +22,6 @@ export interface SshAuthOptions {
   readonly authSecret?: string | null;
   readonly batchMode?: "yes" | "no";
   readonly interactiveAuth?: boolean;
-}
-
-export interface SshPasswordPromptShape {
-  readonly isAvailable: boolean;
-  readonly request: (
-    request: SshPasswordRequest,
-  ) => Effect.Effect<string | null, SshPasswordPromptError>;
-}
-
-export class SshPasswordPrompt extends Context.Service<SshPasswordPrompt, SshPasswordPromptShape>()(
-  "@t3tools/ssh/auth/SshPasswordPrompt",
-) {
-  static readonly disabledLayer = Layer.succeed(
-    SshPasswordPrompt,
-    SshPasswordPrompt.of({
-      isAvailable: false,
-      request: Effect.fn("SshPasswordPrompt.request")(function () {
-        return Effect.succeed(null);
-      }),
-    }),
-  );
 }
 
 export interface SshChildEnvironmentOptions {

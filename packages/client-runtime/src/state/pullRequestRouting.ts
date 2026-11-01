@@ -17,12 +17,8 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
-import {
-  PullRequestRoutingPermissions,
-  pullRequestRoutingConnectionKey,
-} from "../connection/pullRequestRoutingPermissions.ts";
+import { PullRequestRoutingPermissions } from "../connection/pullRequestRoutingPermissions.ts";
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
-import * as ConnectionProfileStore from "../connection/profileStore.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import {
   requestGuarded as request,
@@ -177,19 +173,7 @@ const routingAllowed = Effect.fn("PullRequestRouting.allowed")(function* (
   const allowed = write
     ? source === "read-write" && target === "read-write"
     : source !== "off" && target !== "off";
-  if (!allowed) return false;
-  for (const entry of [origin, destination]) {
-    if (entry.target._tag !== "SshConnectionTarget") continue;
-    const profiles = yield* Effect.serviceOption(ConnectionProfileStore.ConnectionProfileStore);
-    if (Option.isNone(profiles)) return false;
-    const profile = yield* profiles.value
-      .get(entry.target.connectionId)
-      .pipe(Effect.orElseSucceed(() => Option.none()));
-    const key = pullRequestRoutingConnectionKey(entry);
-    if (key === null || key !== pullRequestRoutingConnectionKey({ ...entry, profile }))
-      return false;
-  }
-  return true;
+  return allowed;
 });
 
 function matchesReference(reference: PullRequestRef, filter: PullRequestRef): boolean {

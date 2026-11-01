@@ -16,7 +16,7 @@ import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { environmentPresentations } from "~/state/presentation";
 
 export interface RemoteOpenHost {
-  readonly kind: "ssh-alias" | RemoteOpenTarget["kind"];
+  readonly kind: RemoteOpenTarget["kind"];
   readonly host: string;
   readonly username?: string;
 }
@@ -50,7 +50,6 @@ function parseHostname(url: string): string | null {
 
 export function resolveRemoteOpenState(input: {
   readonly target: ConnectionTarget | null;
-  readonly sshTarget: { readonly alias: string; readonly username: string | null } | null;
   readonly remoteOpenTargets: ReadonlyArray<RemoteOpenTarget> | undefined;
   readonly isDesktopRenderer: boolean;
 }): RemoteOpenState {
@@ -71,22 +70,6 @@ export function resolveRemoteOpenState(input: {
     return LOCAL_EXEC;
   }
 
-  if (input.sshTarget !== null && input.sshTarget.alias.length > 0) {
-    const { alias } = input.sshTarget;
-    const userSeparator = alias.lastIndexOf("@");
-    const host = userSeparator === -1 ? alias : alias.slice(userSeparator + 1);
-    const username =
-      input.sshTarget.username?.trim() ||
-      (userSeparator === -1 ? null : alias.slice(0, userSeparator));
-    return {
-      mode: "remote-links",
-      host: {
-        kind: "ssh-alias",
-        host,
-        ...(username === null ? {} : { username }),
-      },
-    };
-  }
   const advertised = input.remoteOpenTargets?.[0];
   if (advertised !== undefined) {
     return { mode: "remote-links", host: advertised };
@@ -112,12 +95,9 @@ const remoteOpenResolutionAtom = Atom.family((environmentId: EnvironmentId) =>
     if (entry === null) {
       return UNRESOLVED_REMOTE_OPEN;
     }
-    const profile = Option.getOrNull(entry.profile);
     const next: RemoteOpenResolution = {
       state: resolveRemoteOpenState({
         target: entry.target,
-        sshTarget:
-          profile !== null && profile._tag === "SshConnectionProfile" ? profile.target : null,
         remoteOpenTargets: presentation?.serverConfig?.remoteOpenTargets,
         isDesktopRenderer: window.desktopBridge !== undefined,
       }),

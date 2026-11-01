@@ -26,7 +26,6 @@ import { disabled as releaseUpdatesDisabled } from "./fincke/ReleaseUpdates.ts";
 import { uninstallCommand } from "./cli/uninstall.ts";
 import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
 import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
-import { sshHelperCommand } from "./cli/sshHelper.ts";
 import { serviceCommand } from "./cli/service.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { themeCommand } from "./cli/theme.ts";
@@ -61,8 +60,6 @@ export const makeCli = () =>
       uninstallCommand,
       serviceLauncherCommand,
       claudeHistoryCommand,
-      sshHelperCommand,
-
       servicePreflightCommand,
       themeCommand,
       traceCommand,
