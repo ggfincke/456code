@@ -6,6 +6,7 @@ import {
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { finckeFolderTint } from "@t3tools/shared/fincke-folder-tint";
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
@@ -35,12 +36,16 @@ function WorkingDuration(props: { readonly startedAt: string | null }) {
 export function SidebarSelectionBar(props: {
   readonly ocean: boolean;
   readonly theme: MobileThemeVariables;
+  // ocean's project hue; teal when the thread has no project folder
+  readonly hue?: string | null;
 }) {
   return (
     <View
       pointerEvents="none"
       className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-full"
-      style={{ backgroundColor: props.ocean ? OCEAN_ACCENT : props.theme["--color-primary"] }}
+      style={{
+        backgroundColor: props.ocean ? (props.hue ?? OCEAN_ACCENT) : props.theme["--color-primary"],
+      }}
     />
   );
 }
@@ -49,6 +54,8 @@ export function SidebarThreadRowContent(props: {
   readonly layout: SidebarRowLayout;
   readonly thread: EnvironmentThreadShell;
   readonly projectTitle: string | null;
+  // tints the project name w/ its folder hue under ocean; null keeps it muted
+  readonly projectId?: string | null;
   readonly selected: boolean;
   readonly recede: boolean;
   readonly emphasized: boolean;
@@ -69,6 +76,7 @@ export function SidebarThreadRowContent(props: {
   readonly footer?: ReactNode;
 }) {
   const { ocean, theme, status } = props;
+  const hue = ocean && props.projectId ? finckeFolderTint(props.projectId).color : null;
   const titleClassName = props.selected
     ? "text-thread-selected-foreground"
     : props.recede
@@ -76,7 +84,7 @@ export function SidebarThreadRowContent(props: {
       : "text-drawer-foreground";
   const titleColor = ocean
     ? props.selected
-      ? OCEAN_ACCENT
+      ? (hue ?? OCEAN_ACCENT)
       : props.emphasized && !props.recede
         ? OCEAN_EMPHASIS
         : undefined
@@ -107,7 +115,7 @@ export function SidebarThreadRowContent(props: {
   if (props.layout === "activity" && props.slim) {
     return (
       <View className="relative">
-        {props.selected ? <SidebarSelectionBar ocean={ocean} theme={theme} /> : null}
+        {props.selected ? <SidebarSelectionBar ocean={ocean} theme={theme} hue={hue} /> : null}
         <View className="h-9 flex-row items-center gap-2.5 px-2.5">
           {props.projectIcon ? (
             <View style={{ opacity: props.selected ? 1 : 0.4 }}>{props.projectIcon}</View>
@@ -130,7 +138,7 @@ export function SidebarThreadRowContent(props: {
   if (props.layout === "project") {
     return (
       <View className="relative">
-        {props.selected ? <SidebarSelectionBar ocean={ocean} theme={theme} /> : null}
+        {props.selected ? <SidebarSelectionBar ocean={ocean} theme={theme} hue={hue} /> : null}
         <View className="h-[34px] flex-row items-center gap-1.5 pl-8 pr-2.5">
           {pin}
           {title}
@@ -158,7 +166,7 @@ export function SidebarThreadRowContent(props: {
     );
   return (
     <View className="relative px-2.5 py-1.5">
-      {props.selected ? <SidebarSelectionBar ocean={ocean} theme={theme} /> : null}
+      {props.selected ? <SidebarSelectionBar ocean={ocean} theme={theme} hue={hue} /> : null}
       <View className="h-5 flex-row items-center gap-1.5">
         {pin}
         {title}
@@ -175,7 +183,13 @@ export function SidebarThreadRowContent(props: {
           {props.projectTitle ? (
             <Text
               className="text-xs text-drawer-foreground-muted"
-              style={ocean ? { color: OCEAN_MUTED } : undefined}
+              style={
+                ocean
+                  ? {
+                      color: hue ?? OCEAN_MUTED,
+                    }
+                  : undefined
+              }
             >
               {props.projectTitle}
             </Text>
