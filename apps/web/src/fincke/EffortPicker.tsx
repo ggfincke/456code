@@ -225,6 +225,7 @@ export const EffortPicker = memo(function EffortPicker(
                   aria-label={triggerLabel}
                   data-composer-shortcut={isComposerOwned ? "composer.effort" : undefined}
                   data-effort-ultra={chipUltra ? "" : undefined}
+                  data-effort-level={level?.id}
                   size={size}
                   className={cn(
                     isCodexStyle

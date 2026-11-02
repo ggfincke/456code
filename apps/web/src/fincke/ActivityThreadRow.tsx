@@ -53,6 +53,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { projectHueStyle } from "./projectHue";
 
 import { useRightPanelStore } from "../rightPanelStore";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
@@ -745,6 +746,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const isRemote = thread.environmentId !== props.currentEnvironmentId;
   const showsScratchMachine = !thread.branch && props.scratchMachineLabel !== null;
+  // the project's folder-icon hue tints its name, & the bar & title while open
+  const projectHue = props.projectDisplayName ? projectHueStyle(props.project) : undefined;
 
   const detailsTooltip = (
     <SidebarThreadTooltip
@@ -1091,6 +1094,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                data-project-hue={projectHue ? "" : undefined}
+                style={projectHue}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -1273,6 +1278,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || undefined}
               className={rowSurfaceClassName}
+              data-project-hue={projectHue ? "" : undefined}
+              style={projectHue}
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
@@ -1410,7 +1417,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <span className="min-w-0 flex-1 truncate">
                 {props.projectDisplayName || showsScratchMachine ? (
                   <>
-                    <span className="text-secondary-label [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-muted)">
+                    <span
+                      className={
+                        projectHue
+                          ? "text-secondary-label [html[data-theme-id=fincke-ocean]_&]:text-(--project-hue)"
+                          : "text-secondary-label [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-muted)"
+                      }
+                    >
                       {props.projectDisplayName ?? props.scratchMachineLabel}
                     </span>
                     {" · "}
