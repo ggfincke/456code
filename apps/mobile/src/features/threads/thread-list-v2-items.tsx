@@ -50,6 +50,7 @@ import { copyThreadReference } from "../../lib/copyThreadReference";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { resolveSidebarStatus } from "../../fincke/SidebarStatusGlyph";
+import { finckePrStateColor } from "../../fincke/ocean-colors";
 import {
   SidebarPendingRowContent,
   SidebarThreadRowContent,
@@ -1163,6 +1164,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ? `Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`
       : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
+  // fincke: ocean's material green, red & purple; drafts & unknown states stay muted
+  const oceanPrColor =
+    ocean && pr && pr.state !== null && !pr.isDraft ? finckePrStateColor(pr.state) : null;
   const prBadge = pr ? (
     <Pressable
       // Padding cancelled by negative margin grows the touch target into
@@ -1184,20 +1188,23 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               : pullRequestStatus({ state: pr.state, isDraft: pr.isDraft }).icon
         }
         size={12}
-        tintColorClassName={
-          pr.state === null || pr.isDraft
-            ? rowAppearance.mutedIconTintClassName
-            : pr.state === "open"
-              ? "accent-adaptive-emerald-600-400"
-              : pr.state === "closed"
-                ? "accent-adaptive-rose-600-400"
-                : "accent-adaptive-violet-600-400"
-        }
+        {...(oceanPrColor
+          ? { tintColor: oceanPrColor }
+          : {
+              tintColorClassName:
+                pr.state === null || pr.isDraft
+                  ? rowAppearance.mutedIconTintClassName
+                  : pr.state === "open"
+                    ? "accent-adaptive-emerald-600-400"
+                    : pr.state === "closed"
+                      ? "accent-adaptive-rose-600-400"
+                      : "accent-adaptive-violet-600-400",
+            })}
       />
       <Text
         accessibilityLabel={pr.accessibilityLabel}
         className={cn("text-xs", pr.textClassName)}
-        style={{ fontFamily: MONO_FONT }}
+        style={{ fontFamily: MONO_FONT, ...(oceanPrColor ? { color: oceanPrColor } : null) }}
       >
         {pr.label}
       </Text>
@@ -1412,6 +1419,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       layout={props.sidebarLayout ?? "activity"}
       thread={thread}
       projectTitle={props.projectTitle ?? props.project?.title ?? null}
+      projectId={props.project && !props.project.isScratch ? props.project.id : null}
       selected={selected}
       recede={recede || variant === "slim"}
       emphasized={isUnread || showsWoke || status === "input"}

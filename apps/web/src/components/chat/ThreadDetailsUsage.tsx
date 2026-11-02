@@ -214,12 +214,12 @@ function UsageRow({
                 className={cn(
                   "absolute inset-y-0 left-0 rounded-full",
                   tone === "error"
-                    ? "bg-error"
+                    ? "bg-error [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-red)"
                     : tone === "warning"
-                      ? "bg-warning"
+                      ? "bg-warning [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-yellow)"
                       : muted
                         ? "bg-muted-foreground"
-                        : "bg-foreground/80",
+                        : "bg-foreground/80 [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-teal)",
                 )}
                 style={{ width: `max(${fill}%, 6px)` }}
               />

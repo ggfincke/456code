@@ -107,6 +107,8 @@ import Animated, {
 import { useAssetUrl } from "../../state/assets";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { finckeWorkIconColor } from "../../fincke/ocean-colors";
 
 const SHIMMER_WIDTH = 72;
 const SHIMMER_SWEEP_MS = 1_350;
@@ -131,6 +133,12 @@ function WorkLogIcon(props: {
   readonly highlighted?: boolean;
 }) {
   const colorClassName = props.highlighted ? "accent-foreground" : props.colorClassName;
+  // fincke: ocean tints plain tool icons by kind; failure & highlight classes still win
+  const oceanColor =
+    useAppearancePreferences().themeId === "fincke-ocean" && !colorClassName
+      ? finckeWorkIconColor(props.icon)
+      : null;
+  const color = oceanColor ?? props.color;
   if (props.icon === "t3-code") {
     return (
       <Image
@@ -141,12 +149,7 @@ function WorkLogIcon(props: {
     );
   }
   if (props.icon === "computer") {
-    return (
-      <BrowserAppIcon
-        size={14}
-        {...(colorClassName ? { colorClassName } : { color: props.color })}
-      />
-    );
+    return <BrowserAppIcon size={14} {...(colorClassName ? { colorClassName } : { color })} />;
   }
   return (
     <SymbolView
@@ -161,7 +164,7 @@ function WorkLogIcon(props: {
       }
       size={14}
       weight="medium"
-      {...(colorClassName ? { tintColorClassName: colorClassName } : { tintColor: props.color })}
+      {...(colorClassName ? { tintColorClassName: colorClassName } : { tintColor: color })}
       type="monochrome"
     />
   );

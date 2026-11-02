@@ -19,3 +19,9 @@
 html[data-theme-id="fincke-ocean"] [data-app-sidebar] {
   --fincke-sidebar-selected-row: #babed80d;
 }
+
+/* the open thread's bar & title take its project's folder hue (set by projectHueStyle) */
+html[data-theme-id="fincke-ocean"] [data-app-sidebar] [data-project-hue] {
+  --fincke-sidebar-accent: var(--project-hue);
+  --fincke-sidebar-selected-text: var(--project-hue);
+}

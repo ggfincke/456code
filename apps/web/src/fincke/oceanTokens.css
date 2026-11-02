@@ -32,6 +32,44 @@ html[data-theme-id="fincke-ocean"]
   color: var(--fincke-teal);
 }
 
+/* work-log icons take a color per tool kind, the way vs code colors file icons.
+   lucide names its svgs, and a failed call keeps its error tint */
+html[data-theme-id="fincke-ocean"]
+  [data-slot="work-log-icon"]
+  .lucide-terminal:not([class*="tool-error-icon"] *) {
+  color: var(--fincke-green);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="work-log-icon"]
+  .lucide-square-pen:not([class*="tool-error-icon"] *) {
+  color: var(--fincke-blue);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="work-log-icon"]
+  :is(.lucide-search, .lucide-eye):not([class*="tool-error-icon"] *) {
+  color: var(--fincke-purple);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="work-log-icon"]
+  .lucide-globe:not([class*="tool-error-icon"] *) {
+  color: var(--fincke-cyan);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="work-log-icon"]
+  :is(.lucide-wrench, .lucide-hammer, .lucide-zap):not([class*="tool-error-icon"] *) {
+  color: var(--fincke-yellow);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="work-log-icon"]
+  .lucide-bot:not([class*="tool-error-icon"] *) {
+  color: var(--fincke-teal);
+}
+
 /* the new design keeps the composer outline neutral on focus, so the teal edge is classic-only */
 html[data-theme-id="fincke-ocean"]:not([data-redesign]) [data-slot="composer-shell"]:focus-within {
   --chat-composer-outline: color-mix(in srgb, var(--fincke-teal) 33%, transparent);
@@ -55,4 +93,48 @@ html[data-redesign][data-theme-id="fincke-ocean"]:not([data-diff-color-scheme="b
 /* new design sidebar metadata steps down to a neutral gray; ocean keeps its blue-gray label */
 html[data-redesign][data-theme-id="fincke-ocean"] [data-app-sidebar] {
   --secondary-label: var(--app-theme-secondary-label);
+}
+
+/* "Worked for …" turn headers read as teal section markers */
+html[data-theme-id="fincke-ocean"] [data-slot="turn-fold"] {
+  color: color-mix(in srgb, var(--fincke-teal) 85%, transparent);
+}
+
+html[data-theme-id="fincke-ocean"] [data-slot="turn-fold"]:hover {
+  color: var(--fincke-teal);
+}
+
+/* the timeline minimap marks the turns in view in teal */
+html[data-theme-id="fincke-ocean"] [data-minimap-strip] > span {
+  background: var(--fincke-teal);
+}
+
+/* branches are purple, like their git decorations */
+html[data-theme-id="fincke-ocean"] .lucide-git-branch {
+  color: var(--fincke-purple);
+}
+
+/* the effort chip warms from teal to red as the level rises; ultra keeps its own gradient */
+html[data-theme-id="fincke-ocean"]
+  :is([data-effort-level="minimal"], [data-effort-level="low"]):not([data-effort-ultra]) {
+  --fincke-effort-tint: var(--fincke-teal);
+}
+
+html[data-theme-id="fincke-ocean"] [data-effort-level="medium"]:not([data-effort-ultra]) {
+  --fincke-effort-tint: var(--fincke-yellow);
+}
+
+html[data-theme-id="fincke-ocean"] [data-effort-level="high"]:not([data-effort-ultra]) {
+  --fincke-effort-tint: var(--fincke-orange);
+}
+
+html[data-theme-id="fincke-ocean"]
+  :is([data-effort-level="xhigh"], [data-effort-level="max"]):not([data-effort-ultra]) {
+  --fincke-effort-tint: var(--fincke-red);
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-effort-level]
+  :is([data-composer-control-label], .lucide-brain, .lucide-gauge) {
+  color: var(--fincke-effort-tint, inherit);
 }
