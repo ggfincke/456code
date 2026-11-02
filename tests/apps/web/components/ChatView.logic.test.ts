@@ -26,7 +26,7 @@ it("normalizes only Coral without modifying the requested batch", () => {
   expect(result.error).toBeNull();
   expect(result.targets).toEqual([
     { ...targets[0], runtimeMode: "full-access" },
-    { ...targets[1], runtimeMode: "approval-required", interactionMode: "default" },
+    { ...targets[1], runtimeMode: "full-access", interactionMode: "default" },
   ]);
   expect(targets[1]!.interactionMode).toBe("plan");
 });

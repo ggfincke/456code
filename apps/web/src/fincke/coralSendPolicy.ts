@@ -1,5 +1,5 @@
 // apps/web/src/fincke/coralSendPolicy.ts
-// keeps coral sends within its text-only, supervised turn boundary
+// keeps coral sends within its text-only, default-interaction turn boundary
 
 import type { ProviderDriverKind, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 
@@ -27,7 +27,7 @@ export function prepareComposerTargets<
     error: null,
     targets: targets.map((target) => ({
       ...target,
-      runtimeMode: target.provider === "coral" ? ("approval-required" as const) : runtimeMode,
+      runtimeMode,
       interactionMode: target.provider === "coral" ? ("default" as const) : target.interactionMode,
     })),
   } as const;

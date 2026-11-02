@@ -1,5 +1,5 @@
 // apps/server/src/provider/acp/CoralAcpSupport.ts
-// configures coral native sessions and supervised model selection
+// configures coral native sessions, runtime modes and model selection
 import type { CoralSettings, RuntimeMode } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -11,12 +11,24 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import { collectSessionConfigOptionValues } from "@t3tools/provider-acp/server/runtimeModel";
 
 const DEFAULT_CORAL_OLLAMA_HOST = "http://localhost:11434";
 export const DEFAULT_CORAL_MODEL = "qwen3.8:27b-mlx";
 const CORAL_RUNTIME_MODE_CONFIG_ID = "coral.runtime-mode";
 
-export type CoralRuntimeMode = Extract<RuntimeMode, "approval-required">;
+// coral enforces these modes itself and has no auto mode
+export const CORAL_SUPPORTED_RUNTIME_MODES = [
+  "approval-required",
+  "auto-accept-edits",
+  "full-access",
+] as const satisfies ReadonlyArray<RuntimeMode>;
+
+export type CoralRuntimeMode = (typeof CORAL_SUPPORTED_RUNTIME_MODES)[number];
+
+export function isCoralRuntimeMode(mode: RuntimeMode): mode is CoralRuntimeMode {
+  return (CORAL_SUPPORTED_RUNTIME_MODES as ReadonlyArray<RuntimeMode>).includes(mode);
+}
 
 type CoralAcpRuntimeSettings = Pick<CoralSettings, "binaryPath" | "homePath" | "ollamaHost">;
 
@@ -82,14 +94,34 @@ function buildCoralAcpSpawnInput(
   };
 }
 
+// the runtime skips the request when coral already reports this mode
 export function applyCoralAcpRuntimeMode<E>(input: {
-  readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setConfigOption">;
+  readonly runtime: Pick<
+    AcpSessionRuntime.AcpSessionRuntime["Service"],
+    "getConfigOptions" | "setConfigOption"
+  >;
   readonly runtimeMode: CoralRuntimeMode;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
 }): Effect.Effect<void, E> {
-  return input.runtime
-    .setConfigOption(CORAL_RUNTIME_MODE_CONFIG_ID, input.runtimeMode)
-    .pipe(Effect.mapError(input.mapError), Effect.asVoid);
+  return input.runtime.getConfigOptions.pipe(
+    Effect.flatMap((configOptions) => {
+      const option = configOptions.find(({ id }) => id === CORAL_RUNTIME_MODE_CONFIG_ID);
+      // older coral builds advertise only approval-required
+      if (
+        option !== undefined &&
+        !collectSessionConfigOptionValues(option).includes(input.runtimeMode)
+      ) {
+        return Effect.fail(
+          EffectAcpErrors.AcpRequestError.invalidParams(
+            "This Coral build only supports Supervised permissions. Update Coral or switch this thread to Supervised.",
+          ),
+        );
+      }
+      return input.runtime.setConfigOption(CORAL_RUNTIME_MODE_CONFIG_ID, input.runtimeMode);
+    }),
+    Effect.mapError(input.mapError),
+    Effect.asVoid,
+  );
 }
 
 export const makeCoralAcpRuntime = Effect.fn("CoralAcpSupport.makeRuntime")(function* (
