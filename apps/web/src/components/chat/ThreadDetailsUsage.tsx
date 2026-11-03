@@ -1,4 +1,7 @@
+// apps/web/src/components/chat/ThreadDetailsUsage.tsx
+// renders provider limits and session usage
 import type {
+  OrchestrationV2ProviderTurn,
   ProviderInstanceId,
   ServerProvider,
   ServerProviderUsageWindow,
@@ -34,6 +37,77 @@ export interface ThreadDetailsUsageInput {
   readonly providers: readonly ServerProvider[];
   readonly sources: UsageLimitSourceSnapshots;
   readonly contextWindow: ContextWindowSnapshot | null;
+  readonly providerTurns?: readonly OrchestrationV2ProviderTurn[];
+  readonly model?: string;
+}
+
+export function ThreadDetailsCoralSession({
+  providerTurns = [],
+  contextWindow,
+  model,
+}: ThreadDetailsUsageInput) {
+  const fields = [
+    ["Session input", "inputTokens"],
+    ["Session output", "outputTokens"],
+    ["Session cached", "cachedInputTokens"],
+  ] as const;
+  const cost = contextWindow?.cost;
+  const hosted = model?.startsWith("anthropic/") || model?.startsWith("openai/");
+  return (
+    <ThreadDetailsSection
+      headingId="thread-details-coral-session-heading"
+      title="Coral session"
+      showHeading={false}
+    >
+      <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
+        {fields.map(([label, field]) => {
+          let total = 0;
+          let available = 0;
+          for (const turn of providerTurns) {
+            const value = turn.turnTokenUsage?.[field];
+            if (value !== undefined) {
+              total += value;
+              available += 1;
+            }
+          }
+          const partial = providerTurns.some(
+            (turn) =>
+              turn.turnTokenUsage?.[field] === undefined ||
+              turn.turnTokenUsage.usageStatus !== "complete",
+          );
+          const value =
+            available > 0
+              ? `${formatContextWindowTokens(total)}${partial ? "+" : ""}`
+              : "Unavailable";
+          return (
+            <UsageRow
+              key={field}
+              label={label}
+              fill={null}
+              tone={null}
+              value={value}
+              tooltip={
+                <span className="text-foreground">
+                  {available === 0
+                    ? "No token usage reported yet."
+                    : `${total.toLocaleString("en-US")} tokens${partial ? " reported; session total is incomplete." : " across session turns."}`}
+                </span>
+              }
+            />
+          );
+        })}
+        {hosted && cost ? (
+          <UsageRow
+            label="Estimated cost"
+            fill={null}
+            tone={null}
+            value={`${cost.amount.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${cost.currency}`}
+            tooltip={<span className="text-foreground">Reported session cost estimate.</span>}
+          />
+        ) : null}
+      </div>
+    </ThreadDetailsSection>
+  );
 }
 
 type UsageTone = "error" | "warning" | null;

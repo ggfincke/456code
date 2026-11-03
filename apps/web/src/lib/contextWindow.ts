@@ -1,3 +1,5 @@
+// apps/web/src/lib/contextWindow.ts
+// derives context window usage snapshots
 import type { ThreadStructure, ThreadStructureTurnItem } from "@t3tools/client-runtime/state/shell";
 import type {
   OrchestrationV2ProviderTurn,
@@ -61,6 +63,7 @@ export function deriveLatestContextWindowSnapshot(
   liveUsage?: OrchestrationV2ProviderTurnTokenUsage | null,
   providerThread?: Pick<OrchestrationV2ProviderThread, "contextUsage" | "updatedAt"> | null,
 ): ContextWindowSnapshot | null {
+  const providerUsage = providerThread?.contextUsage;
   if (liveUsage != null) {
     const usedTokens = Math.max(0, liveUsage.usedTokens);
     const maxTokens = liveUsage.maxTokens ?? null;
@@ -71,15 +74,19 @@ export function deriveLatestContextWindowSnapshot(
     const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
     return {
       usedTokens,
-      totalProcessedTokens: null,
+      totalProcessedTokens: asFiniteNumber(providerUsage?.totalProcessedTokens),
       maxTokens,
       remainingTokens,
       usedPercentage,
       remainingPercentage,
-      inputTokens: liveUsage.inputTokens ?? null,
-      cachedInputTokens: liveUsage.cachedInputTokens ?? null,
-      outputTokens: liveUsage.outputTokens ?? null,
-      reasoningOutputTokens: liveUsage.reasoningOutputTokens ?? null,
+      inputTokens: asFiniteNumber(providerUsage?.inputTokens) ?? liveUsage.inputTokens ?? null,
+      cachedInputTokens:
+        asFiniteNumber(providerUsage?.cachedInputTokens) ?? liveUsage.cachedInputTokens ?? null,
+      outputTokens: asFiniteNumber(providerUsage?.outputTokens) ?? liveUsage.outputTokens ?? null,
+      reasoningOutputTokens:
+        asFiniteNumber(providerUsage?.reasoningOutputTokens) ??
+        liveUsage.reasoningOutputTokens ??
+        null,
       lastUsedTokens: null,
       lastInputTokens: null,
       lastCachedInputTokens: null,
@@ -89,11 +96,10 @@ export function deriveLatestContextWindowSnapshot(
       durationMs: null,
       compactsAutomatically: true,
       autoCompactThreshold: liveUsage.autoCompactThreshold ?? null,
-      cost: null,
+      cost: providerUsage?.cost ?? null,
       updatedAt: liveUsage.updatedAt,
     };
   }
-  const providerUsage = providerThread?.contextUsage;
   const providerUsageUpdatedAt = providerThread?.updatedAt;
   if (
     providerUsage !== null &&

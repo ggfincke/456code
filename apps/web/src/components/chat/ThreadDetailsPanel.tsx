@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/ThreadDetailsPanel.tsx
+// renders thread workspace and session details
 import type {
   EditorId,
   EnvironmentId,
@@ -25,6 +27,7 @@ import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
 import {
   ThreadDetailsContext,
+  ThreadDetailsCoralSession,
   ThreadDetailsUsage,
   type ThreadDetailsUsageInput,
 } from "./ThreadDetailsUsage";
@@ -87,6 +90,9 @@ interface ThreadDetailsPanelProps extends Pick<
 }
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
+  const isCoral =
+    props.usage.providers.find((provider) => provider.instanceId === props.usage.providerInstanceId)
+      ?.driver === "coral";
   const visible = useClientSettings(resolveThreadDetailsVisibility);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const fileScripts = useT3ProjectFileScripts(
@@ -258,7 +264,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 />
               ) : null}
 
-              {visible.usage ? <ThreadDetailsUsage {...props.usage} /> : null}
+              {visible.usage ? (
+                isCoral ? (
+                  <ThreadDetailsCoralSession {...props.usage} />
+                ) : (
+                  <ThreadDetailsUsage {...props.usage} />
+                )
+              ) : null}
 
               {visible.context && props.usage.contextWindow ? (
                 <ThreadDetailsContext usage={props.usage.contextWindow} />
