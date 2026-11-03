@@ -93,6 +93,7 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
     flavor: {
       driver: DRIVER,
       runtimeHarness: "Coral",
+      reportsPerTurnPromptUsage: true,
       capabilities: CAPABILITIES,
       sessionModeForPolicy: () => "default",
       makeRuntime: (input) =>
