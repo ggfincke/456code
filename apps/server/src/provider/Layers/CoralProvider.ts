@@ -24,6 +24,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
   buildCoralAcpEnvironment,
   coralModelsFromSessionSetup,
+  CORAL_SUPPORTED_RUNTIME_MODES,
   DEFAULT_CORAL_MODEL,
   makeCoralAcpRuntime,
   normalizeCoralOllamaHost,
@@ -42,6 +43,7 @@ const CORAL_PRESENTATION = {
   supportsConversationRollback: false,
   badgeLabel: "Early Access",
   showInteractionModeToggle: false,
+  supportedRuntimeModes: CORAL_SUPPORTED_RUNTIME_MODES,
 } as const;
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({

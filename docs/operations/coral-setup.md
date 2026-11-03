@@ -106,10 +106,16 @@ A separate bounded `GET /api/tags` discovers exact Ollama names without loading
 a model or running inference. The inventory is capped at 512 models and 1 MiB;
 transient failures preserve its last good value. Empty inventory is explicit.
 
-Text sessions support once-only supervised approvals, cancellation, model
-changes and native resume. Attachments and client MCP servers are rejected;
-app-MCP access remains deferred. `exec --permission-profile none` exposes no
-tools, never starts MCP, and never saves a conversation.
+Text sessions support cancellation, model changes and native resume. The
+permission picker offers Supervised, Auto-accept edits and Full access, which
+Coral enforces itself. A mode change keeps the live session and reaches Coral
+before the next turn's prompt. Auto is not offered for Coral; a thread set to
+Auto runs Supervised there. In an approval prompt, "Always allow this session"
+allows that tool for the rest of the Coral session. Coral builds without these
+modes support only Supervised, and other modes fail with an update prompt.
+Attachments and client MCP servers are rejected; app-MCP access remains
+deferred. `exec --permission-profile none` exposes no tools, never starts MCP,
+and never saves a conversation.
 
 Coral stores native snapshots and token-owned leases under its configured home.
 A live lease blocks concurrent ACP ownership and ordinary saves/renames.

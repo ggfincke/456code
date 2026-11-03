@@ -1,5 +1,5 @@
 // apps/server/src/provider/Layers/CoralAdapter.ts
-// adapts supervised coral sessions to upstream v2 orchestration
+// adapts coral sessions and their permission modes to upstream v2 orchestration
 import {
   ProviderDriverKind,
   type CoralSettings,
@@ -21,7 +21,9 @@ import {
   applyCoralAcpRuntimeMode,
   coralModelsFromSessionSetup,
   currentCoralModelFromSessionSetup,
+  isCoralRuntimeMode,
   makeCoralAcpRuntime,
+  type CoralRuntimeMode,
 } from "../acp/CoralAcpSupport.ts";
 
 const DRIVER = ProviderDriverKind.make("coral");
@@ -30,6 +32,8 @@ const CAPABILITIES = {
   sessions: {
     ...AcpProviderCapabilitiesV2.sessions,
     supportsModelSwitchInSession: true,
+    // applyRuntimePolicy pushes the mode before each prompt, so a switch keeps the session
+    supportsRuntimeModeSwitchInSession: true,
   },
   threads: {
     ...AcpProviderCapabilitiesV2.threads,
@@ -54,18 +58,25 @@ export interface CoralAdapterLiveOptions extends Omit<AcpAdapterV2Options, "flav
   ) => Effect.Effect<void>;
 }
 
+// runtime policy resolution coerces auto to approval-required via the snapshot's supported modes
 const validatePolicy = (policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy) =>
-  policy.runtimeMode === "approval-required" && policy.interactionMode === "default"
+  isCoralRuntimeMode(policy.runtimeMode) && policy.interactionMode === "default"
     ? Effect.void
     : Effect.fail(
         new ProviderAdapter.ProviderAdapterProtocolError({
           driver: DRIVER,
           detail:
-            "Coral supports supervised approval-required sessions in default interaction mode.",
+            "Coral supports Supervised, Auto-accept edits and Full access in default interaction mode.",
         }),
       );
 
-// coral only supports selecting a model; native acp options cannot override its fixed modes
+// validatePolicy rejects other modes first; supervised is only the type-level fallback
+const coralRuntimeMode = (
+  policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+): CoralRuntimeMode =>
+  isCoralRuntimeMode(policy.runtimeMode) ? policy.runtimeMode : "approval-required";
+
+// coral only supports selecting a model; its permission mode comes from the runtime policy
 const nativeCoralModelSelection = ({ instanceId, model }: ModelSelection): ModelSelection => ({
   instanceId,
   model,
@@ -99,7 +110,7 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
                 Effect.tap(() =>
                   applyCoralAcpRuntimeMode({
                     runtime,
-                    runtimeMode: "approval-required",
+                    runtimeMode: coralRuntimeMode(input.runtimePolicy),
                     mapError: (cause) => cause,
                   }),
                 ),
@@ -109,6 +120,12 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
               ),
           })),
         ),
+      applyRuntimePolicy: ({ runtime, runtimePolicy }) =>
+        applyCoralAcpRuntimeMode({
+          runtime,
+          runtimeMode: coralRuntimeMode(runtimePolicy),
+          mapError: (cause) => cause,
+        }),
       applyModelSelection: ({ runtime, startResult, modelSelection }) =>
         applyCoralAcpModelSelection({
           runtime,

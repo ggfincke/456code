@@ -184,8 +184,6 @@ interface ComposerSendInput {
   readonly isGitRepo: boolean;
   readonly phase: SessionPhase;
   readonly runtimeMode: RuntimeMode;
-  // the mode before coral's supervised override, used for per-target preflight
-  readonly requestedRuntimeMode: RuntimeMode;
   readonly sendEnvMode: DraftThreadEnvMode;
   readonly startFromOrigin: boolean;
   readonly localCheckoutBranchMismatch: {
@@ -283,7 +281,6 @@ export function useComposerSend(input: ComposerSendInput) {
     isGitRepo,
     phase,
     runtimeMode,
-    requestedRuntimeMode,
     sendEnvMode,
     startFromOrigin,
     localCheckoutBranchMismatch,
@@ -600,7 +597,7 @@ export function useComposerSend(input: ComposerSendInput) {
     if (multipleModelSelections === null) {
       const preflight = prepareComposerTargets(
         [{ provider: ctxSelectedProvider, interactionMode: sendInteractionMode }],
-        requestedRuntimeMode,
+        runtimeMode,
         composerImages.length +
           composerFiles.length +
           (queuedRunEdit.editingAttachments?.length ?? 0),
@@ -958,7 +955,7 @@ export function useComposerSend(input: ComposerSendInput) {
     }
     const preparedTargets = prepareComposerTargets(
       requestedTargets,
-      requestedRuntimeMode,
+      runtimeMode,
       composerAttachmentsSnapshot.length,
     );
     if (preparedTargets.error !== null) {

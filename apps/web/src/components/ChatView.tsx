@@ -955,7 +955,7 @@ export default function ChatView(props: ChatViewProps) {
     localServerError === null && visibleThreadError === serverRuntime?.lastError;
   const defaultRuntimeMode = resolveProjectSettings(settings, activeThread?.projectId ?? null)
     .settings.defaultRuntimeMode;
-  const requestedRuntimeMode =
+  const runtimeMode =
     composerRuntimeMode ??
     (isServerThread ? activeThread?.runtimeMode : undefined) ??
     defaultRuntimeMode;
@@ -1321,7 +1321,6 @@ export default function ChatView(props: ChatViewProps) {
     lockedInstanceId: activeRuntime?.providerInstanceId ?? activeThreadModelInstanceId,
   });
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
-  const runtimeMode = selectedProvider === "coral" ? "approval-required" : requestedRuntimeMode;
   const supportsQuestionAttachments =
     selectedProvider !== "coral" && environmentSupportsQuestionAttachments;
   const supportsAttachmentUploads =
@@ -2933,7 +2932,6 @@ export default function ChatView(props: ChatViewProps) {
     isGitRepo,
     phase,
     runtimeMode,
-    requestedRuntimeMode,
     sendEnvMode,
     startFromOrigin,
     localCheckoutBranchMismatch,

@@ -909,10 +909,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (composerImages.length > 0 || composerFiles.length > 0 || composerVideos.length > 0)
       ? "Coral supports text only. Remove attachments or deselect Coral before sending."
       : upstreamAttachmentBlockReason;
-  const supportedRuntimeModes =
-    selectedProvider === "coral"
-      ? (["approval-required"] as const)
-      : selectedProviderEntry?.snapshot.supportedRuntimeModes;
+  const supportedRuntimeModes = selectedProviderEntry?.snapshot.supportedRuntimeModes;
   const compatibleRuntimeModeOptions =
     supportedRuntimeModes && supportedRuntimeModes.length > 0
       ? runtimeModeOptions.filter((option) => supportedRuntimeModes.includes(option.mode))
