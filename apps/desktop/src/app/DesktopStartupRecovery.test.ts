@@ -2,9 +2,9 @@ import type { DesktopUpdateState } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -93,7 +93,7 @@ it.effect.each([
   Effect.scoped(
     Effect.gen(function* () {
       const checked = yield* Deferred.make<void>();
-      const remembered = yield* Deferred.make<void>();
+      const readyMainReads = yield* Queue.unbounded<void>();
       const shouldRecover = !visible || !started;
       const closed = Promise.withResolvers<void>();
       const loaded: string[] = [];
@@ -126,10 +126,6 @@ it.effect.each([
       yield* listen.pipe(
         Effect.provide(
           Layer.mergeAll(
-            FileSystem.layerNoop({
-              readFileString: () => Effect.succeed("0.1.2"),
-              writeFileString: () => Deferred.succeed(remembered, undefined).pipe(Effect.asVoid),
-            }),
             Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
               appVersion: "0.1.3",
               stateDir: "/task/state",
@@ -150,7 +146,13 @@ it.effect.each([
               shouldUseDarkColors: Effect.succeed(false),
             } as ElectronTheme.ElectronTheme["Service"]),
             Layer.succeed(ElectronWindow.ElectronWindow, {
-              main: Ref.get(mainRef),
+              main: Effect.gen(function* () {
+                const main = yield* Ref.get(mainRef);
+                if ((yield* SubscriptionRef.get(state.primaryBackendStartup))._tag === "Ready") {
+                  yield* Queue.offer(readyMainReads, undefined);
+                }
+                return main;
+              }),
               create: () => Effect.succeed(recovery),
             } as unknown as ElectronWindow.ElectronWindow["Service"]),
             Layer.succeed(DesktopUpdates.DesktopUpdates, {
@@ -164,7 +166,7 @@ it.effect.each([
         ),
       );
       appListeners.get("browser-window-created")?.({}, main);
-      if (started) yield* Deferred.await(remembered);
+      if (started) yield* Queue.take(readyMainReads);
       yield* SubscriptionRef.set(state.primaryBackendStartup, {
         _tag: "Failing",
         reason: "Server failed before readiness",
@@ -177,7 +179,7 @@ it.effect.each([
         expect(decodeURIComponent(loaded[0]!)).toContain("Failure details");
         if (closeMain) yield* Ref.set(mainRef, Option.none());
         yield* SubscriptionRef.set(state.primaryBackendStartup, { _tag: "Ready" });
-        yield* Deferred.await(remembered);
+        yield* Queue.take(readyMainReads);
         if (closeMain || !visible) {
           expect(closeCount).toBe(0);
           if (closeMain) {
