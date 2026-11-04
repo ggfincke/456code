@@ -13,10 +13,13 @@ import * as Scope from "effect/Scope";
 
 import type * as Electron from "electron";
 
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopState from "./DesktopState.ts";
@@ -249,11 +252,19 @@ export const make = DesktopLifecycle.of({
         yield* electronApp.exit(75);
         return;
       }
-      const args = process.argv.slice(1);
+      const appLinkPrefixes = [
+        `${ElectronProtocol.getDesktopScheme(environment.isDevelopment)}:`,
+        environment.isDevelopment ? "t3code-dev:" : "t3code:",
+      ];
+      const argv = yield* HostProcess.Arguments;
+      const executablePath = yield* HostProcess.ExecutablePath;
+      const args = argv
+        .slice(1)
+        .filter((arg) => !appLinkPrefixes.some((prefix) => arg.toLowerCase().startsWith(prefix)));
       // process.execPath sits in the AppImage's /tmp/.mount_* dir, which is
       // unmounted once this process exits, so the relaunch must start the AppImage.
       yield* Option.match(environment.appImagePath, {
-        onNone: () => electronApp.relaunch({ execPath: process.execPath, args }),
+        onNone: () => electronApp.relaunch({ execPath: executablePath, args }),
         onSome: (appImagePath) => spawnAppImageRelaunch(appImagePath, args),
       });
       yield* electronApp.exit(0);

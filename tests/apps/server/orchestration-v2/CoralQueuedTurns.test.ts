@@ -1,3 +1,5 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as Layer from "effect/Layer";
 // tests/apps/server/orchestration-v2/CoralQueuedTurns.test.ts
 // keeps coral queues behind completed turns without changing other providers
 
@@ -18,7 +20,6 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Sqlite from "../../../../apps/server/src/persistence/Sqlite.ts";
 import { makeCoralAdapter } from "../../../../apps/server/src/provider/Layers/CoralAdapter.ts";
@@ -61,10 +62,12 @@ const registryLayer = Layer.unwrap(
 ).pipe(
   Layer.provide(
     Layer.mergeAll(
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       IdAllocator.layer,
       McpProviderSessions.layer,
-      TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
+      TestProviderHost.layer().pipe(
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      ),
     ),
   ),
 );

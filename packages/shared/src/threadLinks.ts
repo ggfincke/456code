@@ -97,7 +97,8 @@ export function threadLinkRefs(
   messageEnvironmentId: EnvironmentId,
 ): ReadonlyArray<ScopedThreadRef> {
   const refs = new Map<string, ScopedThreadRef>();
-  for (const match of markdown.matchAll(THREAD_LINK_OUTSIDE_CODE)) {
+  const pattern = new RegExp(THREAD_LINK_OUTSIDE_CODE);
+  for (let match = pattern.exec(markdown); match !== null; match = pattern.exec(markdown)) {
     const href = match.groups?.href ?? match.groups?.autolink;
     const link = href === undefined ? null : parseThreadLinkHref(href);
     if (link === null) continue;
@@ -150,5 +151,18 @@ export function relabelThreadLinks(
       { environmentId: written.environmentId, threadId },
       current.trim() || groups.label || threadId,
     );
+  });
+}
+
+export function replaceThreadLinks(
+  markdown: string,
+  replace: (link: ThreadLink, label: string | undefined) => string | undefined,
+): string {
+  if (!hasThreadLinks(markdown)) return markdown;
+  return markdown.replace(THREAD_LINK_OUTSIDE_CODE, (source, ...args) => {
+    const groups = args.at(-1) as Partial<Record<"href" | "autolink" | "bare" | "label", string>>;
+    const href = groups.href ?? groups.autolink ?? groups.bare;
+    const link = href === undefined ? null : parseThreadLinkHref(href);
+    return (link && replace(link, groups.label)) ?? source;
   });
 }

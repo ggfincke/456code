@@ -14,7 +14,7 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
 import * as Schema from "effect/Schema";
 import * as ByteSize from "effect/ByteSize";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -129,7 +129,7 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | HttpClient.HttpClient
+  ChildProcessSpawner.ChildProcessSpawner | SecureRandom.SecureRandom | HttpClient.HttpClient
 > {
   if (!coralSettings.enabled) return yield* buildInitialCoralProviderSnapshot(coralSettings);
   const checkedAt = DateTime.formatIso(yield* DateTime.now);

@@ -1,35 +1,42 @@
 // apps/mobile/src/lib/expoCrypto.ts
-// provides Effect's Crypto service through expo-crypto
+// provides effect crypto services through expo-crypto
 
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
+import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
 import * as ExpoCrypto from "expo-crypto";
 
-function toExpoDigestAlgorithm(
-  algorithm: Crypto.DigestAlgorithm,
-): ExpoCrypto.CryptoDigestAlgorithm {
-  switch (algorithm) {
-    case "SHA-1":
-      return ExpoCrypto.CryptoDigestAlgorithm.SHA1;
-    case "SHA-256":
-      return ExpoCrypto.CryptoDigestAlgorithm.SHA256;
-    case "SHA-384":
-      return ExpoCrypto.CryptoDigestAlgorithm.SHA384;
-    case "SHA-512":
-      return ExpoCrypto.CryptoDigestAlgorithm.SHA512;
-  }
-}
+const EXPO_DIGEST_ALGORITHMS: Partial<
+  Record<Digest.Algorithm["name"], ExpoCrypto.CryptoDigestAlgorithm>
+> = {
+  "SHA-1": ExpoCrypto.CryptoDigestAlgorithm.SHA1,
+  "SHA-256": ExpoCrypto.CryptoDigestAlgorithm.SHA256,
+  "SHA-384": ExpoCrypto.CryptoDigestAlgorithm.SHA384,
+  "SHA-512": ExpoCrypto.CryptoDigestAlgorithm.SHA512,
+};
 
-export const layer = Layer.succeed(
-  Crypto.Crypto,
-  Crypto.make({
-    randomBytes: ExpoCrypto.getRandomBytes,
-    digest: (algorithm, data) =>
-      Effect.promise(async () => {
-        const input = new Uint8Array(data.length);
-        input.set(data);
-        return new Uint8Array(await ExpoCrypto.digest(toExpoDigestAlgorithm(algorithm), input));
-      }),
+const digest = Effect.fn("expoCrypto.digest")(function* (
+  algorithm: Digest.Algorithm,
+  data: Uint8Array,
+) {
+  if (algorithm.implementation !== undefined) return algorithm.implementation(data);
+  const nativeAlgorithm = EXPO_DIGEST_ALGORITHMS[algorithm.name];
+  if (nativeAlgorithm === undefined) {
+    return yield* Effect.die(new Error(`Unsupported digest algorithm: ${algorithm.name}`));
+  }
+  return yield* Effect.promise(async () => {
+    const input = new Uint8Array(data.length);
+    input.set(data);
+    return new Uint8Array(await ExpoCrypto.digest(nativeAlgorithm, input));
+  });
+});
+
+export const layer = Layer.mergeAll(
+  Layer.succeed(SecureRandom.SecureRandom, SecureRandom.make(ExpoCrypto.getRandomBytes)),
+  Layer.succeed(Digest.Digest, {
+    digest,
+    digestHex: (algorithm, data) => digest(algorithm, data).pipe(Effect.map(Hex.encode)),
   }),
 );

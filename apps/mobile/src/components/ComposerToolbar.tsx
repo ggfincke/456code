@@ -14,7 +14,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import Animated, { FadeIn } from "react-native-reanimated";
+import Animated, { FadeIn, useReducedMotion } from "react-native-reanimated";
 
 import { cn } from "../lib/cn";
 import { AppText as Text } from "./ui/AppText";
@@ -46,6 +46,7 @@ export function ComposerInlineControl(props: {
   readonly chevronDirection?: "down" | "right";
   readonly showChevron?: boolean;
 }) {
+  const reducedMotion = useReducedMotion();
   // Keep the picker anchored to its parent while the editor changes height.
   const animatesLabel = props.iconOnly !== undefined;
   const iconSize = props.size === "large" ? 20 : 16;
@@ -88,7 +89,7 @@ export function ComposerInlineControl(props: {
         {props.iconOnly ? null : (
           <Animated.View
             className="shrink"
-            entering={animatesLabel ? INLINE_CONTROL_LABEL_ENTERING : undefined}
+            entering={animatesLabel && !reducedMotion ? INLINE_CONTROL_LABEL_ENTERING : undefined}
           >
             <Text
               className={cn(
@@ -298,7 +299,7 @@ export function ComposerActionButton(props: {
               : props.variant === "danger"
                 ? "bg-danger"
                 : props.disabled
-                  ? "bg-primary/15"
+                  ? "bg-foreground/12"
                   : "bg-primary",
           )}
         >
@@ -323,7 +324,9 @@ export function ComposerActionButton(props: {
                 ? undefined
                 : props.variant === "danger"
                   ? "accent-danger-foreground"
-                  : "accent-primary-foreground"
+                  : props.disabled
+                    ? "accent-foreground/38"
+                    : "accent-primary-foreground"
             }
             type="monochrome"
           />

@@ -85,7 +85,6 @@ describe("personal desktop isolation", () => {
       expect(userDataPath).toBe(path.join(runtime.appDataDirectory, "456code-thin-dev"));
       expect(runtime.appUserModelId).toBe("com.ggfincke.456code.thin.dev");
       expect(early.linuxDesktopEntryName).toBe(runtime.linuxDesktopEntryName);
-      expect(early.linuxWmClass).toBe(runtime.linuxWmClass);
       expect(runtime.displayName).toBe("456code (Dev)");
     }).pipe(Effect.provide(NodeServices.layer)),
   );

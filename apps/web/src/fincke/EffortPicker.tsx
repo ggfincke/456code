@@ -4,7 +4,7 @@ import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
   getTraitSelectChange,
-  REASONING_SELECT_DESCRIPTOR_IDS,
+  isReasoningControl,
   replaceDescriptorCurrentValue,
   selectableProviderOptionChoices,
 } from "@t3tools/client-runtime/model-traits";
@@ -96,9 +96,7 @@ export const EffortPicker = memo(function EffortPicker(
     allowPromptInjectedEffort,
     planModeEnabled,
   });
-  const reasoning = selected.selectDescriptors.find((descriptor) =>
-    REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
-  );
+  const reasoning = selected.selectDescriptors.find((descriptor) => isReasoningControl(descriptor));
   if (!selected.hasAnyControls) return null;
   if (selected.modelIsUnavailable || !reasoning || reasoning.options.length < 2) {
     return <TraitsPicker {...props} />;
