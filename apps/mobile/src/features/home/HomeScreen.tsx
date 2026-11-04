@@ -820,6 +820,7 @@ export function HomeScreen(props: HomeScreenProps) {
         pullUp={Platform.OS === "ios" ? insets.top : 0}
         bleedLeft={listPaddingLeft}
         bleedRight={listPaddingRight}
+        showBrand={Platform.OS === "ios"}
       >
         {/* fincke: the projects/activity switch sits at the title band's lower edge, with the
             wave's tail running on under it and the filter chips below that. Native title-row

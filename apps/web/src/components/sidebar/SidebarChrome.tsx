@@ -40,6 +40,7 @@ import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { FinckeWordmark } from "~/fincke/FinckeWordmark";
 import { observeResize } from "~/lib/observeResize";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -67,6 +68,15 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       )}
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
+      {backdropVariant === "fincke" ? (
+        // 72% down the wave backdrop clears the back ribbon's lower edge under the whole
+        // wordmark at the minimum sidebar width, leaving it above the search row
+        <div className="absolute top-[calc((var(--workspace-topbar-height)+2.5rem)*0.72)] left-4 z-10">
+          <SidebarBrand onBackdrop>
+            <FinckeWordmark />
+          </SidebarBrand>
+        </div>
+      ) : null}
       <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center md:hidden">
         <SidebarTrigger
           variant={backdropVariant ? "media-navigation" : "ghost"}
@@ -76,7 +86,9 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       </div>
       <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center justify-end gap-x-2 overflow-hidden py-0.5">
         <div className="flex shrink-0 items-center gap-1">
-          <SidebarBrand onBackdrop={backdropVariant !== null} />
+          {backdropVariant !== "fincke" ? (
+            <SidebarBrand onBackdrop={backdropVariant !== null} />
+          ) : null}
           {isElectron ? (
             <div className="hidden items-center md:flex">
               <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
@@ -165,7 +177,7 @@ function HistoryNavigationButton({
   );
 }
 
-function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
+function SidebarBrand({ onBackdrop, children }: { onBackdrop: boolean; children?: ReactNode }) {
   return (
     <Link
       aria-label="T3 Code home"
@@ -175,7 +187,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      <SidebarBrandMark />
+      {children ?? <SidebarBrandMark />}
     </Link>
   );
 }
