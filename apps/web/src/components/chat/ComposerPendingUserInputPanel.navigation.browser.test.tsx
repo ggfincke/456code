@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/ComposerPendingUserInputPanel.navigation.browser.test.tsx
+// verifies question navigation and inline answer preservation
 import {
   EnvironmentId,
   NodeId,
@@ -11,8 +13,7 @@ import { useLayoutEffect, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
-vi.mock(import("../ChatMarkdown"), async (importOriginal) => ({
-  ...(await importOriginal()),
+vi.mock(import("../ChatMarkdown"), () => ({
   default: (({ text }: { text: string }) => <p>{text}</p>) as never,
 }));
 
@@ -142,41 +143,55 @@ it("retains answers, selections and question position after leaving chat, includ
   expect(requests).toMatchObject(expected);
 });
 
-it("tells the user when an option click moves their typed answer into the hidden composer draft", async () => {
-  using _timers = fakeTimers();
+it("keeps spare typed text inline when selecting an option and collapsing the question", async () => {
   const environmentId = EnvironmentId.make("displaced-environment");
+  const projection = questionProjection(threadRef.threadId, ["only"], [prompt.questions[0]!]);
   const draftTarget = { environmentId, threadId: threadRef.threadId };
   const draftPrompt = () => useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt;
+  function Card() {
+    const state = useProbeRequests({ environmentId, projection });
+    return (
+      <ComposerPendingUserInputPanel
+        pendingUserInputs={state.pendingUserInputs}
+        cwd={undefined}
+        threadRef={draftTarget}
+        respondingRequestIds={[]}
+        answers={state.activePendingDraftAnswers}
+        questionIndex={state.activePendingQuestionIndex}
+        attachmentBlockReason={null}
+        onToggleOption={state.onSelectActivePendingUserInputOption}
+        onChangeCustomAnswer={state.onChangeActivePendingUserInputCustomAnswer}
+        onPasteFiles={() => {}}
+        onSelectQuestion={state.onSelectActivePendingUserInputQuestion}
+        onAdvance={() => {}}
+        onDismiss={() => {}}
+      />
+    );
+  }
+  await using screen = await render(<Card />);
   using toast = vi.spyOn(toastManager, "add");
-  await using _screen = await render(
-    <PendingRequestsProbe
-      environmentId={environmentId}
-      projection={questionProjection(threadRef.threadId)}
-    />,
-  );
+  const answer = screen.getByRole("textbox", { name: "Something else" });
+  const option = screen.getByRole("button", { name: /Incremental/ });
 
-  await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
+  await userEvent.type(answer, "first try");
+  await userEvent.click(option);
+  await expect.element(option).toHaveAttribute("aria-pressed", "true");
+  await expect.element(answer).toHaveValue("first try");
+  expect(draftPrompt()).toBeUndefined();
   expect(toast).not.toHaveBeenCalled();
 
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "first try"));
-  await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
-  expect(draftPrompt()).toBe("first try");
-  expect(toast).toHaveBeenCalledTimes(1);
-  expect(toast).toHaveBeenCalledWith(
-    expect.objectContaining({
-      type: "info",
-      title: "Your typed text was set aside",
-      description: "It will be back in the composer once the question is answered.",
-      data: { threadRef: draftTarget },
-    }),
-  );
-
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "second try"));
-  expect(draftPrompt()).toBe("first try");
-  expect(requests.activePendingDraftAnswers["question-0"]).toMatchObject({
-    customAnswer: "second try",
-  });
-  expect(toast).toHaveBeenCalledTimes(1);
+  await userEvent.click(answer);
+  await expect.element(option).toHaveAttribute("aria-pressed", "false");
+  await userEvent.clear(answer);
+  await userEvent.type(answer, "second try");
+  await userEvent.click(option);
+  await screen.getByTitle("Hide the question and its options").click();
+  await expect.element(answer).not.toBeInTheDocument();
+  await screen.getByTitle("Show the question and its options").click();
+  await expect.element(answer).toHaveValue("second try");
+  await expect.element(option).toHaveAttribute("aria-pressed", "true");
+  expect(draftPrompt()).toBeUndefined();
+  expect(toast).not.toHaveBeenCalled();
 });
 
 function QuestionPositionProbe(props: ProbeProps) {
