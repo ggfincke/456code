@@ -2,10 +2,12 @@
 // presents native 456code branding and build stage
 
 import { NATIVE_WORKSPACE_COLUMNS_SUPPORTED } from "../native/NativeWorkspaceColumns";
+import { JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono/700Bold";
 import Constants from "expo-constants";
+import { useFonts } from "expo-font";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import { useState } from "react";
-import { Platform, View } from "react-native";
+import { Platform, Text as RNText, View } from "react-native";
 
 import { AppText as Text } from "./ui/AppText";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
@@ -13,6 +15,10 @@ import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 
 const BRAND_MAX_FONT_SCALE = 1.4;
+// fincke: loaded at runtime rather than embedded by the expo-font plugin, so the wordmark
+// ships over ota without changing the native fingerprint
+const WORDMARK_FONT = "JetBrainsMono-Bold";
+const WORDMARK_ACCENT = "#80cbc4";
 
 export function brandTitleOffset(): number {
   if (Platform.OS !== "ios") return 0;
@@ -30,6 +36,9 @@ export function CompactBrandTitle(
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
   // fincke: the ocean wave sits behind the title, so it reads white as on desktop
   const ocean = useAppearancePreferences().themeId === "fincke-ocean";
+  const [wordmarkFontLoaded] = useFonts({ [WORDMARK_FONT]: JetBrainsMono_700Bold });
+  // matches desktop's mono wordmark over the wave, w/ the leading digits in the ribbon teal
+  const wordmark = ocean && wordmarkFontLoaded;
   const titleOffset = brandTitleOffset();
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   // Measured only while the badge shows, so hiding it does not make it look like it fits.
@@ -57,14 +66,17 @@ export function CompactBrandTitle(
         allowFontScaling={props.allowFontScaling}
         maxFontSizeMultiplier={BRAND_MAX_FONT_SCALE}
         numberOfLines={1}
-        className="font-t3-medium text-foreground-muted"
+        className={wordmark ? "text-foreground-muted" : "font-t3-medium text-foreground-muted"}
         style={{
           fontSize: 21,
           letterSpacing: -0.5,
           ...(ocean ? { color: "#ffffff" } : null),
+          ...(wordmark ? { fontFamily: WORDMARK_FONT, letterSpacing: -0.4 } : null),
         }}
       >
-        456code
+        {/* plain rn text inherits the wordmark font, where AppText would reset it to dm sans */}
+        {wordmark ? <RNText style={{ color: WORDMARK_ACCENT }}>456</RNText> : "456"}
+        code
       </Text>
       {showStage ? (
         <View

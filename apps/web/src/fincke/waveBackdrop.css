@@ -18,3 +18,15 @@ html[data-theme-id="fincke-ocean"] {
   --fincke-wave-back: #508f8a;
   --fincke-wave-highlight: #b7e4dd;
 }
+
+[data-fincke-wordmark] {
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+[data-fincke-wordmark-digits] {
+  color: var(--fincke-wave-accent, var(--primary));
+}
