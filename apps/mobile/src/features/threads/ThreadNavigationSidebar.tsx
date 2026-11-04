@@ -747,6 +747,7 @@ function ThreadNavigationSidebarPane(
     <FinckeListHeader
       bleedLeft={Platform.OS === "android" ? 0 : styles.threadListContent.paddingHorizontal}
       bleedRight={Platform.OS === "android" ? 0 : styles.threadListContent.paddingHorizontal}
+      showBrand={props.nativeChrome}
     >
       {/* ios gets web's search-row buttons: filter, view, add project, new thread. android
           keeps its toolbar filter & new task fab, so it only needs the view toggle */}

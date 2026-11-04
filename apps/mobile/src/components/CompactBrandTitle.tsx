@@ -13,6 +13,7 @@ import { AppText as Text } from "./ui/AppText";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
+import { useFinckeWaveBrandShown } from "../fincke/wave-brand";
 
 const BRAND_MAX_FONT_SCALE = 1.4;
 // fincke: loaded at runtime rather than embedded by the expo-font plugin, so the wordmark
@@ -31,6 +32,8 @@ export function CompactBrandTitle(
     readonly accessibilityLabel?: string;
     /** Fills the row and hides the stage badge when the full title does not fit. */
     readonly fit?: boolean;
+    /** fincke: drawn under the ocean wave instead of in the native title row. */
+    readonly wave?: boolean;
   } = {},
 ) {
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
@@ -39,7 +42,10 @@ export function CompactBrandTitle(
   const [wordmarkFontLoaded] = useFonts({ [WORDMARK_FONT]: JetBrainsMono_700Bold });
   // matches desktop's mono wordmark over the wave, w/ the leading digits in the ribbon teal
   const wordmark = ocean && wordmarkFontLoaded;
-  const titleOffset = brandTitleOffset();
+  // the native title row sits on the ribbons, so the brand moves under them while a band shows
+  // it. it stays laid out but unseen, since an empty title view makes uikit fall back to the tab
+  const steppedAside = useFinckeWaveBrandShown() && ocean && !props.wave;
+  const titleOffset = props.wave ? 0 : brandTitleOffset();
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   // Measured only while the badge shows, so hiding it does not make it look like it fits.
   const [fullWidth, setFullWidth] = useState<number | null>(null);
@@ -53,13 +59,16 @@ export function CompactBrandTitle(
       }
       aria-level={1}
       accessibilityLabel={props.accessibilityLabel ?? "456code, Threads"}
-      accessible
+      accessible={!steppedAside}
+      accessibilityElementsHidden={steppedAside}
+      importantForAccessibility={steppedAside ? "no-hide-descendants" : "auto"}
       role="heading"
       className="flex-row items-center gap-1.5"
       style={[
         { marginLeft: titleOffset },
         Platform.OS === "android" && { gap: 5.25 },
         props.fit && { flexShrink: 0 },
+        steppedAside && { opacity: 0 },
       ]}
     >
       <Text
