@@ -25,6 +25,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { isStaleAppImageMountEntry } from "../fincke/AppImageMounts.ts";
 
 type EnvironmentPatch = Record<string, string>;
 
@@ -167,6 +168,10 @@ const mergePaths = (
     for (const entry of value.value.split(delimiter)) {
       const sanitized = sanitizePathEntry(entry.trim(), platform);
       if (sanitized.length === 0) continue;
+      // the shell env cache and login shells can carry a dead instance's AppImage mount
+      if (platform === "linux" && isStaleAppImageMountEntry(sanitized, process.env.APPDIR)) {
+        continue;
+      }
 
       const key = pathComparisonKey(sanitized, platform);
       if (key.length === 0 || seen.has(key)) continue;

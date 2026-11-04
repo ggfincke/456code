@@ -1,3 +1,4 @@
+import * as FinckeAppImageMounts from "./fincke/AppImageMounts.ts";
 import * as FinckeFreshProfile from "./fincke/FreshProfile.ts";
 import * as MacPermissions from "./permissions/MacPermissions.ts";
 for (const stream of [process.stdout, process.stderr]) {
@@ -5,6 +6,7 @@ for (const stream of [process.stdout, process.stderr]) {
     if (err.code !== "EPIPE") throw err;
   });
 }
+if (process.env.APPIMAGE) FinckeAppImageMounts.dropStaleAppImageMounts(process.env);
 
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";

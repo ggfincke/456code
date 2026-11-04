@@ -180,6 +180,8 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     )
     .pipe(
       Effect.provideService(Scope.Scope, commandScope),
+      // node throws spawn errors other than ENOENT/EACCES-style ones (e.g. ENOTCONN) synchronously
+      Effect.catchDefect(Effect.fail),
       Effect.mapError(
         (cause) =>
           new SshCommandError({
