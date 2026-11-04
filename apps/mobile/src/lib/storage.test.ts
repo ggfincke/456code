@@ -1,3 +1,5 @@
+// apps/mobile/src/lib/storage.test.ts
+// verifies mobile preference persistence and fallback recovery
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => {
@@ -84,6 +86,12 @@ vi.mock("expo-sqlite", () => ({
 }));
 
 vi.mock("expo-crypto", () => ({
+  CryptoDigestAlgorithm: {
+    SHA1: "SHA-1",
+    SHA256: "SHA-256",
+    SHA384: "SHA-384",
+    SHA512: "SHA-512",
+  },
   getRandomBytes: vi.fn(() => new Uint8Array(16)),
 }));
 
