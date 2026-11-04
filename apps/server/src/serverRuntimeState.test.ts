@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
 import { assert, describe, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
@@ -19,7 +20,9 @@ import * as ServerOwnership from "./serverOwnership.ts";
 import * as ServerRuntimeState from "./serverRuntimeState.ts";
 
 describe("server ownership", () => {
-  const layerOwnership = ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer));
+  const layerOwnership = ProcessRunner.layer.pipe(
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  );
   const makeState = ServerRuntimeState.makePersistedServerRuntimeState({
     config: { host: undefined, devUrl: undefined },
     port: 3773,

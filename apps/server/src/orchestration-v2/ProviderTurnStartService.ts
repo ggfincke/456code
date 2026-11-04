@@ -503,6 +503,7 @@ export const layer: Layer.Layer<
             expectedStatus: "starting",
             events,
           });
+          // A steering restart that cannot start still ends a run whose earlier turns counted.
         },
       );
       const settleStartFailure = Effect.fn("ProviderTurnStartService.settleStartFailure")(
@@ -690,15 +691,29 @@ export const layer: Layer.Layer<
       const { isCurrentAttemptInStatus } = runControls;
 
       // A side chat shares its parent's worktree; the turn that gets its context asks before acting.
-      const resolvedRuntimePolicy = yield* runtimePolicy.resolve({
-        thread:
-          projection.thread.lineage.sideChat === true &&
-          (sideChatHandoff !== undefined ||
-            !projection.runs.some((previous) => previous.ordinal < run.ordinal))
-            ? { ...projection.thread, runtimeMode: "approval-required" }
-            : projection.thread,
-        modelSelection: run.modelSelection,
-      });
+      const resolvedPolicy = yield* runtimePolicy
+        .resolve({
+          thread:
+            projection.thread.lineage.sideChat === true &&
+            (sideChatHandoff !== undefined ||
+              !projection.runs.some((previous) => previous.ordinal < run.ordinal))
+              ? { ...projection.thread, runtimeMode: "approval-required" }
+              : projection.thread,
+          modelSelection: run.modelSelection,
+        })
+        .pipe(Effect.result);
+      if (resolvedPolicy._tag === "Failure") {
+        const error = resolvedPolicy.failure;
+        if (error._tag !== "RuntimePolicyAboveCeilingError") return yield* error;
+        yield* settleStartFailure({
+          signal: "runtime-mode-above-ceiling",
+          title: "Thread mode is above the policy limit",
+          error,
+          message: error.message,
+        });
+        return;
+      }
+      const resolvedRuntimePolicy = resolvedPolicy.success;
       if (!(yield* isCurrentAttemptInStatus("starting"))) return;
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
@@ -1125,10 +1140,24 @@ export const layer: Layer.Layer<
             (candidate) => candidate.ordinal > sourceRun.ordinal && isActiveRun(candidate),
           );
           if (!sourceBusy) {
+            // Rolled-back turns are no longer in the source conversation, so they cannot bound a fork.
+            const rolledBackAttemptIds = new Set(
+              sourceProjection.attempts
+                .filter((attempt) =>
+                  sourceProjection.runs.some(
+                    (candidate) =>
+                      candidate.id === attempt.runId && candidate.status === "rolled_back",
+                  ),
+                )
+                .map((attempt) => attempt.id),
+            );
             return yield* loadFromProvider(
               session.forkThread({
                 sourceProviderThread,
-                sourceProviderTurns: sourceProjection.providerTurns,
+                sourceProviderTurns: sourceProjection.providerTurns.filter(
+                  (turn) =>
+                    turn.runAttemptId === null || !rolledBackAttemptIds.has(turn.runAttemptId),
+                ),
                 targetThreadId: projection.thread.id,
                 modelSelection: run.modelSelection,
                 runtimePolicy: resolvedRuntimePolicy,
@@ -1297,6 +1326,14 @@ export const layer: Layer.Layer<
         resumedHandoffContext = undefined;
         resumedRetryHandoff = [];
         if (!(yield* isCurrentAttemptInStatus("starting"))) return undefined;
+        // Another client is still writing to the native thread. A fresh
+        // session here would silently split the conversation from it.
+        if (
+          resumed._tag === "Failure" &&
+          resumed.failure._tag === "ProviderAdapterThreadInUseError"
+        ) {
+          return yield* loadFromProvider(Effect.fail(resumed.failure));
+        }
 
         yield* Effect.logWarning("Recovering provider context in a fresh native session", {
           driver: session.driver,

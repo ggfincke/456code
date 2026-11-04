@@ -20,6 +20,7 @@ import { AsyncResult, Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { isLocalEnvironmentDisabled } from "../localEnvironment";
 
 export const shellEnvironment = createShellEnvironmentAtoms(connectionAtomRuntime);
 export const environmentShell = createEnvironmentShellAtoms(connectionAtomRuntime);
@@ -122,12 +123,17 @@ export const allEnvironmentProjectSnapshotsReadyAtom =
   createAllEnvironmentProjectSnapshotsReadyAtom({
     catalogValueAtom: environmentCatalog.catalogValueAtom,
     shellStateValueAtom: environmentShell.stateValueAtom,
-    requiresPrimaryEnvironment: true,
+    requiresPrimaryEnvironment: expectsPrimaryEnvironment(),
   });
+
+/** Hosted clients and desktops with the local environment disabled never discover a primary. */
+export function expectsPrimaryEnvironment(): boolean {
+  return !isLocalEnvironmentDisabled();
+}
 
 export const allReachableShellsLiveAtom = Atom.make((get) => {
   const catalog = get(environmentCatalog.catalogValueAtom);
-  if (!catalogIsComplete(catalog, true)) return false;
+  if (!catalogIsComplete(catalog, expectsPrimaryEnvironment())) return false;
   for (const environmentId of enabledEnvironmentIds(catalog)) {
     const shell = get(environmentShell.stateValueAtom(environmentId));
     if (shell.status === "live" && Option.isSome(shell.snapshot)) continue;

@@ -10,7 +10,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -57,7 +57,7 @@ export type CoralDriverEnv =
   | ProviderHost.ProviderHost
   | ProviderLatestVersions.ProviderLatestVersions
   | ChildProcessSpawner.ChildProcessSpawner
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path;
@@ -96,7 +96,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
     enabled,
     config,
   }) {
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const httpClient = yield* HttpClient.HttpClient;
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
@@ -149,7 +149,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
         ),
       ),
       Effect.provideService(HttpClient.HttpClient, httpClient),
-      Effect.provideService(Crypto.Crypto, crypto),
+      Effect.provideService(SecureRandom.SecureRandom, crypto),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
     const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);

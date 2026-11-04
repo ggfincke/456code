@@ -34,7 +34,9 @@ export interface ConnectionDiagnosisInput {
 
 interface Located {
   readonly hop: ConnectionHop;
-  readonly cause: ConnectionFailureCause | "offline" | "outdated" | null;
+  readonly cause: ConnectionFailureCause | "offline" | "outdated" | "session_pending" | null;
+  /** The failure named no hop, so the hops before this one were never probed. */
+  readonly guessed?: true;
 }
 
 function locate(input: ConnectionDiagnosisInput): Located | null {
@@ -45,6 +47,9 @@ function locate(input: ConnectionDiagnosisInput): Located | null {
   if (failure?._tag === "ConnectionBlockedError" && failure.serverUpdateRequired) {
     return { hop: "server", cause: "outdated" };
   }
+  if (failure?.reason === "session-pending") {
+    return { hop: "device", cause: "session_pending" };
+  }
   if (failure?.hop !== undefined) {
     return { hop: failure.hop, cause: failure.failureCause ?? null };
   }
@@ -54,7 +59,11 @@ function locate(input: ConnectionDiagnosisInput): Located | null {
       failure.reason === "timeout" ||
       failure.reason === "transport";
     const via = failure.via ?? input.via;
-    return { hop: unreachable && via === "relay" ? "tunnel" : "server", cause: null };
+    return {
+      hop: unreachable && via === "relay" ? "tunnel" : "server",
+      cause: null,
+      guessed: true,
+    };
   }
   return null;
 }
@@ -63,6 +72,8 @@ function headline(host: string, located: Located, failure: ConnectionAttemptErro
   switch (located.cause) {
     case "offline":
       return "This device is offline";
+    case "session_pending":
+      return "This device is still loading its T3 Connect sign-in";
     case "outdated":
       return `${host} runs an older version`;
     case "clock_skew":
@@ -118,7 +129,12 @@ function steps(host: string, located: Located, failure: ConnectionAttemptError |
   const checkHost = `On ${host}, check that the server is running.`;
   switch (located.cause) {
     case "offline":
-      return ["Connect this device to the internet. The app reconnects on its own."];
+      return ["Connect this device to the internet. 456code reconnects on its own."];
+    case "session_pending":
+      return [
+        "Wait a moment. 456code retries on its own.",
+        "If it keeps waiting, reload or restart 456code on this device.",
+      ];
     case "outdated":
       return [`Update the server on ${host}.`];
     case "clock_skew":
@@ -219,7 +235,12 @@ export function presentConnectionDiagnosis(
   const hops = order.map((hop, index): ConnectionDiagnosisHop => ({
     hop,
     label: hopLabel(hop, host),
-    result: index < failedIndex ? "ok" : index === failedIndex ? "failed" : "unchecked",
+    result:
+      index === failedIndex
+        ? "failed"
+        : index < failedIndex && located.guessed !== true
+          ? "ok"
+          : "unchecked",
   }));
 
   const facts: Array<readonly [string, string]> = [];

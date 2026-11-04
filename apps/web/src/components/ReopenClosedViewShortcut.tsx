@@ -43,13 +43,14 @@ import {
 } from "../threadRoutes";
 import { toastManager } from "./ui/toast";
 
-const PREVIEW_FORWARDED_LAYOUT_COMMANDS = [
+const PREVIEW_FORWARDED_COMMANDS = [
   "workspace.focusNext",
   "workspace.focusPrevious",
   "sidebar.toggle",
   "sidebar.toggleView",
   "rightPanel.toggle",
   "rightPanel.toggleMaximized",
+  "preview.focusUrl",
 ] as const;
 
 const isGlobalPullRequests = (ref: ScopedThreadRef) =>
@@ -206,7 +207,7 @@ export function ReopenClosedViewShortcut() {
     // Guest browser processes miss app keydown listeners; desktop forwards the chords as menu actions.
     const commands = [
       ...(hasHistory ? (["view.reopenClosed"] as const) : []),
-      ...PREVIEW_FORWARDED_LAYOUT_COMMANDS,
+      ...PREVIEW_FORWARDED_COMMANDS,
     ];
     void preview
       .setForwardedShortcuts(

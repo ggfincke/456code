@@ -1,3 +1,5 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as Layer from "effect/Layer";
 // apps/server/src/provider/Layers/CoralAdapter.test.ts
 // verifies supervised coral sessions at the v2 adapter boundary
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -21,7 +23,6 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -41,10 +42,12 @@ import { makeCoralAdapter } from "./CoralAdapter.ts";
 const decodeSettings = Schema.decodeSync(CoralSettings);
 const instanceId = ProviderInstanceId.make("coral-fixture");
 const testLayer = Layer.mergeAll(
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
   IdAllocator.layer,
   McpProviderSessions.layer,
-  TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
+  TestProviderHost.layer().pipe(
+    Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  ),
 );
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const fixture = Effect.fn("coral.test.fixture")(function* (

@@ -5,10 +5,54 @@ import {
   getPromptControlledTraits,
   getTraitSelectChange,
 } from "@t3tools/client-runtime/model-traits";
-import { ProviderInstanceId, type ProviderOptionDescriptor } from "@t3tools/contracts";
+import type {
+  ManagedPolicySummary,
+  ProviderOptionDescriptor,
+  RuntimeMode,
+} from "@t3tools/contracts";
+import { ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveEffortSlider, selectableChoices } from "./thread-settings-options";
+import {
+  RUNTIME_MODE_CHOICES,
+  resolveNewThreadRuntimeMode,
+  selectableChoices,
+  withManagedRuntimeModeLimits,
+} from "./thread-settings-options";
+
+const policy = (organization: string, maxRuntimeMode?: RuntimeMode): ManagedPolicySummary => ({
+  organization,
+  lockedSettings: [],
+  ...(maxRuntimeMode === undefined ? {} : { limits: { maxRuntimeMode } }),
+});
+
+describe("managed runtime mode limits", () => {
+  it("disables modes above the strictest target's ceiling with that target's reason", () => {
+    const choices = withManagedRuntimeModeLimits(RUNTIME_MODE_CHOICES, [
+      policy("Wide Corp", "auto"),
+      undefined,
+      policy("Narrow Corp", "auto-accept-edits"),
+    ]);
+
+    expect(choices.map((choice) => [choice.mode, choice.disabledReason])).toEqual([
+      ["approval-required", undefined],
+      ["auto-accept-edits", undefined],
+      ["auto", "Narrow Corp limits threads to Auto-accept edits."],
+      ["full-access", "Wide Corp limits threads to Auto."],
+    ]);
+  });
+
+  it("drops a new thread's draft mode above the ceiling for the default", () => {
+    const capped = policy("Corp", "auto");
+    expect(resolveNewThreadRuntimeMode("full-access", "auto", capped)).toBe("auto");
+    expect(resolveNewThreadRuntimeMode("approval-required", "auto", capped)).toBe(
+      "approval-required",
+    );
+    expect(resolveNewThreadRuntimeMode(undefined, "auto", capped)).toBe("auto");
+    expect(resolveNewThreadRuntimeMode("full-access", "auto", undefined)).toBe("full-access");
+  });
+});
+import { resolveEffortSlider } from "./thread-settings-options";
 
 const effortDescriptor: Extract<ProviderOptionDescriptor, { type: "select" }> = {
   id: "effort",

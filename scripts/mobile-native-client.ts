@@ -1,6 +1,7 @@
 // scripts/mobile-native-client.ts
 // verifies and builds isolated native development clients
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -8,7 +9,7 @@ import * as Clock from "effect/Clock";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -83,9 +84,9 @@ export const ensureClient = Effect.fn("ensureClient")(function* <E, R, E2, R2>(o
 });
 
 const digest = Effect.fn("nativeClient.digest")(function* (value: string | Uint8Array) {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* Digest.Digest;
   const bytes = yield* crypto.digest(
-    "SHA-256",
+    Digest.sha256,
     typeof value === "string" ? new TextEncoder().encode(value) : value,
   );
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -98,7 +99,7 @@ export const hashBundle = Effect.fn("hashBundle")(function* (root: string) {
   const entries: string[] = [];
   const visit = Effect.fn("mobile-native-client.visit")(function* (
     relative: string,
-  ): Effect.fn.Return<void, FileSystemError, FileSystem.FileSystem | Crypto.Crypto> {
+  ): Effect.fn.Return<void, FileSystemError, FileSystem.FileSystem | Digest.Digest> {
     const names = (yield* fs.readDirectory(path.join(root, relative))).sort((a, b) =>
       a.localeCompare(b, "en"),
     );
@@ -134,7 +135,7 @@ export const hashBundle = Effect.fn("hashBundle")(function* (root: string) {
 });
 type FileSystemError = import("effect/PlatformError").PlatformError;
 
-const bundleId = "com.t3tools.t3code.dev";
+const bundleId = "dev.fincke.456code.dev";
 const roots = Effect.gen(function* () {
   const path = yield* Path.Path;
   const repo = yield* path.fromFileUrl(new URL("../", import.meta.url));
@@ -636,7 +637,7 @@ if (import.meta.main) {
         ),
     }),
     Effect.scoped,
-    Effect.provide(NodeServices.layer),
+    Effect.provide([NodeServices.layer, NodeCrypto.layer]),
     NodeRuntime.runMain,
   );
 }

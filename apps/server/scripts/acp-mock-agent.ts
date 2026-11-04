@@ -22,6 +22,11 @@ const coralProfile = process.env.T3_ACP_CORAL_MODES === "1";
 const coralRequiresAuth = process.env.T3_ACP_CORAL_REQUIRE_AUTH === "1";
 const requestLogPath = process.env.T3_ACP_REQUEST_LOG_PATH;
 const antigravityProfile = process.env.T3_ACP_ANTIGRAVITY === "1";
+// GitHub Copilot CLI advertises URL-shaped session mode ids.
+const copilotModesProfile = process.env.T3_ACP_COPILOT_MODES === "1";
+const copilotModeId = (name: string) =>
+  `https://agentclientprotocol.com/protocol/session-modes#${name}`;
+const modeOptionCategory = process.env.T3_ACP_MODE_OPTION_CATEGORY ?? "mode";
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
@@ -78,7 +83,12 @@ const permissionOptionIds = {
 };
 const sessionId = "mock-session-1";
 
-let currentModeId = antigravityProfile || coralProfile ? "default" : "ask";
+let currentModeId =
+  antigravityProfile || coralProfile
+    ? "default"
+    : copilotModesProfile
+      ? copilotModeId("agent")
+      : "ask";
 let currentModelId = antigravityProfile ? "gemini-test-low" : "default";
 let parameterizedModelPicker = false;
 let currentReasoning = "medium";
@@ -288,7 +298,7 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
     {
       configId: "mode",
       name: "Mode",
-      category: "mode",
+      category: modeOptionCategory,
       type: "select" as const,
       currentValue: currentModeId,
       options: availableModes.map((mode) => ({
@@ -353,23 +363,29 @@ const availableModes: ReadonlyArray<AcpCompat.SessionMode> = antigravityProfile
       { id: "auto_edit", name: "Auto edit" },
       { id: "yolo", name: "YOLO" },
     ]
-  : [
-      {
-        id: "ask",
-        name: "Ask",
-        description: "Request permission before making any changes",
-      },
-      {
-        id: "architect",
-        name: "Architect",
-        description: "Design and plan software systems without implementation",
-      },
-      {
-        id: "code",
-        name: "Code",
-        description: "Write and modify code with full tool access",
-      },
-    ];
+  : copilotModesProfile
+    ? [
+        { id: copilotModeId("agent"), name: "Agent" },
+        { id: copilotModeId("plan"), name: "Plan" },
+        { id: copilotModeId("autopilot"), name: "Autopilot" },
+      ]
+    : [
+        {
+          id: "ask",
+          name: "Ask",
+          description: "Request permission before making any changes",
+        },
+        {
+          id: "architect",
+          name: "Architect",
+          description: "Design and plan software systems without implementation",
+        },
+        {
+          id: "code",
+          name: "Code",
+          description: "Write and modify code with full tool access",
+        },
+      ];
 
 function modeState(): AcpCompat.SessionModeState {
   return {
@@ -531,7 +547,7 @@ const program = Effect.gen(function* () {
         };
       return {
         protocolVersion: 2,
-        info: { name: "t3-acp-mock-agent", version: "0.0.0" },
+        info: { name: "t3-acp-mock-agent", version: process.env.T3_ACP_AGENT_VERSION ?? "0.0.0" },
         ...(omitInitializeModelState ? {} : { _meta: { modelState: modelState() } }),
         capabilities: {
           session: {
@@ -1137,6 +1153,18 @@ const program = Effect.gen(function* () {
               type: "items",
               planId: "plan-b",
               entries: [{ content: "Ship B", priority: "high", status: "in_progress" }],
+            },
+          },
+          {
+            sessionUpdate: "plan_update",
+            plan: {
+              type: "items",
+              planId: "plan-c",
+              entries: [
+                { content: "Write the fix", priority: "high", status: "completed" },
+                { content: "Try another approach", priority: "low", status: "cancelled" },
+                { content: "Add a test", priority: "medium", status: "completed" },
+              ],
             },
           },
           { sessionUpdate: "plan_removed", planId: "plan-a" },

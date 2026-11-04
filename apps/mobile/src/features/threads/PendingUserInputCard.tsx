@@ -6,19 +6,19 @@ import { Button } from "../../components/ui/Button";
 import { QuestionAttachments } from "./QuestionAttachments";
 import type { EnvironmentId, RuntimeRequestId } from "@t3tools/contracts";
 import type { ThreadUserInputQuestion } from "@t3tools/client-runtime/state/thread-requests";
+import {
+  markdownProseDirection,
+  textDirection,
+  type TextDirection,
+} from "@t3tools/shared/textDirection";
 import { useCallback, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
-  Easing,
-  FadeInUp,
-  FadeOutDown,
   useAnimatedStyle,
   useSharedValue,
   type DerivedValue,
   type SharedValue,
 } from "react-native-reanimated";
-
-import { USER_INPUT_TOGGLE_DURATION_MS } from "./pendingUserInputLayout";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -40,8 +40,8 @@ export interface PendingUserInputCardProps {
   readonly collapsed: boolean;
   readonly onToggleCollapsed: () => void;
   readonly onStopThread?: () => void;
-  readonly cardProgress?: SharedValue<number>;
-  readonly cardCoverage?: SharedValue<number>;
+  readonly cardProgress: SharedValue<number>;
+  readonly cardCoverage: SharedValue<number>;
   readonly onInputFocusChange?: (focused: boolean) => void;
   readonly drafts: Record<string, PendingUserInputDraftAnswer>;
   readonly answers: Record<string, string | ReadonlyArray<string>> | null;
@@ -60,19 +60,32 @@ export interface PendingUserInputCardProps {
   readonly onDismiss: () => Promise<unknown>;
 }
 
-/** Android cannot hit-test overlays beyond their parent's bounds; render its expanded card in-flow. */
-const EXPANDED_CARD_IS_OVERLAY = Platform.OS === "ios";
+function proseDirectionStyle(text: string, setDirection: TextDirection | undefined) {
+  const direction = textDirection(text);
+  return {
+    ...(direction ? { direction, writingDirection: direction } : null),
+    textAlign: (direction === "rtl") === (setDirection === "rtl") ? "left" : "right",
+  } as const;
+}
 
 // Long enough for the selection and the next step chip to visibly change before the question does.
 const SINGLE_SELECT_ADVANCE_DELAY_MS = 300;
 
-function QuestionText(props: { readonly markdown: string }) {
+function QuestionText(props: {
+  readonly markdown: string;
+  readonly setDirection: TextDirection | undefined;
+}) {
   const styles = useMarkdownPreviewStyles();
   const openLink = useOpenPullRequest();
   return (
     <SelectableMarkdownText
       markdown={props.markdown}
       textStyle={styles.nativeTextStyle}
+      writingDirection={markdownProseDirection(props.markdown)}
+      // Android's renderer aligns relative to each paragraph's direction.
+      textAlign={
+        Platform.OS === "android" ? undefined : props.setDirection === "rtl" ? "right" : "left"
+      }
       onLinkPress={(href) => void openLink(href)}
     />
   );
@@ -135,8 +148,17 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
     }, SINGLE_SELECT_ADVANCE_DELAY_MS);
   };
   const highlightedStep = advancingTo ?? activeIndex;
+  const setDirection = markdownProseDirection(
+    props.pendingUserInput.questions
+      .flatMap((question) => [
+        question.header,
+        question.question,
+        ...question.options.flatMap((option) => [option.label, option.description ?? ""]),
+      ])
+      .join(" "),
+  );
 
-  const cardCoverage = props.cardCoverage;
+  const { cardCoverage, cardProgress, maxHeight } = props;
   const barHeightRef = useRef(0);
   const cardHeightRef = useRef(0);
   const cardHeight = useSharedValue(0);
@@ -163,22 +185,25 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
     },
     [cardHeight, notifyCoverage],
   );
-  const cardProgress = props.cardProgress;
-  const maxHeight = props.maxHeight;
   const cardAnimatedStyle = useAnimatedStyle(() => {
-    const progress = cardProgress === undefined ? 1 : cardProgress.value;
+    const progress = cardProgress.value;
+    const travel = Platform.OS === "android" ? cardCoverage.value : cardHeight.value;
     return {
       maxHeight: maxHeight.value,
-      transform: [{ translateY: (1 - progress) * cardHeight.value }],
+      opacity:
+        Platform.OS === "android"
+          ? Math.min(1, (progress * cardHeight.value) / Math.max(1, cardHeight.value - travel))
+          : 1,
+      transform: [{ translateY: (1 - progress) * travel }],
     };
   });
-  const cardMaxHeightStyle = useAnimatedStyle(() => ({ maxHeight: maxHeight.value }));
+  // Android hit-tests inside the parent; its height is also the space the card takes below the feed.
+  const androidBoundsStyle = useAnimatedStyle(() => ({
+    paddingTop: cardCoverage.value * cardProgress.value,
+  }));
   const overlayHeightStyle = useAnimatedStyle(() => ({ height: maxHeight.value }));
 
-  // Keep the iOS card mounted so expansion starts on the UI thread without waiting for React layout.
-  const renderCard = EXPANDED_CARD_IS_OVERLAY || !props.collapsed;
-  const showBar = props.collapsed || EXPANDED_CARD_IS_OVERLAY;
-  const bar = showBar ? (
+  const bar = (
     <View
       onLayout={handleBarLayout}
       pointerEvents={props.collapsed ? "auto" : "none"}
@@ -219,25 +244,15 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         />
       ) : null}
     </View>
-  ) : null;
-  const card = renderCard ? (
+  );
+  const card = (
     <Animated.View
       onLayout={handleCardLayout}
       pointerEvents={props.collapsed ? "none" : "auto"}
       accessibilityElementsHidden={props.collapsed}
       importantForAccessibility={props.collapsed ? "no-hide-descendants" : "auto"}
-      entering={
-        EXPANDED_CARD_IS_OVERLAY
-          ? undefined
-          : FadeInUp.duration(USER_INPUT_TOGGLE_DURATION_MS).easing(Easing.out(Easing.cubic))
-      }
-      exiting={
-        EXPANDED_CARD_IS_OVERLAY
-          ? undefined
-          : FadeOutDown.duration(USER_INPUT_TOGGLE_DURATION_MS).easing(Easing.out(Easing.cubic))
-      }
       className="overflow-hidden gap-2.5 rounded-[20px] border border-border bg-card-alt p-4"
-      style={EXPANDED_CARD_IS_OVERLAY ? cardAnimatedStyle : cardMaxHeightStyle}
+      style={cardAnimatedStyle}
     >
       <View className="flex-row items-center gap-2">
         {questionCount > 1 ? (
@@ -319,7 +334,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         ) : null}
         {activeQuestion ? (
           <View key={activeQuestion.id} className="gap-2">
-            <QuestionText markdown={activeQuestion.question} />
+            <QuestionText markdown={activeQuestion.question} setDirection={setDirection} />
             <View className="gap-2">
               {activeQuestion.options.map((option) => {
                 const draft = props.drafts[activeQuestion.id];
@@ -353,7 +368,10 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                         {option.label}
                       </Text>
                       {description ? (
-                        <Text className="font-sans text-sm leading-5 text-foreground-muted">
+                        <Text
+                          className="font-sans text-sm leading-5 text-foreground-muted"
+                          style={proseDirectionStyle(description, setDirection)}
+                        >
                           {description}
                         </Text>
                       ) : null}
@@ -422,21 +440,20 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         </Text>
       ) : null}
     </Animated.View>
-  ) : null;
+  );
   return (
-    <View className="relative">
+    <Animated.View
+      className="relative"
+      style={Platform.OS === "android" ? androidBoundsStyle : undefined}
+    >
       {bar}
-      {EXPANDED_CARD_IS_OVERLAY ? (
-        <Animated.View
-          pointerEvents={props.collapsed ? "none" : "box-none"}
-          className="absolute inset-x-0 bottom-0 justify-end overflow-hidden"
-          style={overlayHeightStyle}
-        >
-          {card}
-        </Animated.View>
-      ) : (
-        card
-      )}
-    </View>
+      <Animated.View
+        pointerEvents={props.collapsed ? "none" : "box-none"}
+        className="absolute inset-x-0 bottom-0 justify-end overflow-hidden"
+        style={overlayHeightStyle}
+      >
+        {card}
+      </Animated.View>
+    </Animated.View>
   );
 }

@@ -28,7 +28,7 @@ import {
   getProviderSlashCommandsForSlashMenu,
 } from "@t3tools/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
-import { useThreadShells } from "~/state/entities";
+import { useVisibleThreadShells } from "~/state/entities";
 import { useEnvironmentIdentities, useEnvironmentMachines } from "~/state/environments";
 import { offersLinkedEnvironmentsAtom } from "~/state/peerLinks";
 import {
@@ -72,6 +72,7 @@ export function useComposerMenuItems({
   selectedProviderSkills,
   selectedProviderSlashCommands,
   showSkillsInSlashMenu,
+  workspaceSkillsScanning,
   questionAttachmentTarget,
 }: {
   readonly composerTrigger: ComposerTrigger | null;
@@ -90,6 +91,7 @@ export function useComposerMenuItems({
   readonly selectedProviderSkills: ServerProvider["skills"];
   readonly selectedProviderSlashCommands: ServerProvider["slashCommands"];
   readonly showSkillsInSlashMenu: boolean;
+  readonly workspaceSkillsScanning: boolean;
   readonly questionAttachmentTarget: DraftId | null;
 }) {
   // Thread mentions rank by recency as of when the composer mounted.
@@ -111,7 +113,7 @@ export function useComposerMenuItems({
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  const environmentThreadShells = useThreadShells(isPathTrigger);
+  const environmentThreadShells = useVisibleThreadShells(isPathTrigger);
   // Mounts older settled threads matching the mention, which shells may leave out.
   useThreadSearch(isPathTrigger ? [environmentId] : [], pathTriggerQuery, { titlesOnly: true });
   // The user's machines feed `@` machine matches; the catalog summary is cheap and stable.
@@ -371,6 +373,8 @@ export function useComposerMenuItems({
   })();
   const isLoading =
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending) ||
+    ((composerTriggerKind === "skill" || composerTriggerKind === "slash-command") &&
+      workspaceSkillsScanning) ||
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
       pullRequestRepository !== null &&

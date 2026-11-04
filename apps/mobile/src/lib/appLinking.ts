@@ -7,9 +7,10 @@ import type { NavigationState, PartialState } from "@react-navigation/native";
  * to the NotFound wildcard route on every dev launch.
  */
 export function shouldHandleAppLink(url: string): boolean {
+  const route = url.split(/[?#]/)[0] ?? "";
   return (
-    !url.includes("expo-development-client") &&
-    !url.includes("://expo-sharing") &&
+    !route.includes("expo-development-client") &&
+    !route.includes("://expo-sharing") &&
     !/^t3code(-dev|-preview)?:\/*$/.test(url)
   );
 }

@@ -1,4 +1,4 @@
-import { EnvironmentId, type ServerConfig } from "@t3tools/contracts";
+import { EnvironmentId, type ServerConfig, type ServerConfigStreamEvent } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -75,7 +75,7 @@ const LAN_TARGET = new BearerConnectionTarget({
   label: TARGET.label,
   connectionId: "bearer:lan",
 });
-const LAN_ROUTE: ConnectionRoute = {
+const LAN_ROUTE = {
   target: LAN_TARGET,
   profile: Option.some(
     new BearerConnectionProfile({
@@ -86,7 +86,7 @@ const LAN_ROUTE: ConnectionRoute = {
       wsBaseUrl: "ws://192.168.1.10:3773/",
     }),
   ),
-};
+} satisfies ConnectionRoute;
 const LAN_THEN_RELAY_ENTRY: ConnectionCatalogEntry = {
   target: LAN_ROUTE.target,
   profile: LAN_ROUTE.profile,
@@ -141,6 +141,7 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
   ) => Effect.Effect<PreparedConnection, ConnectionAttemptError>;
   readonly ready?: (attempt: number) => Effect.Effect<void, ConnectionAttemptError>;
   readonly probe?: (attempt: number) => Effect.Effect<void, ConnectionAttemptError>;
+  readonly configEvents?: Stream.Stream<ServerConfigStreamEvent> | undefined;
   readonly initialConfig?: (attempt: number) => Effect.Effect<ServerConfig, ConnectionAttemptError>;
   readonly checkRoute?: (route: ConnectionRoute) => Effect.Effect<ConnectionDriver.RouteCheck>;
   readonly checkHost?: (prepared: PreparedConnection) => Effect.Effect<ConnectionDriver.RouteCheck>;
@@ -197,7 +198,13 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
         initialConfig:
           options?.initialConfig?.(attempt) ??
           Effect.die(new Error("Initial config is not used by supervisor tests.")),
-        subscribeServerConfig: (input) => TEST_RPC_CLIENT.subscribeServerConfig(input),
+        subscribeServerConfig: () =>
+          options?.configEvents ??
+          Stream.fromEffect(
+            (options?.initialConfig?.(attempt) ?? Effect.never).pipe(Effect.orDie),
+          ).pipe(
+            Stream.map((config) => ({ version: 1 as const, type: "snapshot" as const, config })),
+          ),
         ready: options?.ready?.(attempt) ?? Effect.void,
         probe: options?.probe?.(attempt) ?? Effect.void,
         inboundFrames: options?.inboundFrames ?? Effect.succeed(0),
@@ -308,7 +315,7 @@ describe("EnvironmentSupervisor", () => {
   it.effect("waits while offline and connects immediately when the network returns", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ networkStatus: "offline" });
-      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+      const supervisor = yield* EnvironmentSupervisor.make(LAN_ENTRY, {
         initiallyDesired: true,
       }).pipe(Effect.provide(harness.dependencies));
 
@@ -328,6 +335,54 @@ describe("EnvironmentSupervisor", () => {
       });
       expect(yield* Ref.get(harness.prepareCount)).toBe(1);
     }),
+  );
+
+  it.effect("connects to the primary environment while the device reports offline", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ networkStatus: "offline" });
+      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      const settled = yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" || state.phase === "offline",
+      );
+
+      expect(settled).toMatchObject({
+        phase: "connected",
+        network: "unknown",
+        attempt: 1,
+        lastFailure: null,
+      });
+      expect(yield* Ref.get(harness.prepareCount)).toBe(1);
+    }),
+  );
+
+  it.effect(
+    "keeps a primary attempt through an offline report and restarts it when the network returns",
+    () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const harness = yield* makeHarness({
+          prepare: (attempt) =>
+            attempt === 1
+              ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+              : Effect.succeed(PREPARED_CONNECTION),
+        });
+        const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+          initiallyDesired: true,
+        }).pipe(Effect.provide(harness.dependencies));
+
+        yield* Deferred.await(started);
+        yield* harness.setNetworkStatus("offline");
+        yield* TestClock.adjust("1 second");
+        expect(yield* Ref.get(harness.prepareCount)).toBe(1);
+
+        yield* harness.setNetworkStatus("online");
+        yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+        expect(yield* Ref.get(harness.prepareCount)).toBe(2);
+      }).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("keeps the latest failure visible throughout the next connection attempt", () =>
@@ -747,6 +802,29 @@ describe("EnvironmentSupervisor", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  it.effect("checks the primary environment's socket when the device reports offline", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeSilentSocketHarness();
+      const target = new PrimaryConnectionTarget({
+        ...TARGET,
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(
+        { ...TARGET_ENTRY, target },
+        { initiallyDesired: true },
+      ).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* harness.setNetworkStatus("offline");
+      yield* TestClock.adjust("500 millis");
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2,
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("replaces a remote socket after a long resume while the network reports offline", () =>
     Effect.gen(function* () {
       const harness = yield* makeSilentSocketHarness();
@@ -955,7 +1033,7 @@ describe("EnvironmentSupervisor", () => {
       const harness = yield* makeHarness({
         probe: (attempt) => (attempt === 1 ? Effect.never : Effect.void),
       });
-      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+      const supervisor = yield* EnvironmentSupervisor.make(LAN_ENTRY, {
         initiallyDesired: true,
       }).pipe(Effect.provide(harness.dependencies));
 

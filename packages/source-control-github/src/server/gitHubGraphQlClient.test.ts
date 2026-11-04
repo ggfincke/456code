@@ -263,6 +263,7 @@ describe("call", () => {
           errors: [
             { type: "NOT_FOUND", message: "Could not resolve" },
             { type: "FORBIDDEN", message: "Resource not accessible" },
+            { message: "Unknown error" },
           ],
         }),
       );
@@ -271,7 +272,8 @@ describe("call", () => {
         expect(error).toMatchObject({
           _tag: "GitHubApiResponseError",
           status: 200,
-          githubErrors: ["Could not resolve", "Resource not accessible"],
+          githubErrors: ["Could not resolve", "Resource not accessible", "Unknown error"],
+          githubErrorTypes: ["NOT_FOUND", "FORBIDDEN", null],
         });
       }).pipe(Effect.provide(layer));
     },

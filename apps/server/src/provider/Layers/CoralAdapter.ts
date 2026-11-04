@@ -7,7 +7,7 @@ import {
   type OrchestrationV2ProviderCapabilities,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -86,7 +86,7 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
   coralSettings: CoralSettings,
   options: CoralAdapterLiveOptions,
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const adapter = yield* makeAcpAdapterV2({
     ...options,
@@ -103,7 +103,7 @@ export const makeCoralAdapter = Effect.fn("makeCoralAdapter")(function* (
           childProcessSpawner,
           environment: { ...options.environment, ...input.processEnvironment },
         }).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
+          Effect.provideService(SecureRandom.SecureRandom, crypto),
           Effect.map((runtime) => ({
             ...runtime,
             start: () =>

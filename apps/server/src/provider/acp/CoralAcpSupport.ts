@@ -1,7 +1,7 @@
 // apps/server/src/provider/acp/CoralAcpSupport.ts
 // configures coral native sessions, runtime modes and model selection
 import type { CoralSettings, RuntimeMode } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
@@ -129,7 +129,7 @@ export const makeCoralAcpRuntime = Effect.fn("CoralAcpSupport.makeRuntime")(func
 ): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  Crypto.Crypto | Scope.Scope
+  SecureRandom.SecureRandom | Scope.Scope
 > {
   const acpContext = yield* Layer.build(
     AcpSessionRuntime.layer({

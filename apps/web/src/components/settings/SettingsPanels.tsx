@@ -1,3 +1,4 @@
+import { managedUpdatesDenial } from "@t3tools/contracts";
 import { NotificationSettings } from "./NotificationSettings";
 import { CheckIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -20,6 +21,7 @@ import {
 } from "@t3tools/contracts/settings";
 
 import { createModelSelection } from "@t3tools/shared/model";
+import { resolvePastedPath } from "@t3tools/shared/path";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import { APP_BASE_NAME } from "../../branding";
@@ -55,6 +57,7 @@ import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
+import { usePrimaryManagedPolicy } from "../../state/managedPolicy";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
@@ -131,6 +134,7 @@ const QUIT_CONFIRMATION_MODE_LABELS: Record<QuitConfirmationMode, string> = {
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 function AboutVersionSection() {
+  const updatesDenial = managedUpdatesDenial(usePrimaryManagedPolicy());
   const updateState = useDesktopUpdateState();
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
@@ -204,7 +208,9 @@ function AboutVersionSection() {
               type: "error",
               title: "Could not check for updates",
               description:
-                result.state.message ?? "Automatic updates are not available in this build.",
+                updatesDenial ??
+                result.state.message ??
+                "Automatic updates are not available in this build.",
             }),
           );
         }
@@ -238,7 +244,8 @@ function AboutVersionSection() {
   const description =
     action === "download" || action === "install"
       ? "Update available."
-      : (getDesktopUpdateDisabledReason(updateState) ?? "Current version of the application.");
+      : (getDesktopUpdateDisabledReason(updateState, updatesDenial) ??
+        "Current version of the application.");
 
   return (
     <>
@@ -246,6 +253,7 @@ function AboutVersionSection() {
         id={searchableSetting("app-version").id}
         title={<AboutVersionTitle />}
         description={description}
+        managed={updatesDenial}
         control={
           <Tooltip>
             <TooltipTrigger
@@ -364,7 +372,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       : []),
     ...(settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? ["Diff layout"] : []),
     ...(settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled
-      ? ["Proactive panels"]
+      ? ["Open pull requests and changes panels proactively"]
       : []),
     ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
       ? ["Show skills in slash menu"]
@@ -1280,7 +1288,7 @@ export function DiffsSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ proactivePanelsEnabled: Boolean(checked) })
               }
-              aria-label="Proactive panels"
+              aria-label="Open pull requests and changes panels proactively"
             />
           }
         />
@@ -1439,6 +1447,7 @@ export function ThreadsSettingsPanel() {
               className="w-full sm:w-72"
               value={mixedAddProjectBaseDirectory ? "" : settings.addProjectBaseDirectory}
               onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+              normalizeDraft={resolvePastedPath}
               placeholder={mixedAddProjectBaseDirectory ? "Mixed" : "~/"}
               spellCheck={false}
               aria-label="Add project base directory"
@@ -1459,7 +1468,7 @@ export function ThreadsSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("auto-resume-limited-threads")}
-          description="Resume usage-limit stops at the reported reset time. Each thread can cancel its scheduled continuation."
+          description="Automatically resume threads when their usage limits reset. You can cancel auto-resume in each thread."
           settingKeys={["autoResumeLimitedThreads"]}
           control={
             <ScopedSwitch
@@ -1475,7 +1484,7 @@ export function ThreadsSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("snooze-limited-threads")}
-          description="Snooze usage-limit stops until reset. Pair with resume to continue on wake."
+          description="Snooze threads until their usage limits reset. Enable auto-resume to continue the agent after the reset."
           settingKeys={["snoozeLimitedThreads"]}
           control={
             <ScopedSwitch
@@ -1864,9 +1873,29 @@ export function MaintenanceSettingsPanel() {
 }
 
 export function AboutSettingsPanel() {
+  const primaryPolicy = usePrimaryManagedPolicy();
   return (
     <SettingsPageContainer>
       <SettingsSection id="about" title="App">
+        {primaryPolicy ? (
+          <SettingsRow
+            title="Organization"
+            description={`This environment is managed by ${primaryPolicy.organization}. Some settings and features follow its policy.`}
+            control={
+              primaryPolicy.supportUrl ? (
+                <Button
+                  render={
+                    <a href={primaryPolicy.supportUrl} target="_blank" rel="noreferrer noopener" />
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  Get help
+                </Button>
+              ) : null
+            }
+          />
+        ) : null}
         {isElectron ? (
           <AboutVersionSection />
         ) : (

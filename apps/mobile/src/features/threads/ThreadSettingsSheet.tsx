@@ -123,6 +123,8 @@ import { ModelRow, ChoiceRow } from "./ThreadSettingsRows";
 import {
   compatibleRuntimeModeForChoices,
   runtimeModeChoicesForSupportedModes,
+  withManagedRuntimeModeLimits,
+  type RuntimeModeChoice,
   selectableChoices,
   resolveEffortSlider,
 } from "./thread-settings-options";
@@ -322,7 +324,7 @@ type ThreadSettingsSessionValue = {
   readonly manageHidden: boolean;
   readonly setManageHidden: (value: boolean) => void;
   readonly runtimeMode: RuntimeMode;
-  readonly runtimeModeChoices: ReturnType<typeof runtimeModeChoicesForSupportedModes>;
+  readonly runtimeModeChoices: ReadonlyArray<RuntimeModeChoice>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly promptTraits: ReturnType<typeof getPromptControlledTraits>;
@@ -550,8 +552,9 @@ function ThreadSettingsSessionProvider(
   const modelAvailable =
     displayedModel !== null && !displayedModel.isUnavailable && !displayedModel.isHidden;
   const optionsDisabled = Boolean(props.optionsDisabled) || !modelAvailable;
-  const runtimeModeChoices = runtimeModeChoicesForSupportedModes(
-    displayedModel?.supportedRuntimeModes,
+  const runtimeModeChoices = withManagedRuntimeModeLimits(
+    runtimeModeChoicesForSupportedModes(displayedModel?.supportedRuntimeModes),
+    [config?.managedPolicy],
   );
   const compatibleRuntimeMode = compatibleRuntimeModeForChoices(
     props.runtimeMode,
@@ -1273,7 +1276,8 @@ function ThreadSettingsChoiceContent(props: {
           rows: session.runtimeModeChoices.map((choice) => ({
             id: choice.mode,
             label: choice.label,
-            description: choice.description,
+            description: choice.disabledReason ?? choice.description,
+            disabled: choice.disabledReason !== undefined,
             selected: choice.mode === session.runtimeMode,
             onPress: () => {
               void Haptics.selectionAsync();
@@ -1288,6 +1292,7 @@ function ThreadSettingsChoiceContent(props: {
               id: choice.id,
               label: choice.label,
               description: choice.description,
+              disabled: false,
               selected:
                 choice.id ===
                 (session.promptTraits.ultrathinkPromptControlled &&

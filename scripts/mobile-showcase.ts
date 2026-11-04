@@ -158,6 +158,11 @@ export function validateStoreAsset(
       `${label} must be an 8-bit, 24-bit RGB PNG without alpha (found bit depth ${metadata.bitDepth}, color type ${metadata.colorType}).`,
     );
   }
+  try {
+    PNG.sync.read(Buffer.from(bytes));
+  } catch (cause) {
+    throw new Error(`${label} is not a valid PNG.`, { cause });
+  }
   return metadata;
 }
 

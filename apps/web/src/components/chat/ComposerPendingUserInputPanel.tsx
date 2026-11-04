@@ -1,5 +1,8 @@
+// apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx
+// presents collapsible questions with inline answer recovery
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
-import { CheckIcon } from "lucide-react";
+import { markdownProseDirection, textDirection } from "~/textDirection";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import {
   memo,
   use,
@@ -20,6 +23,7 @@ import {
 import { derivePendingUserInputProgress } from "../../pendingUserInput";
 import { Button } from "../ui/button";
 import { CheckboxMark } from "../ui/checkbox";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
 import { Kbd } from "../ui/kbd";
 import { Textarea } from "../ui/textarea";
@@ -90,6 +94,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const responseDisabled = disabled || isResponding || !canRespond;
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const customAnswerInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const [collapsedQuestionId, setCollapsedQuestionId] = useState<string | null>(null);
   const advance = useStableCallback(onAdvance);
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
     questionId: string;
@@ -108,6 +113,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     (option) =>
       !customAnswerActive && progress.selectedOptionValues.includes(option.value ?? option.label),
   );
+  const isCollapsed = collapsedQuestionId !== null && collapsedQuestionId === activeQuestion?.id;
   const allowsCustomAnswer = activeQuestion?.allowCustomAnswer !== false;
   const canGoNext =
     !responseDisabled &&
@@ -256,11 +262,23 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     return null;
   }
 
+  const promptDirection = markdownProseDirection(
+    prompt.questions
+      .flatMap((question) => [
+        question.header,
+        question.question,
+        ...question.options.flatMap((option) => [option.label, option.description ?? ""]),
+      ])
+      .join(" "),
+  );
+  const questionTextAlign = promptDirection === "rtl" ? "text-right" : "text-left";
+
   const highlightedStepIndex =
     advancingQuestionId === activeQuestion.id ? progress.questionIndex + 1 : progress.questionIndex;
   const optionRowClassName = (selected: boolean) =>
     cn(
-      "group flex w-full items-start gap-2.5 rounded-md bg-transparent py-1.5 ps-2 text-left sm:ps-1.5 outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
+      questionTextAlign,
+      "group flex w-full items-start gap-2.5 rounded-md bg-transparent py-1.5 ps-2 sm:ps-1.5 outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
       selected ? "text-foreground" : "text-foreground/70 hover:bg-muted/30",
       responseDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
     );
@@ -291,7 +309,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   };
 
   return (
-    <div data-pending-user-input-card onKeyDown={handleCardKeyDown}>
+    <Collapsible
+      dir={promptDirection}
+      open={!isCollapsed}
+      onOpenChange={(open) => setCollapsedQuestionId(open ? null : activeQuestion.id)}
+      data-pending-user-input-card
+      onKeyDown={handleCardKeyDown}
+    >
       <ComposerBanner.Row className="px-4 pt-1.5">
         <ComposerBanner.Content>
           {prompt.questions.length > 1 ? (
@@ -321,9 +345,36 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           ) : (
             <span className="shrink-0 text-muted-foreground">{activeQuestion.header}</span>
           )}
+          {isCollapsed ? (
+            <>
+              <ComposerBanner.Separator />
+              <span
+                className={cn("min-w-0 flex-1 truncate text-secondary-label", questionTextAlign)}
+                dir={markdownProseDirection(activeQuestion.question)}
+              >
+                {activeQuestion.question}
+              </span>
+            </>
+          ) : null}
         </ComposerBanner.Content>
-        {prompt.dismissible ? (
-          <ComposerBanner.Actions>
+        <ComposerBanner.Actions>
+          <CollapsibleTrigger
+            render={<Button size="icon-xs" variant="ghost" />}
+            aria-label={
+              isCollapsed
+                ? "Show the question and its options"
+                : "Hide the question and its options"
+            }
+            title={
+              isCollapsed
+                ? "Show the question and its options"
+                : "Hide the question and its options"
+            }
+            data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
+          >
+            <ChevronDownIcon className={cn("size-3.5", isCollapsed && "rotate-180")} />
+          </CollapsibleTrigger>
+          {prompt.dismissible ? (
             <ComposerBanner.Dismiss
               aria-label="Dismiss question without answering"
               title="Dismiss question without answering"
@@ -331,119 +382,129 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               data-pending-user-input-dismiss
               onClick={() => onDismiss(prompt.requestId)}
             />
-          </ComposerBanner.Actions>
-        ) : null}
+          ) : null}
+        </ComposerBanner.Actions>
       </ComposerBanner.Row>
-      <ComposerBanner.Scroll>
-        <ComposerBanner.Body className="ps-6 pe-4 pb-1 wrap-anywhere sm:ps-5.5">
-          <ChatMarkdown
-            text={activeQuestion.question}
-            cwd={cwd}
-            threadRef={threadRef}
-            className="pt-2 text-foreground/85"
-          />
-          {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
-          <div className="-ms-2 mt-1.5 sm:-ms-1.5">
-            {activeQuestion.options.map((option, index) => {
-              const optionValue = option.value ?? option.label;
-              const isOptimisticallySelected =
-                optimisticSingleSelect?.questionId === activeQuestion.id &&
-                optimisticSingleSelect.optionValue === optionValue;
-              const isSelected = isOptimisticallySelected || draftSelectedOptions?.[index] === true;
-              // The h-5 slots match the label's line box, so the indicator and shortcut stay on its first line.
-              return (
-                <button
-                  key={`${activeQuestion.id}:${optionValue}`}
-                  type="button"
-                  aria-pressed={isSelected}
-                  disabled={responseDisabled}
-                  data-pending-user-input-enter
-                  onClick={() => {
-                    handleOptionSelection(activeQuestion.id, optionValue);
-                  }}
-                  className={optionRowClassName(isSelected)}
-                >
-                  <span className="pointer-events-none flex h-5 shrink-0 items-center">
+      <CollapsiblePanel>
+        <ComposerBanner.Scroll>
+          <ComposerBanner.Body className="ps-6 pe-4 pb-1 wrap-anywhere sm:ps-5.5">
+            <ChatMarkdown
+              text={activeQuestion.question}
+              cwd={cwd}
+              threadRef={threadRef}
+              className={cn("pt-2 text-foreground/85", questionTextAlign)}
+            />
+            {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
+            <div className="-ms-2 mt-1.5 sm:-ms-1.5">
+              {activeQuestion.options.map((option, index) => {
+                const optionValue = option.value ?? option.label;
+                const isOptimisticallySelected =
+                  optimisticSingleSelect?.questionId === activeQuestion.id &&
+                  optimisticSingleSelect.optionValue === optionValue;
+                const isSelected =
+                  isOptimisticallySelected || draftSelectedOptions?.[index] === true;
+                // The h-5 slots match the label's line box, so the indicator and shortcut stay on its first line.
+                return (
+                  <button
+                    key={`${activeQuestion.id}:${optionValue}`}
+                    type="button"
+                    aria-pressed={isSelected}
+                    disabled={responseDisabled}
+                    data-pending-user-input-enter
+                    onClick={() => {
+                      handleOptionSelection(activeQuestion.id, optionValue);
+                    }}
+                    className={optionRowClassName(isSelected)}
+                  >
+                    <span className="pointer-events-none flex h-5 shrink-0 items-center">
+                      {activeQuestion.multiSelect ? (
+                        <CheckboxMark checked={isSelected} />
+                      ) : (
+                        <OptionRadio checked={isSelected} />
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                      <span className="text-sm font-medium" dir={textDirection(option.label)}>
+                        {option.label}
+                      </span>
+                      {option.description && option.description !== option.label ? (
+                        <span
+                          className="text-secondary-label text-2xs"
+                          dir={textDirection(option.description)}
+                        >
+                          {option.description}
+                        </span>
+                      ) : null}
+                    </div>
+                    {index < 9 ? (
+                      <span className="flex h-5 w-7 shrink-0 items-center justify-center sm:w-6">
+                        <Kbd>{index + 1}</Kbd>
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+              {allowsCustomAnswer ? (
+                <label className={optionRowClassName(customAnswerActive)}>
+                  <span className="pointer-events-none flex h-7 shrink-0 items-center">
                     {activeQuestion.multiSelect ? (
-                      <CheckboxMark checked={isSelected} />
+                      <CheckboxMark checked={customAnswerActive} />
                     ) : (
-                      <OptionRadio checked={isSelected} />
+                      <OptionRadio checked={customAnswerActive} />
                     )}
                   </span>
-                  <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">{option.label}</span>
-                    {option.description && option.description !== option.label ? (
-                      <span className="text-secondary-label text-2xs">{option.description}</span>
-                    ) : null}
-                  </div>
-                  {index < 9 ? (
-                    <span className="flex h-5 w-7 shrink-0 items-center justify-center sm:w-6">
-                      <Kbd>{index + 1}</Kbd>
+                  <span className="min-w-0 flex-1">
+                    {activeQuestion.initialAnswer !== undefined ? (
+                      <Textarea
+                        {...customAnswerField}
+                        size="sm"
+                        onChange={(event) => changeCustomAnswer(event.target.value)}
+                      />
+                    ) : (
+                      <Input
+                        {...customAnswerField}
+                        size="sm"
+                        nativeInput
+                        onChange={(event) => changeCustomAnswer(event.target.value)}
+                      />
+                    )}
+                  </span>
+                  {customAnswerIndex < 9 ? (
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center sm:w-6">
+                      <Kbd>{customAnswerIndex + 1}</Kbd>
                     </span>
                   ) : null}
-                </button>
-              );
-            })}
-            {allowsCustomAnswer ? (
-              <label className={optionRowClassName(customAnswerActive)}>
-                <span className="pointer-events-none flex h-7 shrink-0 items-center">
-                  {activeQuestion.multiSelect ? (
-                    <CheckboxMark checked={customAnswerActive} />
-                  ) : (
-                    <OptionRadio checked={customAnswerActive} />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  {activeQuestion.initialAnswer !== undefined ? (
-                    <Textarea
-                      {...customAnswerField}
-                      size="sm"
-                      onChange={(event) => changeCustomAnswer(event.target.value)}
-                    />
-                  ) : (
-                    <Input
-                      {...customAnswerField}
-                      size="sm"
-                      nativeInput
-                      onChange={(event) => changeCustomAnswer(event.target.value)}
-                    />
-                  )}
-                </span>
-                {customAnswerIndex < 9 ? (
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center sm:w-6">
-                    <Kbd>{customAnswerIndex + 1}</Kbd>
-                  </span>
-                ) : null}
-              </label>
-            ) : null}
-          </div>
-        </ComposerBanner.Body>
-      </ComposerBanner.Scroll>
-      <div className="flex items-center justify-end gap-2 ps-6 pe-4 pt-1.5 pb-1 sm:ps-5.5">
-        {!canRespond ? (
-          <span className="me-auto text-muted-foreground">
-            The provider can no longer take this answer.
-          </span>
-        ) : attachmentBlockReason ? (
-          <span className="me-auto min-w-0 truncate text-muted-foreground">
-            {attachmentBlockReason}
-          </span>
-        ) : null}
-        {progress.questionIndex > 0 ? (
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={isResponding}
-            onClick={() => selectQuestion(progress.questionIndex - 1)}
-          >
-            Back
+                </label>
+              ) : null}
+            </div>
+          </ComposerBanner.Body>
+        </ComposerBanner.Scroll>
+        <div className="flex items-center justify-end gap-2 ps-6 pe-4 pt-1.5 pb-1 sm:ps-5.5">
+          {!canRespond ? (
+            <span className="me-auto text-muted-foreground">
+              The provider can no longer take this answer.
+            </span>
+          ) : attachmentBlockReason ? (
+            <span className="me-auto min-w-0 truncate text-muted-foreground">
+              {attachmentBlockReason}
+            </span>
+          ) : null}
+          {progress.questionIndex > 0 ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={isResponding}
+              onClick={() => selectQuestion(progress.questionIndex - 1)}
+            >
+              Back
+            </Button>
+          ) : null}
+          <Button size="xs" disabled={!canGoNext} onClick={goNext}>
+            {isResponding ? "Submitting…" : progress.isLastQuestion ? "Submit" : "Next"}
           </Button>
-        ) : null}
-        <Button size="xs" disabled={!canGoNext} onClick={goNext}>
-          {isResponding ? "Submitting…" : progress.isLastQuestion ? "Submit" : "Next"}
-        </Button>
-      </div>
-    </div>
+        </div>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 });
 

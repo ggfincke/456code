@@ -41,7 +41,7 @@ import { deriveBottomControlInsets } from "../../lib/reserved-regions";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useNativeLayoutMetrics } from "../../native/native-layout-metrics";
 import { T3KeyboardCommands } from "../../native/T3KeyboardCommands";
-import { useProjects, useThreadShell, useThreadShells } from "../../state/entities";
+import { useProjects, useThreadShell, useVisibleThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { requestThreadMessageJump } from "../threads/threadMessageJump";
 import { threadEnvironment } from "../../state/threads";
@@ -215,7 +215,7 @@ export function CommandPalette(props: {
   const selectDetail = useSelectWorkspaceDetail();
   const runCommand = props.onCommand;
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const activeThreadRef = parseActiveThreadPath(props.pathname);
   const activeThread = useThreadShell(activeThreadRef);
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });

@@ -13,12 +13,13 @@
     },
     "scripts": {
       // knip loads its preprocessor through a cli option; native checks, worktree setup, branding
-      // and local packaging helpers run directly. electron-builder loads the macOS signer and
+      // and local packaging helpers run directly. electron-builder loads the macOS signer and Linux afterPack hook and
       // mobile-e2e.ts runs agent-device's CLI by path.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
         "knip-schemas.ts",
+        "linux-after-pack.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
@@ -26,6 +27,7 @@
         "fincke-stage-update.ts",
         "apply-web-brand-assets.ts",
         "sign-macos.ts",
+        "prepare-server-compile-cache.cjs",
         "smoke-desktop-app.ts",
       ],
       "ignoreDependencies": ["agent-device", "esbuild"],
@@ -60,6 +62,7 @@
         "@t3tools/web",
         "@napi-rs/keyring",
         "dependency-cruiser",
+        "ffi-rs",
       ],
     },
     "apps/desktop": {
@@ -72,6 +75,7 @@
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
         "src/boot.ts!",
         "src/compileCache.ts!",
+        "src/serverCompileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",

@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -34,7 +35,7 @@ describe("ssh command", () => {
   it.effect("passes an option-shaped alias to ssh as the destination", () => {
     const spawned: Array<ReadonlyArray<string>> = [];
     const spawner = ChildProcessSpawner.make((command) => {
-      if (ChildProcess.isStandardCommand(command)) spawned.push(command.args);
+      if (ChildProcess.isStandardCommand(command)) spawned.push(command.args.map(String));
       return Effect.succeed(makeFailedProcess({ stdout: "", stderr: "bad hostname\n" }));
     });
     return runSshCommand(
@@ -47,7 +48,7 @@ describe("ssh command", () => {
       }),
       Effect.provide(
         Layer.merge(
-          NodeServices.layer,
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
         ),
       ),
@@ -99,7 +100,7 @@ describe("ssh command", () => {
           ? `[truncated]\n${redacted.slice(-4_000)}`
           : `${redacted.slice(0, 4_000)}\n[truncated]`,
       );
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
   it.live("enables server-alive checks for long remote commands", () =>
@@ -119,7 +120,7 @@ describe("ssh command", () => {
       Effect.succeed(makeFailedProcess({ stdout: '{"credential":"pairing-secret"}\n' })),
     );
     const layerSpawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
-    const layerProcess = Layer.mergeAll(NodeServices.layer, layerSpawner);
+    const layerProcess = Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, layerSpawner);
 
     return Effect.gen(function* () {
       const result = yield* Effect.result(

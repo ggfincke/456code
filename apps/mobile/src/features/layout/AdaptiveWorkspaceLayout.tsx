@@ -750,8 +750,25 @@ function AdaptiveWorkspaceLayoutContent(
   // Clip the navigator at its settled width so native headers and markdown reflow only once per pane toggle.
   const renderedInspectorWidth = useSharedValue(inspectorColumnTargetWidth);
   const renderedContentWidth = useDerivedValue(() =>
-    Math.max(0, viewportWidth - renderedSidebarWidth.value - renderedInspectorWidth.value),
+    Math.max(
+      0,
+      viewportWidth -
+        (workspacePage ? 0 : renderedSidebarWidth.value) -
+        renderedInspectorWidth.value,
+    ),
   );
+  // Android can resize the native row before React removes its split panes on a fold.
+  const androidSplit = Platform.OS === "android" && layout.usesSplitView;
+  const androidContentSlotStyle = useAnimatedStyle(() => ({
+    width: androidSplit ? renderedContentWidth.value : ("100%" as const),
+  }));
+  // While the sidebar animates, clip the settled navigator instead of reflowing its text every frame.
+  const androidNavigatorLimit = useAnimatedStyle(() => ({
+    maxWidth:
+      androidSplit && contentTargetWidth !== null && renderedContentWidth.value < contentTargetWidth
+        ? contentTargetWidth
+        : ("100%" as const),
+  }));
 
   const handleSelectThread = (thread: EnvironmentThreadShell) => {
     handleSelectThreadRoute({
@@ -822,7 +839,7 @@ function AdaptiveWorkspaceLayoutContent(
     >
       {shouldRenderPrimarySidebar && layout.listPaneWidth !== null ? (
         <Animated.View
-          className="self-stretch overflow-hidden"
+          className="self-stretch overflow-hidden android:shrink"
           accessibilityElementsHidden={workspacePage || !panes.primarySidebarVisible}
           collapsable={false}
           importantForAccessibility={
@@ -868,17 +885,18 @@ function AdaptiveWorkspaceLayoutContent(
           </Animated.View>
         </Animated.View>
       ) : null}
-      <View
+      <Animated.View
         className={
           Platform.OS === "android"
-            ? "flex-1 overflow-hidden bg-header"
+            ? "max-w-full shrink-0 overflow-hidden bg-header"
             : "flex-1 overflow-hidden bg-screen"
         }
+        style={Platform.OS === "android" ? androidContentSlotStyle : undefined}
         collapsable={false}
       >
-        <View
+        <Animated.View
           collapsable={false}
-          style={
+          style={[
             contentTargetWidth !== null
               ? {
                   flex: 1,
@@ -886,8 +904,9 @@ function AdaptiveWorkspaceLayoutContent(
                   alignSelf: contentAnchor.end ? "flex-end" : "flex-start",
                   marginRight: contentAnchor.end ? contentEndGap : 0,
                 }
-              : { flex: 1 }
-          }
+              : { flex: 1 },
+            Platform.OS === "android" ? androidNavigatorLimit : undefined,
+          ]}
         >
           {/* Android holds the content still, so its floating controls keep its width. */}
           <WorkspaceContentWidthContext
@@ -901,8 +920,8 @@ function AdaptiveWorkspaceLayoutContent(
               </View>
             </WorkspaceSettledContentWidthContext>
           </WorkspaceContentWidthContext>
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
       <WorkspaceInspectorPane
         pathname={props.pathname}
         renderedInspectorWidth={renderedInspectorWidth}

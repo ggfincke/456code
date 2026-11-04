@@ -1,3 +1,5 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as Layer from "effect/Layer";
 // apps/server/src/provider/Layers/CoralProvider.test.ts
 // checks coral compatibility and model discovery
 
@@ -105,7 +107,11 @@ it.effect(
       const empty = yield* f.check(ready.models);
       expect(empty.status).toBe("error");
       expect(empty.models).toEqual([]);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      TestClock.withLive,
+    ),
 );
 
 it.effect(
@@ -119,7 +125,11 @@ it.effect(
         expect(yield* f.log).not.toContain("authenticate");
         expect(f.requests).toEqual([]);
       }
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      TestClock.withLive,
+    ),
 );
 
 it.effect("discovers configured hosted models before creating a Coral session", () =>
@@ -134,7 +144,11 @@ it.effect("discovers configured hosted models before creating a Coral session", 
     ]);
     expect(f.requests).toEqual([]);
     expect(yield* f.log).toBe("initialize\n");
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    TestClock.withLive,
+  ),
 );
 
 it.effect("times out an unresponsive probe and releases its process", () =>
@@ -146,5 +160,9 @@ it.effect("times out an unresponsive probe and releases its process", () =>
     expect(f.requests).toEqual([]);
     const pid = Number(yield* f.pid);
     expect(() => process.kill(pid, 0)).toThrow();
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    TestClock.withLive,
+  ),
 );
