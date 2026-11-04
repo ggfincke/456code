@@ -1,3 +1,5 @@
+// apps/server/src/cli/policy.test.ts
+// verifies installed and running managed policy status
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -42,14 +44,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))((it) =>
           return yield* describeRunningServer(statePath, current);
         });
 
-      assert.include(yield* describeRunningServer(statePath, installed), "No T3 Code server");
+      assert.include(yield* describeRunningServer(statePath, installed), "No 456code server");
       assert.include(yield* running(installed), "loaded this policy.");
       assert.include(
         yield* running(yield* loaded("Other Corp")),
         "loaded Other Corp's policy from /etc/t3code/policy.json",
       );
-      assert.include(yield* running(null), "loaded no policy. Restart T3 Code");
-      assert.include(yield* running(installed, null), "Restart T3 Code to apply");
+      assert.include(yield* running(null), "loaded no policy. Restart 456code");
+      assert.include(yield* running(installed, null), "Restart 456code to apply");
       assert.include(yield* running(null, null), "runs without a policy, as installed");
       assert.include(yield* running(undefined), "does not report which policy it loaded");
     }),

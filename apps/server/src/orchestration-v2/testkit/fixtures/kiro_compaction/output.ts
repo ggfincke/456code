@@ -1,3 +1,5 @@
+// apps/server/src/orchestration-v2/testkit/fixtures/kiro_compaction/output.ts
+// verifies kiro compaction preserves context and restores instructions
 import { assert } from "@effect/vitest";
 import type { ProviderReplayTranscript } from "@t3tools/contracts";
 
@@ -28,9 +30,9 @@ export function assertKiroCompactionOutput(
     outbound.filter((frame) => field(frame, "method") === "_kiro/session/compact"),
     1,
   );
-  // Compaction drops T3's instructions from Kiro's context, so the next prompt carries them again.
+  // compaction drops instructions, so the next prompt carries them again
   assert.deepEqual(
-    prompts.map((frame) => promptText(frame).startsWith("<t3_code_instructions>")),
+    prompts.map((frame) => promptText(frame).startsWith("<456code_instructions>")),
     [true, true],
   );
 
