@@ -764,4 +764,22 @@ describe("DesktopShellEnvironment", () => {
       assert.equal(env.XDG_SESSION_TYPE, "wayland");
     }),
   );
+
+  it.effect("drops another AppImage instance's mount from PATH on linux", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = {
+        SHELL: "/bin/zsh",
+        APPDIR: "/tmp/.mount_456codNew",
+        PATH: "/tmp/.mount_456codNew:/tmp/.mount_456codOld/usr/sbin:/usr/bin",
+      };
+
+      yield* runShellEnvironment({
+        env,
+        platform: "linux",
+        handler: () => envOutput({ PATH: "/home/test/.local/bin:/tmp/.mount_456codOld:/usr/bin" }),
+      });
+
+      assert.equal(env.PATH, "/home/test/.local/bin:/usr/bin:/tmp/.mount_456codNew");
+    }),
+  );
 });

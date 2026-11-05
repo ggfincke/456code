@@ -115,6 +115,27 @@ describe("ssh command", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("fails with SshCommandError when spawn throws synchronously", () => {
+    const thrown = Object.assign(new Error("spawn ENOTCONN"), { code: "ENOTCONN" });
+    const spawner = ChildProcessSpawner.make(() => Effect.die(thrown));
+    return runSshCommand(
+      { alias: "devbox", hostname: "devbox", username: null, port: null },
+      { preHostArgs: ["-G"] },
+    ).pipe(
+      Effect.flip,
+      Effect.map((failure) => {
+        assert.instanceOf(failure, SshCommandError);
+        assert.equal(failure.message, "spawn ENOTCONN");
+      }),
+      Effect.provide(
+        Layer.merge(
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
+          Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+      ),
+    );
+  });
+
   it.effect("redacts credentials from stdout in non-zero command failures", () => {
     const spawner = ChildProcessSpawner.make(() =>
       Effect.succeed(makeFailedProcess({ stdout: '{"credential":"pairing-secret"}\n' })),
