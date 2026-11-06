@@ -7,6 +7,7 @@ import {
   snapshotComposerSend,
   withMessageContext,
   deriveAvailableRevertTurnCounts,
+  hasPendingProviderBackgroundWork,
 } from "./ChatView.logic";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
 import { ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
@@ -1256,5 +1257,68 @@ describe("deriveAvailableRevertTurnCounts", () => {
   it("offers nothing without a provider session to rewind", () => {
     expect(deriveAvailableRevertTurnCounts(projection({ providerSessionId: null })).size).toBe(0);
     expect(deriveAvailableRevertTurnCounts(null).size).toBe(0);
+  });
+});
+
+describe("hasPendingProviderBackgroundWork", () => {
+  const providerThreadId = ProviderThreadId.make("provider-thread");
+
+  function projection(input: {
+    readonly laterRun?: "queued" | "rolled_back";
+    readonly agent?: boolean;
+    readonly command?: boolean;
+    readonly pullRequestWatch?: boolean;
+  }) {
+    const base = makeThreadProjectionFixture();
+    const run = (ordinal: number, status: string) => ({
+      id: RunId.make(`run-${ordinal}`),
+      ordinal,
+      status,
+      startedAt: status === "queued" ? null : "2026-10-30T14:20:00.000Z",
+    });
+    return {
+      ...base,
+      thread: {
+        ...base.thread,
+        activeProviderThreadId: providerThreadId,
+        pullRequests:
+          input.pullRequestWatch === true
+            ? [{ host: "github.com", repository: "o/r", number: 1, watch: {} }]
+            : [],
+      },
+      providerThreads: [
+        {
+          id: providerThreadId,
+          providerInstanceId: base.thread.modelSelection.instanceId,
+          pendingBackgroundTasks:
+            input.command === true ? [{ taskId: "gate", kind: "command" }] : [],
+        },
+      ],
+      runs: [
+        run(1, "completed"),
+        ...(input.laterRun === undefined ? [] : [run(2, input.laterRun)]),
+      ],
+      turnItems:
+        input.agent === true
+          ? [{ id: "item-agent", type: "subagent", status: "running", runId: RunId.make("run-1") }]
+          : [],
+    } as unknown as ReturnType<typeof makeThreadProjectionFixture>;
+  }
+
+  it.each([
+    { name: "a running background agent", input: { agent: true }, expected: true },
+    {
+      name: "a background agent behind a queued message",
+      input: { agent: true, laterRun: "queued" },
+      expected: true,
+    },
+    {
+      name: "a listed command after a rollback",
+      input: { command: true, laterRun: "rolled_back" },
+      expected: false,
+    },
+    { name: "only a watched pull request", input: { pullRequestWatch: true }, expected: false },
+  ] as const)("$name: $expected", ({ input, expected }) => {
+    expect(hasPendingProviderBackgroundWork(projection(input))).toBe(expected);
   });
 });

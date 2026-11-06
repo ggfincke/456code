@@ -11,6 +11,7 @@ import { announcedRun, isDetailBehindShell } from "./chat/threadActivityAnnounce
 import {
   deriveAvailableRevertTurnCounts,
   deriveThreadPendingBackgroundTasks,
+  hasPendingProviderBackgroundWork,
   presentThreadShellFromProjection,
 } from "./ChatView.logic";
 import { usePullRequestDraftThread } from "./chat/usePullRequestDraftThread";
@@ -2494,8 +2495,7 @@ export default function ChatView(props: ChatViewProps) {
     !hasHeldQueuedRuns &&
     multipleModelSelections === null &&
     // Background agents keep the session live and report into its next turn.
-    deriveThreadPendingBackgroundTasks(serverProjection, { includePullRequestWatches: false })
-      .length === 0 &&
+    (serverProjection === null || !hasPendingProviderBackgroundWork(serverProjection)) &&
     shouldOfferResumeCompaction({
       provider: selectedProvider,
       usedTokens: activeContextWindow.usedTokens,
