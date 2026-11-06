@@ -180,7 +180,7 @@ function HistoryNavigationButton({
 function SidebarBrand({ onBackdrop, children }: { onBackdrop: boolean; children?: ReactNode }) {
   return (
     <Link
-      aria-label="T3 Code home"
+      aria-label={`${APP_BASE_NAME} home`}
       className={cn(
         "relative z-10 hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
         onBackdrop ? "text-white" : "text-foreground",
