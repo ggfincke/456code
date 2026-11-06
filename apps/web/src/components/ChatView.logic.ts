@@ -1555,11 +1555,8 @@ export function presentThreadShellFromProjection(
   };
 }
 
-/** Background work the provider still runs after the latest run ended, plus watched pull requests. */
-export function deriveThreadPendingBackgroundTasks(
-  projection: ThreadStructure | null,
-  options?: { readonly includePullRequestWatches?: boolean },
-) {
+/** Background work the provider still runs after the latest run ended. */
+export function deriveThreadPendingBackgroundTasks(projection: ThreadStructure | null) {
   if (projection === null) return [];
   const sessionError =
     projection.providerSessions.findLast(
@@ -1575,11 +1572,32 @@ export function deriveThreadPendingBackgroundTasks(
       turnItems: projection.turnItems,
       activeProviderThreadId: projection.thread.activeProviderThreadId,
       runs: projection.runs,
-      ...(options?.includePullRequestWatches === false
-        ? {}
-        : { pullRequests: projection.thread.pullRequests }),
+      pullRequests: projection.thread.pullRequests,
     }),
   ];
+}
+
+/**
+ * Whether the provider still runs background agents or commands for the thread's latest run.
+ * Pull request watches do not count, and a queued run has not taken over the session yet.
+ */
+export function hasPendingProviderBackgroundWork(
+  projection: Pick<ThreadStructure, "thread" | "providerThreads" | "runs" | "turnItems">,
+): boolean {
+  const latestRun = projection.runs.reduce<ThreadStructure["runs"][number] | null>(
+    (latest, run) =>
+      run.status === "queued" || (latest !== null && latest.ordinal > run.ordinal) ? latest : run,
+    null,
+  );
+  return (
+    derivePendingBackgroundWork({
+      latestRun,
+      providerThreads: projection.providerThreads,
+      turnItems: projection.turnItems,
+      activeProviderThreadId: projection.thread.activeProviderThreadId,
+      runs: projection.runs,
+    }).length > 0
+  );
 }
 
 /**
