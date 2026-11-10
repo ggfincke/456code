@@ -57,6 +57,8 @@ const QueuedThreadMessageSchema = Schema.Struct({
   attachments: Schema.Array(DraftComposerAttachmentSchema),
   modelSelection: Schema.optional(ModelSelection),
   dispatchMode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),
+  compactBeforeSend: Schema.optional(Schema.Boolean),
+  freshContext: Schema.optional(Schema.Boolean),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
   sourceProposedPlan: Schema.optional(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
@@ -93,6 +95,10 @@ export interface QueuedThreadMessage {
   readonly dispatchMode?: ComposerDispatchMode;
   /** Set by the fork's Implement button so the server marks that plan implemented. */
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
+  /** Sends "When you return"'s `/compact` ahead of the message, which queues behind it. */
+  readonly compactBeforeSend?: boolean;
+  /** Starts a new provider session (`/clear`). */
+  readonly freshContext?: boolean;
   readonly creation?: QueuedThreadCreation;
   readonly createdAt: string;
 }

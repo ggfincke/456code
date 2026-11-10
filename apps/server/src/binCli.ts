@@ -23,7 +23,8 @@ import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { threadCommand } from "./cli/thread.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
-import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
+import { runServiceLauncherCli } from "./cli/serviceLauncher.ts";
+import { speechWorkerCommand } from "./cli/speechWorker.ts";
 import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
 import { themeCommand } from "./cli/theme.ts";
 import { traceCommand } from "./cli/trace.ts";
@@ -52,8 +53,14 @@ export const makeCli = () =>
       browserCommand,
       projectCommand,
       threadCommand,
-      serviceLauncherCommand,
+      // bin.ts runs the bare service invocation; this keeps flags and help working like other commands.
+      Command.make("__service-launcher").pipe(
+        Command.unlisted,
+        // The launcher owns shutdown until its child exits; `runMain` would interrupt that shutdown.
+        Command.withHandler(() => Effect.sync(() => void runServiceLauncherCli())),
+      ),
       claudeHistoryCommand,
+      speechWorkerCommand,
       themeCommand,
       traceCommand,
       doctorCommand,

@@ -9,8 +9,8 @@ import { Platform, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { SheetHeader } from "../../../components/ui/SheetHeader";
 import { ScreenContent } from "../../../components/ui/ScreenContent";
-import { NativeStackScreenOptions } from "../../../native/StackHeader";
 import { AppText as Text } from "../../../components/ui/AppText";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
@@ -117,19 +117,9 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
   return (
     <View
       collapsable={false}
-      className="bg-sheet ios:flex-1"
+      className="bg-sheet ios:flex-1 android:flex-col-reverse"
       style={Platform.OS === "android" ? { maxHeight: windowHeight * 0.92 } : undefined}
     >
-      {Platform.OS === "android" ? (
-        <NativeStackScreenOptions
-          options={{
-            sheetCornerRadius: 28,
-            sheetAllowedDetents: "fitToContents",
-          }}
-        />
-      ) : null}
-      <View className="min-h-4 pt-2" />
-
       <ScreenContent fitToContents>
         <ScrollView
           nestedScrollEnabled
@@ -180,6 +170,7 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
           </View>
         </ScrollView>
       </ScreenContent>
+      <SheetHeader title="Confirm action" onClose={() => navigation.goBack()} />
     </View>
   );
 }

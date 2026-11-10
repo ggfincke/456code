@@ -7,6 +7,7 @@ import {
   type ServerProviderUpdateState,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -92,6 +93,12 @@ export class ProviderRegistry extends Context.Service<
       readonly fresh?: boolean | undefined;
     }) => Effect.Effect<void>;
 
+    /**
+     * For an opened model picker: re-probe the local provider CLIs unless a full
+     * pass finished within the last few minutes. Never fetches a remote manifest.
+     */
+    readonly refreshModelCatalog: Effect.Effect<void>;
+
     readonly getProviderMaintenanceCapabilitiesForInstance: (
       instanceId: ProviderInstanceId,
       provider: ProviderDriverKind,
@@ -132,6 +139,7 @@ const hasModelCapabilities = (model: ServerProvider["models"][number]): boolean 
   (model.capabilities?.optionDescriptors?.length ?? 0) > 0;
 
 const MAX_WORKSPACE_SNAPSHOTS_PER_PROVIDER = 16;
+const MODEL_CATALOG_REPROBE_INTERVAL_MS = 5 * 60 * 1000;
 
 function dropProviderWorkspaceSnapshot(provider: ServerProvider, cwd: string): ServerProvider {
   return provider.workspaceSnapshots?.some((snapshot) => snapshot.cwd === cwd)
@@ -624,6 +632,8 @@ export const layer = Layer.effect(
       Option.none(),
     );
 
+    const lastFullProbeAtMs = yield* Ref.make<number | null>(null);
+
     const refreshAll = Effect.fn("refreshAll")(function* () {
       const claimed = yield* Ref.modify(
         refreshAllInFlightRef,
@@ -652,6 +662,9 @@ export const layer = Layer.effect(
             }),
           ),
           Effect.andThen(Ref.get(providersRef)),
+          Effect.tap(() =>
+            Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Ref.set(lastFullProbeAtMs, now))),
+          ),
           Effect.onExit((exit) =>
             Ref.set(refreshAllInFlightRef, Option.none()).pipe(
               Effect.andThen(Deferred.done(claimed.completion, exit)),
@@ -1069,6 +1082,20 @@ export const layer = Layer.effect(
       );
     });
 
+    // 456code ships only the bundled manifest, so new models can only come from the local CLIs.
+    const refreshModelCatalog = Effect.fn("ProviderRegistry.refreshModelCatalog")(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const lastProbeAtMs = yield* Ref.get(lastFullProbeAtMs);
+      if (
+        lastProbeAtMs !== null &&
+        now >= lastProbeAtMs &&
+        now - lastProbeAtMs < MODEL_CATALOG_REPROBE_INTERVAL_MS
+      ) {
+        return;
+      }
+      yield* refreshAll();
+    });
+
     return {
       getProviders: Ref.get(providersRef),
       refresh: (provider?: ProviderDriverKind) =>
@@ -1081,6 +1108,10 @@ export const layer = Layer.effect(
         refreshWorkspaceSnapshot(input).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshAfterUpdate,
       invalidateModelCaches,
+      refreshModelCatalog: refreshModelCatalog().pipe(
+        Effect.catchCause(recoverRefreshFailure),
+        Effect.asVoid,
+      ),
       getProviderMaintenanceCapabilitiesForInstance,
       setProviderMaintenanceActionState,
       get streamChanges() {

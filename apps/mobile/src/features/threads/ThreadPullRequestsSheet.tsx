@@ -5,8 +5,8 @@ import { Platform, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { ScreenContent } from "../../components/ui/ScreenContent";
 import { SheetHeader } from "../../components/ui/SheetHeader";
-import { Toolbar } from "../../components/ui/Toolbar";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import {
@@ -63,7 +63,7 @@ export function ThreadPullRequestsSheet(
         recycleItems
         alwaysBounceVertical
         style={{ flex: 1 }}
-        contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+        contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
           paddingBottom: Math.max(insets.bottom, 18) + 18,
@@ -87,17 +87,22 @@ export function ThreadPullRequestsSheet(
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <SheetHeader presentation="native" title={title} onClose={() => navigation.goBack()} />
-      {actions.canLink ? (
-        <Toolbar placement="right">
-          <Toolbar.Button
-            icon="plus"
-            accessibilityLabel={`Link ${singular}`}
-            onPress={actions.promptLink}
-          />
-        </Toolbar>
-      ) : null}
-      {content}
+      <SheetHeader
+        title={title}
+        onClose={() => navigation.goBack()}
+        actions={
+          actions.canLink
+            ? [
+                {
+                  accessibilityLabel: `Link ${singular}`,
+                  icon: "plus",
+                  onPress: actions.promptLink,
+                },
+              ]
+            : undefined
+        }
+      />
+      <ScreenContent>{content}</ScreenContent>
     </View>
   );
 }

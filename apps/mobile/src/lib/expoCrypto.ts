@@ -37,6 +37,8 @@ export const layer = Layer.mergeAll(
   Layer.succeed(SecureRandom.SecureRandom, SecureRandom.make(ExpoCrypto.getRandomBytes)),
   Layer.succeed(Digest.Digest, {
     digest,
-    digestHex: (algorithm, data) => digest(algorithm, data).pipe(Effect.map(Hex.encode)),
+    digestHex: Effect.fn("Digest.Digest.digestHex")((algorithm, data) =>
+      digest(algorithm, data).pipe(Effect.map(Hex.encode)),
+    ),
   }),
 );

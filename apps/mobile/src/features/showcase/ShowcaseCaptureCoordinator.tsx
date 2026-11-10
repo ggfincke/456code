@@ -53,7 +53,7 @@ import {
 } from "./showcaseRenderSignal";
 import { retryShowcaseOperation } from "./showcaseRetry";
 import { settingsNavigationState } from "../settings/settings-navigation";
-import { selectWorkspaceDetail } from "../workspace/workspace-detail-selection";
+import { selectWorkspaceDetail } from "../layout/workspace/workspace-detail-selection";
 
 const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
 // Native launch requests (pairing links, scene switches) have no change event.

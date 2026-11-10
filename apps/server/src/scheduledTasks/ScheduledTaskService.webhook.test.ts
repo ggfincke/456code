@@ -169,6 +169,8 @@ const withService = <A, E>(
     const launches = yield* Queue.unbounded<LaunchInput>();
     const secretsByRef = new Map<string, string>();
     const layerDependencies = Layer.mergeAll(
+      NodePlatformCrypto.layerDigest,
+      NodePlatformCrypto.layerMac,
       options.frameGate === undefined && options.onFrame === undefined
         ? NodePlatformCrypto.layer
         : Layer.effect(

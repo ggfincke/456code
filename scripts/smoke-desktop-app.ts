@@ -19,18 +19,24 @@ const STEP_TIMEOUT_MS = 60_000;
 const { values } = NodeUtil.parseArgs({
   options: {
     executable: { type: "string" },
+    // An unpackaged app directory for a plain Electron executable, as PR CI runs it.
+    app: { type: "string" },
     "artifacts-dir": { type: "string" },
   },
 });
 const executable = values.executable;
 if (!executable)
-  throw new Error("Usage: smoke-desktop-app.ts --executable <app> [--artifacts-dir <dir>]");
+  throw new Error(
+    "Usage: smoke-desktop-app.ts --executable <app> [--app <dir>] [--artifacts-dir <dir>]",
+  );
 const artifactsDir = NodePath.resolve(values["artifacts-dir"] ?? "desktop-launch-check");
 
 const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-desktop-launch-"));
 const t3Home = NodePath.join(home, "t3");
-NodeFS.mkdirSync(NodePath.join(t3Home, "userdata"), { recursive: true });
-NodeFS.copyFileSync(FIXTURE_DB, NodePath.join(t3Home, "userdata/statev2.sqlite"));
+// fincke: the 456code desktop build keeps its state in a 456code-thin child of T3CODE_HOME
+const stateDir = NodePath.join(t3Home, "456code-thin", "userdata");
+NodeFS.mkdirSync(stateDir, { recursive: true });
+NodeFS.copyFileSync(FIXTURE_DB, NodePath.join(stateDir, "statev2.sqlite"));
 
 let step = "launching the app";
 let app: ElectronApplication | undefined;
@@ -38,7 +44,7 @@ try {
   app = await _electron.launch({
     executablePath: executable,
     // Linux CI runners do not allow the Chromium sandbox's user namespaces.
-    args: ["--no-sandbox"],
+    args: [...(values.app ? [NodePath.resolve(values.app)] : []), "--no-sandbox"],
     // HOME stays real: on macOS a fake HOME has no login keychain, and safeStorage blocks the
     // main process on a keychain dialog. macOS keeps its Electron profile in the runner's HOME.
     env: {
@@ -74,7 +80,7 @@ try {
   console.error(`Desktop launch check failed while ${step}.`);
   NodeFS.mkdirSync(artifactsDir, { recursive: true });
   console.error(error instanceof Error ? error.message : error);
-  const logs = NodePath.join(t3Home, "userdata/logs");
+  const logs = NodePath.join(stateDir, "logs");
   if (NodeFS.existsSync(logs)) {
     NodeFS.cpSync(logs, NodePath.join(artifactsDir, "logs"), { recursive: true });
     const serverLog = NodePath.join(logs, "server-child.log");
