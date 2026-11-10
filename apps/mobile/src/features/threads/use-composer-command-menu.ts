@@ -699,6 +699,9 @@ export function useComposerCommandMenu({
     });
     setSelection({ start: result.cursor, end: result.cursor });
     onChangeDraftMessage(result.text);
+    if (result.interactionMode !== null) {
+      onUpdateInteractionMode?.(result.interactionMode);
+    }
   };
 
   return {
