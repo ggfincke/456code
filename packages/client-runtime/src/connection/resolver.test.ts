@@ -65,6 +65,7 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
             token: input.bearerToken,
           },
         })),
+    rememberCheckedDescriptor: () => Effect.void,
   });
   const layerDependencies = Layer.mergeAll(
     RpcHttp.layerRemoteHttpClient((() =>

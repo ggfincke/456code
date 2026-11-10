@@ -1,5 +1,8 @@
 // apps/mobile/src/features/home/HomeScreen.tsx
 // adaptive native thread list and workspace navigation
+import { useContentTopInset } from "../../components/ui/useBarInset";
+import { usePaneRole } from "../../components/ui/Pane";
+import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useActiveNewTask } from "../../state/active-new-task";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import type { ThreadMoveDestination } from "../threads/threadOrder";
@@ -61,14 +64,14 @@ import {
   useNativeColumnLayoutMetrics,
   useNativeLayoutMetrics,
 } from "../../native/native-layout-metrics";
-import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
+import { useWorkspaceListEmptyTopInset } from "../layout/workspace/workspace-list-insets";
 import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
 import { useThreadSearch } from "../../state/queries";
 import { requestThreadMessageJump } from "../threads/threadMessageJump";
 import { useThreadListSearchMatches } from "../threads/useThreadListSearchMatches";
 import { useThreadListV2 } from "../threads/useThreadListV2";
 import { useThreadListNow } from "../threads/use-thread-list-now";
-import { useSearchScrollRestoration } from "../workspace/useSearchScrollRestoration";
+import { useSearchScrollRestoration } from "../layout/workspace/useSearchScrollRestoration";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { threadListEnvironmentsAtom } from "../../state/presentation";
@@ -102,7 +105,7 @@ import {
 import { createSwipeRowActivation } from "./swipe-row-activation";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { useFabScroll } from "./FabScrollContext";
-import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
+import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
 
 interface HomeScreenProps {
@@ -234,6 +237,7 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
   const primaryColumn = use(NativePrimaryColumnContext);
   const { themeId } = useAppearancePreferences();
   const waveCleared = use(FinckeWaveClearedContext);
+  const sidebarSurface = usePaneRole() === "sidebar" && primaryColumn !== null;
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
   // fincke: the ocean wave sits behind the list's header in every layout (compact, Duo
   // panes, sidebar), so UIKit's edge dimming would cut a hard line through it. once the
@@ -256,7 +260,7 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
       <ScrollView
         {...props}
         // UIKit's scroll-edge material needs the scroll view's own surface color.
-        className={cn(props.className, primaryColumn ? "bg-drawer" : "bg-screen")}
+        className={cn(props.className, sidebarSurface ? "bg-drawer" : "bg-screen")}
       />
     </ScrollViewMarker>
   );
@@ -272,7 +276,8 @@ export function HomeScreen(props: HomeScreenProps) {
   const workspace = useWorkspaceTabs();
   const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
   const primaryColumn = use(NativePrimaryColumnContext);
-  const contentBackground = primaryColumn ? "bg-drawer" : "bg-screen";
+  const sidebarSurface = usePaneRole() === "sidebar" && primaryColumn !== null;
+  const contentBackground = sidebarSurface ? "bg-drawer" : "bg-screen";
   const containerClassName = cn(
     "flex-1",
     Platform.OS === "android" ? "bg-header" : contentBackground,
@@ -285,10 +290,9 @@ export function HomeScreen(props: HomeScreenProps) {
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const homeScrollGesture = useNativeGesture();
   const insets = useSafeAreaInsets();
-  const waveCleared = useFinckeWaveCleared(
-    initialScrollOffset,
-    Platform.OS === "ios" ? insets.top : 0,
-  );
+  const contentTopInset = useContentTopInset();
+  const waveCleared = useFinckeWaveCleared(initialScrollOffset, contentTopInset);
+  const emptyTopInset = useWorkspaceListEmptyTopInset();
   const screenMetrics = useNativeLayoutMetrics();
   const contentSideInsets = usesNativeWorkspaceColumns
     ? (columnMetrics ?? screenMetrics)?.safeArea
@@ -351,7 +355,7 @@ export function HomeScreen(props: HomeScreenProps) {
   useSearchScrollRestoration(searchMode, () => {
     if (restoredOffset === undefined) return;
     void listRef.current?.scrollToOffset({
-      offset: restoredOffset - (Platform.OS === "ios" ? insets.top : 0),
+      offset: restoredOffset - contentTopInset,
       animated: false,
     });
   });
@@ -369,11 +373,11 @@ export function HomeScreen(props: HomeScreenProps) {
   useEffect(() => () => clearTimeout(activationTimerRef.current), []);
   const handleListScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     onFabScroll?.(event);
-    waveCleared.track(event.nativeEvent.contentOffset.y + (Platform.OS === "ios" ? insets.top : 0));
+    waveCleared.track(event.nativeEvent.contentOffset.y + contentTopInset);
     if (workspace)
       workspace.recordScrollOffset(
         "threads",
-        Math.max(0, event.nativeEvent.contentOffset.y + (Platform.OS === "ios" ? insets.top : 0)),
+        Math.max(0, event.nativeEvent.contentOffset.y + contentTopInset),
       );
     clearTimeout(activationTimerRef.current);
     activationTimerRef.current = setTimeout(
@@ -508,13 +512,13 @@ export function HomeScreen(props: HomeScreenProps) {
     snoozedShelfExpanded,
     settledShelfExpanded,
     selectedThreadKey,
-    timeOnStatusRows: primaryColumn !== null,
+    timeOnStatusRows: sidebarSurface,
   });
   // fincke: the sidebar column can group its rows under projects, like desktop
   const { themeId, themeVariables } = useAppearancePreferences();
   const ocean = themeId === "fincke-ocean";
   const sidebarView = useSidebarView();
-  const projectsView = primaryColumn !== null && sidebarView.projectsView;
+  const projectsView = sidebarSurface && sidebarView.projectsView;
   const listItems: FinckeSidebarListItem[] = projectsView
     ? buildProjectSidebarItems({
         layoutInput: threadListV2LayoutInput,
@@ -584,7 +588,7 @@ export function HomeScreen(props: HomeScreenProps) {
       );
       return (
         <ThreadListV2PendingRow
-          pane={primaryColumn ? "sidebar" : "screen"}
+          pane={sidebarSurface ? "sidebar" : "screen"}
           sidebarLayout={sidebarLayout}
           pendingTask={item.pendingTask}
           selected={
@@ -618,7 +622,7 @@ export function HomeScreen(props: HomeScreenProps) {
       return (
         <ThreadListV2NeedsYouHeader
           count={item.count}
-          pane={primaryColumn ? "sidebar" : "screen"}
+          pane={sidebarSurface ? "sidebar" : "screen"}
         />
       );
     }
@@ -629,7 +633,7 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           expanded={item.expanded}
           onToggle={toggleWorkingShelf}
-          pane={primaryColumn ? "sidebar" : "screen"}
+          pane={sidebarSurface ? "sidebar" : "screen"}
         />
       );
     }
@@ -640,7 +644,7 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           expanded={item.expanded}
           onToggle={toggleSnoozedShelf}
-          pane={primaryColumn ? "sidebar" : "screen"}
+          pane={sidebarSurface ? "sidebar" : "screen"}
         />
       );
     }
@@ -651,14 +655,14 @@ export function HomeScreen(props: HomeScreenProps) {
           disabled={item.disabled}
           expanded={item.expanded}
           onToggle={toggleSettledShelf}
-          pane={primaryColumn ? "sidebar" : "screen"}
+          pane={sidebarSurface ? "sidebar" : "screen"}
         />
       );
     }
     const thread = item.item.thread;
     return (
       <ThreadListV2Row
-        pane={primaryColumn ? "sidebar" : "screen"}
+        pane={sidebarSurface ? "sidebar" : "screen"}
         sidebarLayout={sidebarLayout}
         selected={scopedThreadKey(thread.environmentId, thread.id) === selectedThreadKey}
         fullSwipeWidth={fullSwipeWidth}
@@ -763,61 +767,67 @@ export function HomeScreen(props: HomeScreenProps) {
   if (!hasAnyThreads) {
     return (
       <View className={containerClassName}>
-        <View
-          className={cn(
-            "flex-1 items-center justify-center px-8",
-            contentBackground,
-            Platform.OS === "android" && "overflow-hidden rounded-t-[28px]",
-          )}
-          style={{
-            paddingBottom: Platform.OS === "ios" ? iosBottomClearance : Math.max(insets.bottom, 24),
-            paddingTop: NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 72 : 0,
-            paddingLeft: 32 + (contentSideInsets?.left ?? 0),
-            paddingRight: 32 + (contentSideInsets?.right ?? 0),
-          }}
-        >
-          <View className="w-full max-w-[430px]">
-            <EmptyState
-              title={emptyState.title}
-              detail={emptyState.detail}
-              actionLabel={!props.catalogState.hasReadyEnvironment ? "Add environment" : undefined}
-              onAction={!props.catalogState.hasReadyEnvironment ? props.onAddConnection : undefined}
-              action={
-                Platform.OS === "android" && !props.catalogState.hasReadyEnvironment ? (
-                  <FloatingActionButton
-                    label="Add environment"
-                    icon="plus"
-                    variant="extended"
-                    tone="primary"
-                    onPress={props.onAddConnection}
-                  />
-                ) : undefined
-              }
-              variant="plain"
-            />
-            {emptyState.loading ? (
-              <View className="mt-4 items-center">
-                <AppActivityIndicator colorClassName="accent-icon-muted" />
-              </View>
-            ) : null}
+        <ScreenContent surface={sidebarSurface ? "drawer" : "screen"}>
+          <View
+            className={cn(
+              "flex-1 items-center justify-center px-8",
+              Platform.OS !== "android" && contentBackground,
+            )}
+            style={{
+              paddingBottom:
+                Platform.OS === "ios" ? iosBottomClearance : Math.max(insets.bottom, 24),
+              paddingTop: emptyTopInset,
+              paddingLeft: 32 + (contentSideInsets?.left ?? 0),
+              paddingRight: 32 + (contentSideInsets?.right ?? 0),
+            }}
+          >
+            <View className="w-full max-w-[430px]">
+              <EmptyState
+                title={emptyState.title}
+                detail={emptyState.detail}
+                actionLabel={
+                  !props.catalogState.hasReadyEnvironment ? "Add environment" : undefined
+                }
+                onAction={
+                  !props.catalogState.hasReadyEnvironment ? props.onAddConnection : undefined
+                }
+                action={
+                  Platform.OS === "android" && !props.catalogState.hasReadyEnvironment ? (
+                    <FloatingActionButton
+                      label="Add environment"
+                      icon="plus"
+                      variant="extended"
+                      tone="primary"
+                      onPress={props.onAddConnection}
+                    />
+                  ) : undefined
+                }
+                variant="plain"
+              />
+              {emptyState.loading ? (
+                <View className="mt-4 items-center">
+                  <AppActivityIndicator colorClassName="accent-icon-muted" />
+                </View>
+              ) : null}
+            </View>
           </View>
-        </View>
+        </ScreenContent>
       </View>
     );
   }
 
   const listHeader = Platform.OS === "ios" ? undefined : <HomeTopContentSpacer />;
   const listPaddingLeft =
-    (contentSideInsets?.left ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter;
+    (contentSideInsets?.left ?? 0) + (sidebarSurface ? 8 : 0) + androidListGutter;
   const listPaddingRight =
-    (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter;
+    (contentSideInsets?.right ?? 0) + (sidebarSurface ? 8 : 0) + androidListGutter;
 
-  const waveTail = finckeWaveTail(Platform.OS === "ios" ? insets.top : 0);
+  const waveTail = finckeWaveTail(contentTopInset);
   const v2ListHeader = (
     <>
       {listHeader}
       <FinckeListHeader
-        pullUp={Platform.OS === "ios" ? insets.top : 0}
+        pullUp={contentTopInset}
         bleedLeft={listPaddingLeft}
         bleedRight={listPaddingRight}
         showBrand={Platform.OS === "ios"}
@@ -825,7 +835,7 @@ export function HomeScreen(props: HomeScreenProps) {
         {/* fincke: the projects/activity switch sits at the title band's lower edge, with the
             wave's tail running on under it and the filter chips below that. Native title-row
             buttons would make UIKit dim the wave behind them */}
-        {primaryColumn ? (
+        {sidebarSurface ? (
           <View
             className="flex-row justify-end pr-1"
             style={ocean ? { marginTop: -40 - waveTail, marginBottom: waveTail } : undefined}
@@ -841,7 +851,7 @@ export function HomeScreen(props: HomeScreenProps) {
       </FinckeListHeader>
       {Platform.OS === "ios" && workspace ? (
         <ThreadListFilters
-          gutter={primaryColumn ? 8 : 0}
+          gutter={sidebarSurface ? 8 : 0}
           environments={props.environments}
           projects={pickableProjectGroups(projectScopes).map((scope) => ({
             key: scope.key,
@@ -885,96 +895,88 @@ export function HomeScreen(props: HomeScreenProps) {
 
   if (Platform.OS === "android" && threadListV2Items.length === 0) {
     return (
-      <View className="flex-1 bg-header">
+      <ScreenContent surface="screen">
         <View
-          className="flex-1 items-center justify-center overflow-hidden rounded-t-[28px] bg-screen px-4"
+          className="flex-1 items-center justify-center px-4"
           style={{ paddingBottom: insets.bottom }}
         >
           {v2ListEmpty}
         </View>
-      </View>
+      </ScreenContent>
     );
   }
 
   return withFinckeWaveCleared(
     waveCleared.cleared,
     <View className={containerClassName}>
-      <View
-        className={
-          Platform.OS === "android"
-            ? "flex-1 overflow-hidden rounded-t-[28px] bg-screen"
-            : cn("flex-1", contentBackground)
-        }
-      >
-        <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
-          <GestureDetector gesture={homeScrollGesture}>
-            <AnimatedLegendList
-              itemLayoutAnimation={primaryColumn ? THREAD_SIDEBAR_ROW_LAYOUT : undefined}
-              ref={listRef}
-              onLoad={() => activateVisibleRows(threadListV2Items)}
-              onTouchStart={(event) => trackListTouches(event, true)}
-              onTouchEnd={(event) => trackListTouches(event, false)}
-              onTouchCancel={(event) => trackListTouches(event, false)}
-              renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
-              data={listItems}
-              renderItem={renderV2Item}
-              keyExtractor={v2KeyExtractor}
-              getItemType={(item) => item.type}
-              itemsAreEqual={finckeSidebarItemsAreEqual}
-              estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
-              drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
-              recycleItems
-              extraData={v2ExtraData}
-              ListHeaderComponent={v2ListHeader}
-              ListFooterComponent={
-                !projectsView &&
-                settledShelfExpanded &&
-                threadListV2Layout.hiddenSettledCount > 0 ? (
-                  <ThreadListV2ShowMoreRow
-                    hiddenCount={threadListV2Layout.hiddenSettledCount}
-                    {...(olderSettledShelf.loading
-                      ? { state: "loading" as const }
-                      : olderSettledShelf.failed
-                        ? { state: "failed" as const }
-                        : {})}
-                    onPress={() => {
-                      olderSettledShelf.retry();
-                      showMoreSettled();
-                    }}
-                  />
-                ) : null
-              }
-              ListEmptyComponent={v2ListEmpty}
-              style={{ flex: 1 }}
-              automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
-              // UIKit owns the bar's inset, so a minimizing bar and a resized column move
-              // the list in the same frame as the bar.
-              contentInsetAdjustmentBehavior="automatic"
-              contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
-              // RN scrollTo clamps against raw insets and ignores the automatic bar inset.
-              scrollToOverflowEnabled
-              initialScrollOffset={
-                initialScrollOffset > 0
-                  ? initialScrollOffset - (Platform.OS === "ios" ? insets.top : 0)
-                  : undefined
-              }
-              showsVerticalScrollIndicator={false}
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="handled"
-              {...scrollGateHandlers}
-              scrollEventThrottle={16}
-              contentContainerStyle={{
-                paddingLeft: listPaddingLeft,
-                paddingRight: listPaddingRight,
-                paddingBottom:
-                  Platform.OS === "ios"
-                    ? iosBottomClearance - (columnMetrics?.safeArea.bottom ?? insets.bottom)
-                    : (workspace?.bottomClearance ?? Math.max(insets.bottom, 16) + 88),
-              }}
-            />
-          </GestureDetector>
-        </SwipeableScrollGateProvider>
-      </View>
+      <ScreenContent surface="screen">
+        <View className={cn("flex-1", Platform.OS !== "android" && contentBackground)}>
+          <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
+            <GestureDetector gesture={homeScrollGesture}>
+              <AnimatedLegendList
+                itemLayoutAnimation={sidebarSurface ? THREAD_SIDEBAR_ROW_LAYOUT : undefined}
+                ref={listRef}
+                onLoad={() => activateVisibleRows(threadListV2Items)}
+                onTouchStart={(event) => trackListTouches(event, true)}
+                onTouchEnd={(event) => trackListTouches(event, false)}
+                onTouchCancel={(event) => trackListTouches(event, false)}
+                renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
+                data={listItems}
+                renderItem={renderV2Item}
+                keyExtractor={v2KeyExtractor}
+                getItemType={(item) => item.type}
+                itemsAreEqual={finckeSidebarItemsAreEqual}
+                estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
+                drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
+                recycleItems
+                extraData={v2ExtraData}
+                ListHeaderComponent={v2ListHeader}
+                // Lifted above the rows so an iOS filter menu's dismissal morph is not covered.
+                ListHeaderComponentStyle={{ zIndex: 1 }}
+                ListFooterComponent={
+                  !projectsView &&
+                  settledShelfExpanded &&
+                  threadListV2Layout.hiddenSettledCount > 0 ? (
+                    <ThreadListV2ShowMoreRow
+                      hiddenCount={threadListV2Layout.hiddenSettledCount}
+                      {...(olderSettledShelf.loading
+                        ? { state: "loading" as const }
+                        : olderSettledShelf.failed
+                          ? { state: "failed" as const }
+                          : {})}
+                      onPress={() => {
+                        olderSettledShelf.retry();
+                        showMoreSettled();
+                      }}
+                    />
+                  ) : null
+                }
+                ListEmptyComponent={v2ListEmpty}
+                style={{ flex: 1 }}
+                automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
+                contentInsetAdjustmentBehavior="never"
+                contentInset={Platform.OS === "ios" ? { top: contentTopInset } : undefined}
+                initialScrollOffset={
+                  initialScrollOffset > 0 ? initialScrollOffset - contentTopInset : undefined
+                }
+                showsVerticalScrollIndicator={false}
+                keyboardDismissMode="on-drag"
+                keyboardShouldPersistTaps="handled"
+                {...scrollGateHandlers}
+                scrollEventThrottle={16}
+                contentContainerStyle={{
+                  paddingLeft: listPaddingLeft,
+                  paddingRight: listPaddingRight,
+                  paddingBottom:
+                    Platform.OS === "ios"
+                      ? iosBottomClearance
+                      : (workspace?.bottomClearance ?? Math.max(insets.bottom, 16) + 88),
+                }}
+              />
+            </GestureDetector>
+          </SwipeableScrollGateProvider>
+        </View>
+      </ScreenContent>
     </View>,
   );
 }

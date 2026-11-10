@@ -172,9 +172,8 @@ command to run on the host:
 sudo t3 browser setup
 ```
 
-The server shows the exact line for how you started it, such as
-`sudo npx t3 browser setup`, and keeps your `PATH` when Node is installed only
-for your user. Where `t3` is not on your `PATH`, such as with only the
+The server shows the exact line for how you started it, and keeps your `PATH`
+when you started it with `npx` and Node is installed only for your user. Where `t3` is not on your `PATH`, such as with only the
 desktop app installed, it names the full path of the app's own `t3` instead. It allows Chrome's sandbox with an AppArmor profile and installs
 any missing libraries and system fonts with apt; pages that load without text
 can mean the host has no fonts. It is safe to run again. Without `sudo`, it only
@@ -253,6 +252,9 @@ pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
 management is available through `t3 auth --help`.
 
+When the app connects to more than one environment, choose one at the top of the
+page.
+
 A session with an open connection stays listed after its access credential
 expires.
 
@@ -263,7 +265,7 @@ npx t3 pair --scope orchestration:read --scope filesystem:read
 ```
 
 The selected scopes replace the default permissions. The same option works with
-`npx t3 auth pairing create` and `npx t3 auth session issue`; each command's
+`t3 auth pairing create` and `t3 auth session issue`; each command's
 `--help` lists the available scopes. Without `--scope`, pairing tokens and issued
 bearer sessions get every permission, including managing access.
 A terminal or a full-access agent on the host can reach those as well, so a

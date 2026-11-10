@@ -135,12 +135,14 @@ export interface McpInvocationScope {
   readonly linkedEnvironments?: boolean;
 }
 
+/** A known `title` labels the chip for clients that cannot load this environment's threads. */
 export const threadLinkFor = (
   scope: Pick<McpInvocationScope, "environmentId" | "client">,
   threadId: ThreadId,
+  title?: string,
 ): string => {
   const ref = { environmentId: scope.environmentId, threadId };
-  return formatThreadLink(ref);
+  return formatThreadLink(ref, title);
 };
 
 export class McpInvocationContext extends Context.Service<

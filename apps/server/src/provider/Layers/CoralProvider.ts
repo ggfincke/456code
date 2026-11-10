@@ -226,7 +226,10 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
   const inventory = Option.isSome(configuredInventory)
     ? configuredInventory
     : yield* Effect.gen(function* () {
-        const host = yield* Effect.try(() => normalizeCoralOllamaHost(coralSettings.ollamaHost));
+        const host = yield* Effect.try({
+          try: () => normalizeCoralOllamaHost(coralSettings.ollamaHost),
+          catch: () => ({ _tag: "CoralModelInventoryUnavailable" as const }),
+        });
         const client = yield* HttpClient.HttpClient;
         const response = yield* client
           .get(`${host}/api/tags`)

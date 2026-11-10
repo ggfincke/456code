@@ -10,7 +10,7 @@ import { CONTEXT_CHIP_ICON_SOURCES } from "../lib/contextChipIcons.generated";
 import { FONT_FAMILIES } from "../lib/fontFamilies";
 import { finckeFileIconColor } from "../fincke/file-icon-color";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
-import { contextChipIconSource } from "../lib/contextChipIconSource";
+import { contextChipIconSource, modelChipIcon } from "../lib/contextChipIconSource";
 import { markdownFileIconSource } from "../lib/markdownFileIcons";
 import { markdownLinkIcon } from "../lib/markdownLinkIcons";
 import { useUniwindTheme } from "../lib/useUniwindTheme";
@@ -22,6 +22,7 @@ import type {
 import {
   enrichedContextLinkPresentation,
   enrichedLinkVariantPattern,
+  enrichedModelReference,
   enrichedSkillDisplayName,
   enrichedSkillReference,
   enrichedThreadLinkPresentation,
@@ -69,7 +70,7 @@ export function withChipIcon(
 
 function presentation(
   url: string,
-  props: Pick<SelectableMarkdownTextProps, "linkCustomization" | "skills" | "textStyle">,
+  props: Pick<SelectableMarkdownTextProps, "linkCustomization" | "skills" | "models" | "textStyle">,
   ocean: boolean,
 ): MarkdownLinkCustomization | undefined {
   const link = resolveMarkdownLinkPresentation(url);
@@ -87,6 +88,18 @@ function presentation(
       icon: CONTEXT_CHIP_ICON_SOURCES.skill,
       chip: { accent: contextChipPresentation("skill").accent, tintsIcon: true },
     };
+  const model = enrichedModelReference(url, props.models);
+  if (model) {
+    const icon = modelChipIcon(model);
+    return {
+      label: model.label,
+      icon: icon.source,
+      chip: {
+        accent: icon.accent,
+        tintsIcon: icon.tintsIcon,
+      },
+    };
+  }
   if (link.kind === "file")
     return {
       label: link.label,
@@ -111,7 +124,7 @@ export function useEnrichedLinkVariants(
 ) {
   const { themeId } = useAppearancePreferences();
   const ocean = themeId === "fincke-ocean";
-  const { linkCustomization, skills, textStyle, fileEmbedLabel } = props;
+  const { linkCustomization, skills, models, textStyle, fileEmbedLabel } = props;
   const theme = useUniwindTheme();
   const links = useMemo(() => {
     const byUrl = new Map<string, MarkdownLinkCustomization>();
@@ -127,11 +140,11 @@ export function useEnrichedLinkVariants(
               icon: markdownFileIconSource(fileIcon),
               ...(ocean ? { iconTintColor: finckeFileIconColor(fileIcon) } : {}),
             }
-          : presentation(url, { linkCustomization, skills, textStyle }, ocean);
+          : presentation(url, { linkCustomization, skills, models, textStyle }, ocean);
       if (value) byUrl.set(url, value);
     }
     return byUrl;
-  }, [urls, linkCustomization, ocean, skills, textStyle, fileHrefs, fileEmbedLabel]);
+  }, [urls, linkCustomization, ocean, skills, models, textStyle, fileHrefs, fileEmbedLabel]);
   const chipForegrounds = useMemo(
     () =>
       new Map(

@@ -1,5 +1,5 @@
 import * as Dialog from "../../../components/ui/Dialog";
-import { SheetHeader } from "../../../components/ui/SheetHeader";
+import { cn } from "../../../lib/cn";
 import { useOpenPullRequest } from "../../../native/useOpenPullRequest";
 import {
   type GitActionRequestInput,
@@ -15,17 +15,17 @@ import {
   useNavigation,
   type StaticScreenProps,
 } from "@react-navigation/native";
-import { useEffect, useState } from "react";
-import { Platform, RefreshControl, ScrollView, View } from "react-native";
+import { use, useEffect, useState } from "react";
+import { Platform, RefreshControl, View } from "react-native";
+import { NativeScrollView } from "../../../native/NativeScrollViewMarker";
 
-import { ScreenStack } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { NativeInspectorContent } from "../../../native/NativeInspectorContent";
-import { NativeHeader, NativeScreen } from "../../../native/ThemedScreenStack";
+import { AppBar } from "../../../components/ui/AppBar";
 import { ListRow } from "../../../components/ui/ListRow";
 import { ListSection } from "../../../components/ui/ListSection";
+import { ScreenContent } from "../../../components/ui/ScreenContent";
+import { InspectorSheetContext } from "../../layout/workspace-inspector-sheet";
 import { AppText as Text } from "../../../components/ui/AppText";
-import { nativeHeaderScrollEdgeEffects } from "../../../native/StackHeader";
 import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
@@ -40,13 +40,10 @@ import {
 } from "../LinkedPullRequestList";
 import { useLinkedPullRequestActions } from "../useLinkedPullRequestActions";
 
-const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
-
 type GitOverviewSheetProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
 }> & {
-  readonly headerInset?: number;
   readonly presentation?: "sheet" | "inspector";
 };
 
@@ -67,6 +64,9 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const insets = useSafeAreaInsets();
   const presentation = props.presentation ?? "sheet";
   const isInspector = presentation === "inspector";
+  const closeInspectorSheet = use(InspectorSheetContext);
+  const presentRoute = (present: () => void) =>
+    closeInspectorSheet ? closeInspectorSheet(present) : present();
   const environmentId = EnvironmentId.make(props.route.params.environmentId);
   const threadId = ThreadId.make(props.route.params.threadId);
   const { selectedThread, selectedThreadProject, selectedEnvironmentRuntime } =
@@ -153,19 +153,23 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       !input.featureBranch &&
       requiresDefaultBranchConfirmation(input.action, isDefaultRef)
     ) {
-      navigation.navigate("GitConfirm", {
-        environmentId: String(environmentId),
-        threadId: String(threadId),
-        confirmAction: confirmableAction,
-        branchName,
-        includesCommit: String(input.action === "commit_push" || input.action === "commit_push_pr"),
-      });
+      presentRoute(() =>
+        navigation.navigate("GitConfirm", {
+          environmentId: String(environmentId),
+          threadId: String(threadId),
+          confirmAction: confirmableAction,
+          branchName,
+          includesCommit: String(
+            input.action === "commit_push" || input.action === "commit_push_pr",
+          ),
+        }),
+      );
       return;
     }
 
-    if (!isInspector) {
-      navigation.goBack();
-    }
+    // Close a sheet so the thread shows the action's progress.
+    if (!isInspector) navigation.goBack();
+    else closeInspectorSheet?.();
     await gitActions.onRunSelectedThreadGitAction(input);
   };
 
@@ -177,10 +181,12 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     }
     if (!canWriteSourceControl) return;
     if (item.dialogAction === "commit") {
-      navigation.navigate("GitCommit", {
-        environmentId: String(environmentId),
-        threadId: String(threadId),
-      });
+      presentRoute(() =>
+        navigation.navigate("GitCommit", {
+          environmentId: String(environmentId),
+          threadId: String(threadId),
+        }),
+      );
       return;
     }
     if (item.dialogAction === "push") {
@@ -222,11 +228,11 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   };
 
   const content = (
-    <ScrollView
+    <NativeScrollView
       nestedScrollEnabled
       alwaysBounceVertical
       className="flex-1 android:bg-sheet-solid ios:bg-screen"
-      contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+      contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
       contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
       contentContainerStyle={{
@@ -235,9 +241,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         gap: Platform.OS === "android" ? 8 : 14,
       }}
       refreshControl={
-        Platform.OS === "ios" || isInspector ? (
-          <RefreshControl refreshing={isRefreshing} onRefresh={() => void handleRefresh()} />
-        ) : undefined
+        <RefreshControl refreshing={isRefreshing} onRefresh={() => void handleRefresh()} />
       }
     >
       <ListSection>
@@ -271,11 +275,13 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           disabled={busy || !isRepo}
           onPress={() => {
             const params = { environmentId, threadId };
-            navigation.dispatch(
-              presentation === "sheet"
-                ? StackActions.replace("ThreadReview", params)
-                : CommonActions.navigate("ThreadReview", params),
-            );
+            if (presentation === "sheet") {
+              navigation.dispatch(StackActions.replace("ThreadReview", params));
+            } else {
+              presentRoute(() =>
+                navigation.dispatch(CommonActions.navigate("ThreadReview", params)),
+              );
+            }
           }}
         />
         <ListRow
@@ -288,10 +294,12 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           }
           disabled={busy || !isRepo}
           onPress={() =>
-            navigation.navigate("GitBranches", {
-              environmentId: String(environmentId),
-              threadId: String(threadId),
-            })
+            presentRoute(() =>
+              navigation.navigate("GitBranches", {
+                environmentId: String(environmentId),
+                threadId: String(threadId),
+              }),
+            )
           }
         />
         {linkedPrActions.canLink ? (
@@ -326,49 +334,28 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           </Text>
         </ListSection>
       ) : null}
-    </ScrollView>
+    </NativeScrollView>
   );
 
-  if (isInspector && Platform.OS === "ios") {
-    return (
-      <View collapsable={false} className="flex-1 border-l border-border bg-sheet">
-        <ScreenStack style={{ flex: 1 }}>
-          <NativeScreen
-            activityState={2}
-            enabled
-            isNativeStack
-            screenId="thread-git-inspector-native"
-            scrollEdgeEffects={HEADER_SCROLL_EDGE_EFFECTS}
-            className="flex-1 bg-sheet"
-          >
-            <NativeInspectorContent>{content}</NativeInspectorContent>
-            <NativeHeader
-              backgroundColor="rgba(0,0,0,0)"
-              tintColorClassName="accent-foreground"
-              hideBackButton
-              hideShadow={false}
-              navigationItemStyle="editor"
-              title={currentBranchLabel}
-              titleColorClassName="accent-foreground"
-              titleFontSize={17}
-              titleFontWeight="700"
-              translucent
-            />
-          </NativeScreen>
-        </ScreenStack>
-      </View>
-    );
-  }
+  const refresh = {
+    accessibilityLabel: "Refresh repository status",
+    disabled: busy || isRefreshing,
+    onPress: () => void handleRefresh(),
+  };
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
-      <SheetHeader
-        presentation="native"
+    <View
+      collapsable={false}
+      className={cn("flex-1 android:bg-header", isInspector ? "ios:bg-screen" : "ios:bg-sheet")}
+    >
+      <AppBar
         title={currentBranchLabel}
         subtitle={currentStatusSummary}
-        onClose={() => navigation.goBack()}
+        hideBottomBorder={!isInspector}
+        onClose={isInspector ? undefined : () => navigation.goBack()}
+        refresh={refresh}
       />
-      {content}
+      <ScreenContent insetHorizontal={isInspector ? true : undefined}>{content}</ScreenContent>
     </View>
   );
 }

@@ -6,6 +6,23 @@ check which providers and models are available. This covers Claude Code or
 Codex in your own terminal, ChatGPT, and bots that support MCP. Each agent signs
 in once, and you choose what it may do.
 
+## Add 456code to an assistant app
+
+Open the command palette (`Cmd/Ctrl+K`) and choose **Use 456code in another
+app (MCP)**, or use the button in **Settings → Sharing & access**. Pick the
+app, choose what it may do, and follow the step for that app. Assistants like
+Poke and Claude run in the cloud, so they can only reach an environment you
+connect to over an `https` address they can reach, such as Tailscale Funnel.
+The option is unavailable otherwise.
+
+When the app opens the sign-in page, choose **Get code** in the wizard and paste
+the code there. A code works once, for 5 minutes, and approves only the level
+you chose.
+
+For an app that is not listed, choose **Something else…**, add a remote MCP
+server with OAuth in that app, and paste the URL. Apps that require their own
+client ID cannot connect.
+
 ## Get the MCP URL
 
 In **Settings → Environments**, open a saved environment's menu and choose
@@ -19,8 +36,8 @@ https://<environment-address>/mcp
 The copied URL uses the route this device is connected over, so an agent on the
 same device can reach it.
 
-- **An agent on your own computers** can use `localhost` on the host, T3
-  Connect, or any `https` address, such as
+- **An agent on your own computers** can use `localhost` on the host or any
+  `https` address, such as
   [Tailscale HTTPS](./remote-access.md#tailscale-https). Signing in sends the
   agent's credentials to the environment, and agents only do that over `https`
   or to `localhost`. A plain-`http` LAN or Tailscale address, like
@@ -40,14 +57,17 @@ The page names the agent and where its access goes:
 - For a hosted agent, approval goes to that service, such as `chatgpt.com`.
   Anyone who runs that service gets the access.
 
-Only approve a sign-in you just started. To approve, enter a pairing code from
-**Settings → Sharing & access** or from `t3 auth pairing create` on the host. A
-browser already signed in to the environment with permission to manage access
-can approve without a code.
+Only approve a sign-in you just started. To approve, enter a code from
+**Use 456code in another app (MCP)**, **Settings → Sharing & access**, or
+`t3 auth pairing create` on the host. A browser already signed in to the
+environment with permission to manage access can approve without a code.
 
-Then choose what the agent may do:
+A code from **Use 456code in another app (MCP)** already carries the level you
+picked there. With another code, choose what the agent may do here: **Auto** is
+selected by default, or the closest lower mode allowed by your organization’s
+policy. Approving without a code starts at **Read only**:
 
-- **Read only** is the default. The agent can read projects and threads and see
+- **Read only** lets the agent read projects and threads and see
   the available providers and models. It cannot change anything.
 - **Supervised** through **Full access** also let it start, message and stop
   threads in every project. A thread it starts or steers cannot run with more

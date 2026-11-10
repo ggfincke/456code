@@ -5,7 +5,6 @@ import { NATIVE_WORKSPACE_COLUMNS_SUPPORTED } from "../native/NativeWorkspaceCol
 import { JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono/700Bold";
 import Constants from "expo-constants";
 import { useFonts } from "expo-font";
-import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import { useState } from "react";
 import { Platform, Text as RNText, View } from "react-native";
 
@@ -120,19 +119,4 @@ export function CompactBrandTitle(
   ) : (
     title
   );
-}
-
-function renderCompactBrandTitle() {
-  return <CompactBrandTitle allowFontScaling={Platform.OS === "ios"} />;
-}
-
-export function getCompactBrandHeaderOptions(
-  fallbackTitleStyle?: NativeStackNavigationOptions["headerTitleStyle"],
-): NativeStackNavigationOptions {
-  return {
-    headerTitle: renderCompactBrandTitle,
-    headerTitleStyle: fallbackTitleStyle,
-    title: "Threads",
-    unstable_headerLeftItems: undefined,
-  };
 }

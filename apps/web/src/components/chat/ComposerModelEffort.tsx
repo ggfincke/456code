@@ -1,6 +1,6 @@
 import { selectableProviderOptionChoices } from "@t3tools/client-runtime/model-traits";
 import type { ProviderOptionDescriptor, RuntimeMode } from "@t3tools/contracts";
-import { ChevronUpIcon } from "lucide-react";
+import { ChevronUpIcon, WorkflowIcon } from "lucide-react";
 import { useRef } from "react";
 
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -13,22 +13,22 @@ import { type TraitsSelectionInput, useTraitsSelection } from "./TraitsPicker";
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 type BooleanDescriptor = Extract<ProviderOptionDescriptor, { type: "boolean" }>;
 
-/** Codex service tiers and Claude's Fast mode share the footer's speed control. */
+/** Service tiers, Claude's Fast mode, and Ultracode sit in the footer, not the column. */
 function splitSpeed(
-  provider: TraitsSelectionInput["provider"],
   selects: ReadonlyArray<SelectDescriptor>,
   toggles: ReadonlyArray<BooleanDescriptor>,
 ) {
-  const speedSelect =
-    provider === "codex"
-      ? (selects.find((descriptor) => descriptor.id === "serviceTier") ?? null)
-      : null;
+  const speedSelect = selects.find((descriptor) => descriptor.id === "serviceTier") ?? null;
   const fastToggle = toggles.find((descriptor) => descriptor.id === "fastMode") ?? null;
+  const ultracodeToggle = toggles.find((descriptor) => descriptor.id === "ultracode") ?? null;
   return {
     speedSelect,
     fastToggle,
+    ultracodeToggle,
     columnSelects: selects.filter((descriptor) => descriptor !== speedSelect),
-    columnToggles: toggles.filter((descriptor) => descriptor !== fastToggle),
+    columnToggles: toggles.filter(
+      (descriptor) => descriptor !== fastToggle && descriptor !== ultracodeToggle,
+    ),
   };
 }
 
@@ -69,7 +69,6 @@ function SpeedSegment(props: {
 function SpeedControl(props: { traits: TraitsSelectionInput }) {
   const traits = useTraitsSelection(props.traits);
   const { speedSelect, fastToggle } = splitSpeed(
-    props.traits.provider,
     traits.selectDescriptors,
     traits.booleanDescriptors,
   );
@@ -100,6 +99,27 @@ function SpeedControl(props: { traits: TraitsSelectionInput }) {
               />
             ))
           : null}
+    </div>
+  );
+}
+
+function UltracodeControl(props: { traits: TraitsSelectionInput }) {
+  const traits = useTraitsSelection(props.traits);
+  const { ultracodeToggle } = splitSpeed(traits.selectDescriptors, traits.booleanDescriptors);
+  if (traits.modelIsUnavailable || !ultracodeToggle) return null;
+  const on = ultracodeToggle.currentValue === true;
+  return (
+    <div className="flex rounded-lg bg-input/40 p-0.5">
+      <button
+        type="button"
+        aria-pressed={on}
+        data-checked={on || undefined}
+        className={FOOTER_SEGMENT}
+        onClick={() => traits.changeBoolean(ultracodeToggle.id, !on)}
+      >
+        <WorkflowIcon aria-hidden="true" className="size-3" />
+        {ultracodeToggle.label}
+      </button>
     </div>
   );
 }
@@ -156,6 +176,7 @@ export function ComposerPickerFooter(props: {
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-border/70 bg-muted/40 px-3 py-2">
       {props.traits ? <SpeedControl traits={props.traits} /> : null}
+      {props.traits ? <UltracodeControl traits={props.traits} /> : null}
       <PermissionsMenu
         runtimeMode={props.runtimeMode}
         options={props.runtimeModeOptions}

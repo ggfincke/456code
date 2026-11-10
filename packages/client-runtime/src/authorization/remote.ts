@@ -12,6 +12,7 @@ import {
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import {
   executeEnvironmentHttpRequest,
@@ -23,6 +24,7 @@ import {
 export type RemoteEnvironmentAuthError = RemoteEnvironmentRequestError;
 
 const DEFAULT_REMOTE_REQUEST_TIMEOUT_MS = 10_000;
+const isUndeclaredStatusError = Schema.is(RemoteEnvironmentAuthUndeclaredStatusError);
 
 const clientMetadataTokenExchangeFields = (
   clientMetadata: AuthClientPresentationMetadata | undefined,
@@ -114,8 +116,7 @@ const issueWebSocketTicketWithFallback = <E, R>(
     ? issue(use)
     : issue(use).pipe(
         Effect.catchIf(
-          (error) =>
-            error instanceof RemoteEnvironmentAuthUndeclaredStatusError && error.status === 404,
+          (error) => isUndeclaredStatusError(error) && error.status === 404,
           () => issue(undefined),
         ),
       );

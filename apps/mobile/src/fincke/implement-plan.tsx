@@ -15,15 +15,7 @@ import {
   type ScopedThreadRef,
   type ServerConfig,
 } from "@t3tools/contracts";
-import {
-  createContext,
-  use,
-  useCallback,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { createContext, use, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/Button";
 import * as Dialog from "../components/ui/Dialog";
@@ -50,22 +42,10 @@ interface ImplementPlanInput {
   readonly busy: boolean;
   readonly awaitingUserInput: boolean;
   readonly onUpdateInteractionMode: ((mode: ProviderInteractionMode) => void) | undefined;
-  // the feed follows the new turn once it's queued
-  readonly feedRef: RefObject<{ resetEndFollow(): void } | null>;
   readonly onSent: () => void;
 }
 
 const ImplementPlanContext = createContext<ImplementPlanInput | null>(null);
-
-// folds the feed's follow reset into onSent here, so the screen never reads its ref in render
-export function useImplementPlanInput(input: ImplementPlanInput): ImplementPlanInput {
-  const { feedRef, onSent } = input;
-  const handleSent = useCallback(() => {
-    onSent();
-    feedRef.current?.resetEndFollow();
-  }, [feedRef, onSent]);
-  return { ...input, onSent: handleSent };
-}
 
 // wraps a screen's returned tree as a call so the hook doesn't re-indent upstream's JSX
 export function withImplementPlan(input: ImplementPlanInput, children: ReactNode) {

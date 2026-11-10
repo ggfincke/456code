@@ -17,8 +17,8 @@
     }
   },
   "scripts": {
-    "build": "node scripts/cleanDist.mjs && node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json",
-    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit",
+    "build": "node scripts/cleanDist.mjs && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
     "test": "vp test run"
   },
   "dependencies": {

@@ -11,21 +11,21 @@ import { Atom } from "effect/reactivity";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useEffect, useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from "react-native-gesture-handler/ReanimatedSwipeable";
-import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
+import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "../../components/ui/Button";
+import { SheetHeader } from "../../components/ui/SheetHeader";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
+import { ScreenContent } from "../../components/ui/ScreenContent";
 import { scopedThreadKey } from "../../lib/scopedEntities";
-import { useUniwindTheme } from "../../lib/useUniwindTheme";
-import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { useAssetUrl } from "../../state/assets";
 import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
@@ -40,7 +40,6 @@ import {
   resolveThreadQueueRowControls,
 } from "./threadQueueControlPresentation";
 
-const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 const REMOVE_ACTION_WIDTH = 76;
 const THUMBNAIL_LIMIT = 3;
 const EMPTY_QUEUED_COUNT_ATOM = Atom.make(0).pipe(
@@ -92,7 +91,7 @@ function QueuedRunSender(props: {
             label: senderShell?.title.trim() || "Agent",
           }
         : attribution === "t3code"
-          ? { icon: null, label: "Sent by T3 Code" }
+          ? { icon: null, label: "Sent by 456code" }
           : null;
   if (sender === null) return null;
   return (
@@ -117,10 +116,10 @@ function QueuedRunSender(props: {
 }
 
 export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
+  const theme = useUniwindTheme();
   const target = route.params;
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const theme = useUniwindTheme();
   const workflow = useThreadQueueWorkflow(target);
   const threadKey = scopedThreadKey(target.environmentId, target.threadId);
   const editing = useQueuedRunEdit(threadKey);
@@ -202,7 +201,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
       nestedScrollEnabled
       className="flex-1"
       // UIKit must inset content beneath the floating translucent iOS header.
-      contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+      contentInsetAdjustmentBehavior="automatic"
       contentContainerClassName="px-5 pb-6"
       contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
     >
@@ -234,7 +233,10 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
       {queuedRuns.map(({ run, text, attachments, context, message }, index) => {
         const controls = resolveThreadQueueRowControls({
           busy: busyRunId !== null,
-          canPromoteToSteer: workflow?.canPromoteToSteer ?? false,
+          // A fresh message starts its own turn: it may skip compaction, but not steer into a turn.
+          canPromoteToSteer:
+            (workflow?.canPromoteToSteer ?? false) &&
+            (run.freshContext !== true || workflow?.promoteSkipsCompaction === true),
           canSendNow: workflow?.canSendNow ?? false,
           editBlocked: editBlockedReason !== null,
           isEditing: editing?.runId === run.id,
@@ -262,7 +264,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                             id: "steer",
                             title: "Send now",
                             attributes: { disabled: !controls.canSend },
-                            image: Platform.OS === "ios" ? "arrow.up" : "arrow_upward",
+                            image: "arrow.up",
                           },
                         ]
                       : []),
@@ -270,7 +272,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                       id: "edit",
                       title: "Edit",
                       attributes: { disabled: !controls.canEdit },
-                      image: Platform.OS === "ios" ? "pencil" : "edit",
+                      image: "pencil",
                     },
                     {
                       id: "remove",
@@ -354,33 +356,11 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     </ScrollView>
   );
 
-  // Plain formSheets lack stack headers; host one in a nested native stack.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View collapsable={false} className="flex-1 bg-sheet">
-        <ScreenStack style={{ flex: 1 }}>
-          <Screen
-            activityState={2}
-            enabled
-            isNativeStack
-            screenId="thread-queue-sheet-native"
-            scrollEdgeEffects={HEADER_SCROLL_EDGE_EFFECTS}
-            style={{ backgroundColor: theme["--color-sheet"], flex: 1 }}
-          >
-            {content}
-            <ScreenStackHeaderConfig
-              backgroundColor="rgba(0,0,0,0)"
-              color={theme["--color-foreground"]}
-              hideBackButton
-              hideShadow={false}
-              title="Queued"
-              titleColor={theme["--color-foreground"]}
-              titleFontSize={18}
-              titleFontWeight="800"
-              translucent
-            />
-          </Screen>
-        </ScreenStack>
+        <SheetHeader title="Queued" onClose={() => navigation.goBack()} />
+        <ScreenContent>{content}</ScreenContent>
       </View>
     </GestureHandlerRootView>
   );

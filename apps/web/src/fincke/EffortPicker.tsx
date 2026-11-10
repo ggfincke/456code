@@ -192,7 +192,6 @@ export const EffortPicker = memo(function EffortPicker(
   );
 
   const { label: triggerLabel } = buildTraitsTriggerDisplay({
-    provider,
     descriptors: selected.descriptors,
     primarySelectDescriptorId: selected.primarySelectDescriptor?.id ?? null,
     ultrathinkPromptControlled: selected.ultrathinkPromptControlled,

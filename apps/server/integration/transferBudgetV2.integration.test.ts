@@ -29,6 +29,7 @@ import {
   type OrchestrationV2ShellStreamItem,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -454,7 +455,9 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
     }
     const fs = yield* FileSystem.FileSystem;
     const report = formatTransferBudgetReport(runs);
-    const reportPath = process.env.T3CODE_TRANSFER_BUDGET_REPORT_PATH;
+    const reportPath = yield* Config.String("T3CODE_TRANSFER_BUDGET_REPORT_PATH").pipe(
+      Config.withDefault(""),
+    );
     if (reportPath) yield* fs.writeFileString(reportPath, report);
     yield* Effect.log(report);
     assert.deepEqual(transferBudgetViolations(runs), []);

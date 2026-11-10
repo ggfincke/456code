@@ -1,6 +1,8 @@
 // packages/client-runtime/src/state/environmentHttpAuth.ts
 // authenticates environment requests without sharing upstream traces
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import {
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
@@ -8,10 +10,12 @@ import {
 import { FetchHttpClient, type HttpMethod } from "effect/http";
 
 import type { PreparedConnection, PreparedHttpAuthorization } from "../connection/model.ts";
+import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
   makeEnvironmentHttpApiUrlBuilder,
+  RemoteEnvironmentAuthFetchError,
   RemoteEnvironmentAuthTimeoutError,
   type RemoteEnvironmentRequestError,
 } from "../rpc/http.ts";
@@ -35,13 +39,19 @@ export function withOrchestrationProtocolHeader(
  * Cookie-authenticated environments need credentialed mode for cross-origin fetches; bearer uses headers.
  * `FetchHttpClient` reads `RequestInit` from the fiber context per request.
  */
-const withEnvironmentCredentials = <A, E, R>(
+const withEnvironmentRequestInit = <A, E, R>(
   authorization: PreparedHttpAuthorization | null,
+  requestInit: RequestInit | undefined,
   request: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  authorization === null
-    ? request.pipe(Effect.provideService(FetchHttpClient.RequestInit, { credentials: "include" }))
-    : request;
+): Effect.Effect<A, E, R> => {
+  if (authorization !== null && requestInit === undefined) return request;
+  return request.pipe(
+    Effect.provideService(FetchHttpClient.RequestInit, {
+      ...requestInit,
+      ...(authorization === null ? { credentials: "include" as const } : {}),
+    }),
+  );
+};
 
 const environmentAuthHeaders = (
   authorization: PreparedHttpAuthorization | null,
@@ -61,6 +71,8 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   /** The request URL, from the group's contract URL builder. */
   readonly url: (urls: ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>[Group]) => string;
   readonly timeoutMs: number;
+  /** Extra fetch options, such as refusing redirects for credentialed audio uploads. */
+  readonly requestInit?: RequestInit;
   readonly group: Group;
   readonly request: (input: {
     readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
@@ -78,14 +90,38 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   return yield* executeEnvironmentHttpRequest(
     requestUrl,
     input.timeoutMs,
-    withEnvironmentCredentials(
+    withEnvironmentRequestInit(
       authorization,
+      input.requestInit,
       input.request({ client, headers: environmentAuthHeaders(authorization) }),
     ),
   ).pipe(
     Effect.timeoutOrElse({
       duration: input.timeoutMs,
-      orElse: () => Effect.fail(new RemoteEnvironmentAuthTimeoutError(requestUrl, input.timeoutMs)),
+      orElse: () =>
+        Effect.fail(
+          new RemoteEnvironmentAuthTimeoutError({ requestUrl, timeoutMs: input.timeoutMs }),
+        ),
     }),
   );
+});
+
+/** Sends the request with this client's own credentials on the supervised environment. */
+export const executeConnectedEnvironmentHttpRequest = Effect.fn(
+  "clientRuntime.state.executeConnectedEnvironmentHttpRequest",
+)(function* <Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1], A, E, R>(
+  input: Omit<
+    Parameters<typeof executeAuthenticatedEnvironmentHttpRequest<Group, A, E, R>>[0],
+    "prepared"
+  >,
+) {
+  const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+  const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+  if (Option.isNone(prepared)) {
+    return yield* new RemoteEnvironmentAuthFetchError({
+      message: "The environment is not connected.",
+      cause: supervisor.target._tag,
+    });
+  }
+  return yield* executeAuthenticatedEnvironmentHttpRequest({ ...input, prepared: prepared.value });
 });
