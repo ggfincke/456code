@@ -1,7 +1,6 @@
 // apps/mobile/src/features/home/HomeScreen.tsx
 // adaptive native thread list and workspace navigation
 import { useContentTopInset } from "../../components/ui/useBarInset";
-import { usePaneRole } from "../../components/ui/Pane";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useActiveNewTask } from "../../state/active-new-task";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
@@ -237,7 +236,8 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
   const primaryColumn = use(NativePrimaryColumnContext);
   const { themeId } = useAppearancePreferences();
   const waveCleared = use(FinckeWaveClearedContext);
-  const sidebarSurface = usePaneRole() === "sidebar" && primaryColumn !== null;
+  // fincke: any primary column (the folded Duo too) gets the sidebar rows, toggle and backdrop
+  const sidebarSurface = primaryColumn !== null;
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
   // fincke: the ocean wave sits behind the list's header in every layout (compact, Duo
   // panes, sidebar), so UIKit's edge dimming would cut a hard line through it. once the
@@ -276,7 +276,8 @@ export function HomeScreen(props: HomeScreenProps) {
   const workspace = useWorkspaceTabs();
   const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
   const primaryColumn = use(NativePrimaryColumnContext);
-  const sidebarSurface = usePaneRole() === "sidebar" && primaryColumn !== null;
+  // fincke: any primary column (the folded Duo too) gets the sidebar rows, toggle and backdrop
+  const sidebarSurface = primaryColumn !== null;
   const contentBackground = sidebarSurface ? "bg-drawer" : "bg-screen";
   const containerClassName = cn(
     "flex-1",
