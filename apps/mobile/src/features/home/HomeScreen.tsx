@@ -748,6 +748,8 @@ export function HomeScreen(props: HomeScreenProps) {
     workingShelfEnabled,
     // recycled rows compare equal across the two views, so the view must re-render them
     projectsView,
+    // the list stays mounted across a Duo fold, so rows must re-render when the pane changes
+    sidebarSurface,
   };
 
   const hasAnyThreads =
