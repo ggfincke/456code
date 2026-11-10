@@ -92,7 +92,9 @@ import { useStableCallback } from "../hooks/useStableCallback";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseProjectDraftUploads } from "../lib/composerDraftUploads";
+import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { isMacPlatform } from "../lib/utils";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { makeWorkspaceFileDropHandlers } from "../components/chat/workspaceFileDrop";
@@ -929,6 +931,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       render={
                         <span
                           aria-label={jumpLabel}
+                          data-jump-hint
                           className="inline-flex h-5 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-3xs font-medium tracking-tight text-foreground shadow-sm"
                         />
                       }
@@ -3389,6 +3392,9 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  const routePreviewOpen = useRightPanelStore(
+    (state) => selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview",
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
@@ -3519,6 +3525,8 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
   const sidebarShortcutContext = {
     terminalFocus: terminalFocused,
     terminalOpen: routeTerminalOpen,
+    previewFocus: isPreviewFocused(),
+    previewOpen: routePreviewOpen,
     modelPickerOpen: isModelPickerOpen(),
   };
   const shouldShowThreadJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
@@ -3539,6 +3547,8 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
     const shortcutContext = {
       terminalFocus: isTerminalFocused(),
       terminalOpen: routeTerminalOpen,
+      previewFocus: isPreviewFocused(),
+      previewOpen: routePreviewOpen,
       modelPickerOpen: isModelPickerOpen(),
     };
 

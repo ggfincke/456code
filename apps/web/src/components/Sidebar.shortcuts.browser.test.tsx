@@ -46,7 +46,8 @@ vi.mock(import("~/state/server"), async (original) => {
 });
 
 it("leaves thread shortcuts and their hints to the preview when their rules exclude it", async () => {
-  const [first, second] = [threadWithHistory("thread-a", 1), threadWithHistory("thread-b", 1)];
+  // The projects sidebar lists the newer thread first, so "next" walks from thread-b to thread-a.
+  const [second, first] = [threadWithHistory("thread-a", 1), threadWithHistory("thread-b", 1)];
   using _environment = installFakeEnvironment([first, second]);
   using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
   __setClientSettingsForTests({
