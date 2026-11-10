@@ -230,8 +230,9 @@ it.effect(
         hostedAppUrl: "https://t3.example.com",
       });
       expect(aboveCeiling.launched[0]?.runtimeMode).toBe("auto-accept-edits");
+      // 456code has no hosted app, so a hosted origin still yields a titled t3-thread link.
       expect(aboveCeiling.result).toMatchObject({
-        link: `<t3-thread://v2/environment/${aboveCeiling.launched[0]?.threadId}>`,
+        link: `[Fix](t3-thread://v2/environment/${aboveCeiling.launched[0]?.threadId})`,
       });
 
       const requested = yield* launchWith("full-access", "approval-required", {
