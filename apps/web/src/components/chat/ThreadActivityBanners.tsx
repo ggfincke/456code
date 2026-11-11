@@ -31,6 +31,7 @@ import {
 import { Fragment } from "react";
 
 import { tickTextContent } from "~/lib/tickTextContent";
+import { BackgroundWorkDetails } from "./BackgroundWorkDetails";
 import { Button, InlineButton } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
@@ -172,6 +173,7 @@ export function runStopNowItem(input: {
 
 /** Background commands and subagents, for the end of the timeline. */
 export function backgroundWorkNowItem(input: {
+  readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly tasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>;
   readonly turnItems: ThreadStructure["turnItems"];
@@ -228,10 +230,19 @@ export function backgroundWorkNowItem(input: {
             );
           }),
     actions: (
-      <InlineButton disabled={input.stopDisabled} onClick={() => void input.onStop()}>
-        <FinckeBackgroundWorkStopIcon />
-        {input.stopping ? "Stopping..." : "Stop"}
-      </InlineButton>
+      <>
+        <BackgroundWorkDetails
+          environmentId={input.environmentId}
+          threadId={input.threadId}
+          tasks={input.tasks}
+          turnItems={input.turnItems}
+          onOpenThread={onOpenThread}
+        />
+        <InlineButton disabled={input.stopDisabled} onClick={() => void input.onStop()}>
+          <FinckeBackgroundWorkStopIcon />
+          {input.stopping ? "Stopping..." : "Stop"}
+        </InlineButton>
+      </>
     ),
   };
 }

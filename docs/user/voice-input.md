@@ -21,7 +21,7 @@ authenticated connection, transcribed there, and discarded. The choice is saved
 on this device only, so every computer and browser you use asks for it once.
 Set it back to **Off** at any time; a recording in progress is discarded.
 
-If the chosen environment goes offline, voice input waits for it. T3 Code never
+If the chosen environment goes offline, voice input waits for it. 456code never
 substitutes another environment.
 
 For cloud dictation, choose **OpenAI** or **Grok Voice Transcribe** via the environment
@@ -54,6 +54,16 @@ isn’t already selected. **Test model** lets you try it without sending a messa
 If you use the composer microphone before a model is installed, it offers to download one.
 The recommendation uses your Voice language, or your system’s preferred languages with **Auto-detect**.
 
+If another app already downloaded one of these models, you don’t need a second copy.
+**Download** first looks in Handy’s model folder and the Hugging Face cache on that
+environment and uses a copy it finds there instead of downloading. For a copy anywhere
+else, on web or desktop, paste the path of the model file or its folder under the model
+list and choose **Use existing**. The path is on the environment
+that transcribes, not on the device you are using. 456code checks that the file is exactly a
+model from its list and then uses it in place. Removing the model in 456code leaves your file
+alone; if the other app deletes it, download or link the model again. Files in another
+format, such as Core ML, ONNX, or MLX builds of the same model, can’t be used.
+
 Select the languages you dictate in to compare models that support all of them.
 Accuracy shows how often the model got words or characters wrong in each
 language; speed is the time to transcribe 30 seconds on a reference GPU. Choose
@@ -80,7 +90,7 @@ the other editors, Save, Comment, Reply, Submit review, or Attach works the
 same way, and the shortcut targets the editor that has focus, or the composer
 when none does. In the desktop browser's annotation editor, the microphone and
 the shortcut work while the page has focus; the page you are annotating never
-sees the recording, which runs in T3 Code itself.
+sees the recording, which runs in 456code itself.
 
 **Dictation shortcut** in Voice settings picks how the keybinding behaves:
 **Auto** tap-toggles or records while held, **Hold** records only while the keys

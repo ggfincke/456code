@@ -89,7 +89,6 @@ import { isDesktopLocalConnectionTarget, isWslConnectionTarget } from "../connec
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";
 import { useStableCallback } from "../hooks/useStableCallback";
-import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseProjectDraftUploads } from "../lib/composerDraftUploads";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -125,13 +124,11 @@ import {
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
-  shouldShowThreadJumpHintsForModifiers,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
 import { isModelPickerOpen } from "../modelPickerVisibility";
-import { useShortcutModifierState } from "../shortcutModifierState";
 import { ensureLocalApi, readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread, useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -3407,8 +3404,6 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const platform = navigator.platform;
-  const shortcutModifiers = useShortcutModifierState();
-  const terminalFocused = useTerminalFocus();
   const {
     projectsLength,
     orderedProjects,
@@ -3522,22 +3517,7 @@ export default function LegacySidebar({ routeReveal }: { routeReveal: SidebarRou
     terminalOpen: routeTerminalOpen,
     threadJumpCommandByKey,
   });
-  const sidebarShortcutContext = {
-    terminalFocus: terminalFocused,
-    terminalOpen: routeTerminalOpen,
-    previewFocus: isPreviewFocused(),
-    previewOpen: routePreviewOpen,
-    modelPickerOpen: isModelPickerOpen(),
-  };
-  const shouldShowThreadJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    {
-      platform,
-      context: sidebarShortcutContext,
-    },
-  );
-  const showThreadJumpHints = useThreadJumpHintsVisible(shouldShowThreadJumpHintsNow);
+  const showThreadJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);
   const visibleThreadJumpLabelByKey = showThreadJumpHints
     ? threadJumpLabelByKey
     : EMPTY_THREAD_JUMP_LABELS;

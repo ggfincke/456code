@@ -1,3 +1,5 @@
+import { isClientHostEnvironment } from "./clientHostEnvironment";
+import { PrimaryConnectionTarget } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
@@ -38,4 +40,24 @@ describe("themeEnvironmentIdAtom", () => {
     expect(themeEnvironmentId({ primary: null, host: "service", catalog: [REMOTE] })).toBeNull();
     expect(themeEnvironmentId({ primary: null, host: null, catalog: [REMOTE] })).toBeNull();
   });
+});
+
+it("recognizes the desktop host service and direct browser loopback, excluding remote primaries", () => {
+  const target = (httpBaseUrl: string) =>
+    new PrimaryConnectionTarget({
+      environmentId: PRIMARY,
+      label: "Local",
+      httpBaseUrl,
+      wsBaseUrl: "ws://localhost/ws",
+    });
+  expect(isClientHostEnvironment(SERVICE, "service", null, true)).toBe(true);
+  expect(isClientHostEnvironment(REMOTE, "service", target("https://remote.example"), false)).toBe(
+    false,
+  );
+  expect(isClientHostEnvironment(PRIMARY, null, target("http://localhost:3000"), false)).toBe(true);
+  expect(isClientHostEnvironment(PRIMARY, null, target("http://127.0.0.1:3000"), false)).toBe(true);
+  expect(isClientHostEnvironment(PRIMARY, null, target("https://remote.example"), true)).toBe(
+    false,
+  );
+  expect(isClientHostEnvironment(REMOTE, null, null, true)).toBe(false);
 });
