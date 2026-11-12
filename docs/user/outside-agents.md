@@ -1,6 +1,6 @@
 # Outside agents
 
-Agents that T3 Code did not start can work with an environment through its MCP
+Agents that 456code did not start can work with an environment through its MCP
 server. They can read projects and threads, start and message threads, and
 check which providers and models are available. This covers Claude Code or
 Codex in your own terminal, ChatGPT, and bots that support MCP. Each agent signs
@@ -15,9 +15,9 @@ Poke and Claude run in the cloud, so they can only reach an environment you
 connect to over an `https` address they can reach, such as Tailscale Funnel.
 The option is unavailable otherwise.
 
-When the app opens the sign-in page, choose **Get code** in the wizard and paste
-the code there. A code works once, for 5 minutes, and approves only the level
-you chose.
+The wizard gives you a code for the access level you selected. Paste it on the
+environment's sign-in page. A code works once, for 5 minutes, and approves only
+that level.
 
 For an app that is not listed, choose **Something else…**, add a remote MCP
 server with OAuth in that app, and paste the URL. Apps that require their own

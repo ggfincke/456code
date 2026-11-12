@@ -132,7 +132,10 @@ jobs:
         run: |
           (
             set +e
-            sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config xvfb
+            sudo apt-get update -o Acquire::Languages=none \
+              -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false \
+              -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false &&
+              sudo apt-get install -y libsecret-1-dev pkg-config xvfb
             echo "$?" > "$RUNNER_TEMP/apt-status"
           ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
 
@@ -281,7 +284,10 @@ jobs:
         run: |
           (
             set +e
-            sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+            sudo apt-get update -o Acquire::Languages=none \
+              -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false \
+              -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false &&
+              sudo apt-get install -y libsecret-1-dev pkg-config
             echo "$?" > "$RUNNER_TEMP/apt-status"
           ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
 
@@ -369,7 +375,11 @@ jobs:
           fi
 
       - name: Test
-        run: vp run --filter @t3tools/web test --maxWorkers 1
+        # fresh processes avoid the connection loss in the full single-worker browser suite.
+        run: |
+          for shard in 1 2 3 4; do
+            vp run --filter @t3tools/web test --maxWorkers 1 --shard "$shard/4"
+          done
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of

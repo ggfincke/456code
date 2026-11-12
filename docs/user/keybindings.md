@@ -166,6 +166,9 @@ a shortcut.
 the composer's command menu takes Escape first, and so does a text field other
 than the composer, so Escape there only closes or cancels it.
 
+`thread.regenerateTitle` generates a new title for the focused thread, like
+**Regenerate title** in the thread menu. It has no default shortcut.
+
 `thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the
 bottom of the sidebar, such as unpin, archive, snooze, or discarding a
 draft. Consecutive

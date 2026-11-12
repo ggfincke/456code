@@ -13,6 +13,7 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   normalizeModelSlug,
 } from "@t3tools/shared/model";
+// oxlint-disable-next-line t3code/no-sparkles-icon -- preserves the fork's approved ultra effort indicator
 import { BrainIcon, GaugeIcon, RotateCcwIcon, SparklesIcon, ZapIcon } from "lucide-react";
 import { type ComponentProps, memo, type ReactNode, useRef, useState } from "react";
 

@@ -6,6 +6,7 @@ import IconGitPullRequestDraft from "@tabler/icons-react-native/IconGitPullReque
 import type { AndroidSymbol, SFSymbol, SymbolViewProps } from "expo-symbols";
 import IconGitPullRequest from "@tabler/icons-react-native/IconGitPullRequest";
 import IconFileDiff from "@tabler/icons-react-native/IconFileDiff";
+import IconRobot from "@tabler/icons-react-native/IconRobot";
 import { SymbolView as ExpoSymbolView } from "expo-symbols";
 import { withUniwind } from "uniwind";
 
@@ -20,6 +21,7 @@ const CUSTOM_ICONS = {
   "git.pull-request.closed": IconGitPullRequestClosed,
   "git.pull-request.draft": IconGitPullRequestDraft,
   "git.commit": IconGitCommit,
+  robot: IconRobot,
 };
 
 // iOS-only fork: the Android tabler map that used to define the name set is gone.
