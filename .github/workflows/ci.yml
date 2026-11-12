@@ -330,8 +330,9 @@ jobs:
 
   # The web suite is the largest outside the server. In the shared Test job it
   # started last and ran alone for about 40s after everything else finished.
-  # Each shard gets its own runner: sequential shards on one runner still lost the
-  # browser connection in the last shard.
+  # Each shard runs on its own runner. With one worker, a single browser page ran
+  # every browser file in a shard and lost its connection partway through on a
+  # cold Vite cache; two workers split the files over two pages.
   test_web:
     name: Test Web ${{ matrix.shard }}
     needs: changes
@@ -381,19 +382,7 @@ jobs:
           fi
 
       - name: Test
-        # TEMP diagnostics: chromium stderr for the shard 4 crash. Remove before merge.
-        env:
-          DEBUG: pw:browser*
-        run: vp run --filter @t3tools/web test --maxWorkers 1 --shard ${{ matrix.shard }}/${{ strategy.job-total }}
-
-      # TEMP diagnostics. Remove before merge.
-      - name: Dump runner state after a failure
-        if: failure()
-        run: |
-          free -m
-          df -h /dev/shm /tmp
-          ps -eo pid,rss,etime,args --sort=-rss | head -20
-          sudo dmesg -T | tail -60
+        run: vp run --filter @t3tools/web test --maxWorkers 2 --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
