@@ -403,10 +403,9 @@ function WorkspaceColumns(
       presentsWithGesture
       showInspector={inspector.visible}
       onInspectorHide={hideInspector}
-      // fincke: the sidebar keeps one width, so it only shows or hides and never drags
       columnMetrics={{
-        minimumPrimaryColumnWidth: layout.listPaneWidth ?? 320,
-        maximumPrimaryColumnWidth: layout.listPaneWidth ?? 320,
+        minimumPrimaryColumnWidth: 280,
+        maximumPrimaryColumnWidth: Math.max(380, layout.listPaneWidth ?? 0),
         preferredPrimaryColumnWidthOrFraction: layout.listPaneWidth ?? 320,
         minimumSecondaryColumnWidth: NATIVE_INSPECTOR_MIN_MAIN_WIDTH,
         // UIKit can retain its automatic width despite a new preference; constrain both edges.
