@@ -38,9 +38,14 @@ export function SliderRow(props: SliderRowProps) {
   return (
     <View className={props.disabled ? "gap-1 p-4 opacity-[0.45]" : "gap-1 p-4"}>
       <View className="flex-row items-center gap-4">
-        <SymbolView name={props.icon} size={22} tintColorClassName="accent-icon" />
+        {props.iconSlot ?? (
+          <SymbolView name={props.icon} size={22} tintColorClassName="accent-icon" />
+        )}
         <AppText className="flex-1 text-lg text-foreground">{props.label}</AppText>
-        <AppText className="text-base font-t3-medium text-foreground-muted">
+        <AppText
+          className="text-base font-t3-medium text-foreground-muted"
+          style={props.tintColor ? { color: props.tintColor } : undefined}
+        >
           {props.valueLabel}
         </AppText>
       </View>
@@ -55,7 +60,7 @@ export function SliderRow(props: SliderRowProps) {
             step={props.step}
             value={props.value}
             modifiers={[
-              tint(colors["--color-primary"]),
+              tint(props.tintColor ?? colors["--color-primary"]),
               disabled(Boolean(props.disabled)),
               accessibilityLabel(props.label),
               accessibilityValue(props.valueLabel),
@@ -79,6 +84,12 @@ export function SliderRow(props: SliderRowProps) {
           <SymbolView name={props.maximumIcon} size={22} tintColorClassName="accent-icon-muted" />
         ) : null}
       </View>
+      {/* the native slider draws at the top of its 44pt host, so the footer tucks up under it */}
+      {props.footer ? (
+        <View pointerEvents="none" style={{ marginTop: -14 }}>
+          {props.footer}
+        </View>
+      ) : null}
     </View>
   );
 }

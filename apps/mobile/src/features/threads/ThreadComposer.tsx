@@ -38,6 +38,7 @@ import {
   isReasoningControl,
 } from "@t3tools/client-runtime/model-traits";
 import { ComposerControls } from "../../fincke/composer-controls";
+import { resolveEffortSlider } from "./thread-settings-options";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type RefObject } from "react";
@@ -785,6 +786,13 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
           props.reportedModelSelection,
         ) ?? effortDescriptor.label)
     : null;
+  const effortScale = resolveEffortSlider({
+    descriptor: effortDescriptor,
+    modelAvailable: true,
+    selection: currentModelSelection,
+    reportedSelection: props.reportedModelSelection ?? null,
+    promptTraits,
+  });
   const controlsDisabled = isSubmissionLocked || !props.canOperateThread;
   const openSettings = (initialDescriptorId?: string) => {
     settingsDescriptorRef.current = initialDescriptorId;
@@ -966,6 +974,8 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             effortDescriptor && effortLabel
               ? {
                   label: effortLabel,
+                  levelIds: effortScale?.choices.map((choice) => choice.id) ?? [],
+                  levelId: effortScale?.currentValue ?? null,
                   disabled: controlsDisabled,
                   onPress: () => {
                     if (!controlsDisabled) openSettings(effortDescriptor.id);

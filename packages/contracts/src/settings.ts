@@ -359,6 +359,9 @@ export type CodeTheme = typeof CodeTheme.Type;
 /** How the composer shows reasoning effort: the level's name, or rising bars. */
 export const EffortDisplay = Schema.Literals(["label", "bars"]);
 export type EffortDisplay = typeof EffortDisplay.Type;
+/** How the effort popover picks a level: a row of named segments, or a snapping slider. */
+export const EffortControl = Schema.Literals(["segments", "slider"]);
+export type EffortControl = typeof EffortControl.Type;
 
 export const ToolCallVisibility = Schema.Literals(["showAll", "hideSuccessful", "hideAll", "zen"]);
 export type ToolCallVisibility = typeof ToolCallVisibility.Type;
@@ -418,6 +421,9 @@ export const ClientSettingsSchema = Schema.Struct({
   chatWidth: ChatWidth.pipe(Schema.withDecodingDefault(Effect.succeed("comfortable" as const))),
   codeTheme: CodeTheme.pipe(Schema.withDecodingDefault(Effect.succeed("auto" as const))),
   effortDisplay: EffortDisplay.pipe(Schema.withDecodingDefault(Effect.succeed("label" as const))),
+  effortControl: EffortControl.pipe(
+    Schema.withDecodingDefault(Effect.succeed("segments" as const)),
+  ),
   loadBalancingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   loadBalancingWeights: LoadBalancingWeights.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   appearanceContrast: AppearanceContrast.pipe(
@@ -2009,6 +2015,7 @@ export const ClientSettingsPatch = Schema.Struct({
   chatWidth: Schema.optionalKey(ChatWidth),
   codeTheme: Schema.optionalKey(CodeTheme),
   effortDisplay: Schema.optionalKey(EffortDisplay),
+  effortControl: Schema.optionalKey(EffortControl),
   loadBalancingEnabled: Schema.optionalKey(Schema.Boolean),
   loadBalancingWeights: Schema.optionalKey(LoadBalancingWeights),
   appearanceContrast: Schema.optionalKey(AppearanceContrast),

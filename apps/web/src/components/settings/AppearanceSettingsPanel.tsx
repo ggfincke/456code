@@ -36,6 +36,7 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
 import { CodeThemeSetting } from "../../fincke/CodeThemeSetting";
+import { EffortControlSetting } from "../../fincke/EffortControlSetting";
 import { ProjectFolderTintSetting } from "../../fincke/ProjectFolderTintSetting";
 import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
 
@@ -351,6 +352,7 @@ export function AppearanceSettingsPanel() {
           }
         />
         <CodeThemeSetting />
+        <EffortControlSetting />
         <ProjectFolderTintSetting />
         <AdvancedSettings
           targetIds={[

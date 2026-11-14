@@ -146,6 +146,17 @@ const THREAD_SETTINGS_ROUTE = sheetRoute({
   android: "card",
   spansRail: true,
 });
+// fincke: opened onto one option (the effort chip), the sheet starts compact & still drags to full
+const THREAD_SETTINGS_OPTION_ROUTE = sheetRoute({
+  detent: 0.6,
+  header: "none",
+  android: "card",
+  spansRail: true,
+});
+const threadSettingsRoute = (props: {
+  readonly route: { readonly params?: { readonly initialDescriptorId?: string | undefined } };
+}) =>
+  props.route.params?.initialDescriptorId ? THREAD_SETTINGS_OPTION_ROUTE : THREAD_SETTINGS_ROUTE;
 
 // Search sheets push on Android like the branch picker; a formSheet there leaves the list's
 // header peeking above it once the keyboard opens.
@@ -582,7 +593,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
     NewTaskThreadSettings: createNativeStackScreen({
       screen: NewTaskThreadSettingsRouteScreen,
       linking: "new/draft/settings",
-      options: THREAD_SETTINGS_ROUTE,
+      options: threadSettingsRoute,
     }),
     ThreadTerminal: createNativeStackScreen({
       screen: ThreadTerminalRouteScreen,
@@ -635,7 +646,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
     }),
     ThreadSettingsSheet: createNativeStackScreen({
       screen: ExistingThreadSettingsRouteScreen,
-      options: THREAD_SETTINGS_ROUTE,
+      options: threadSettingsRoute,
     }),
     ThreadQueue: createNativeStackScreen({
       screen: ThreadQueueSheet,

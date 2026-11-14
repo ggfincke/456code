@@ -20,9 +20,9 @@ export interface EffortLevel {
   readonly ultra: boolean;
 }
 
-// stops sit inside 6%..94% so the thumb never overhangs the rounded ends
+// stops sit inside 3%..97% so the thumb never overhangs the rail's ends
 function stopPosition(index: number, count: number): number {
-  return count < 2 ? 50 : 6 + (index / (count - 1)) * 88;
+  return count < 2 ? 50 : 3 + (index / (count - 1)) * 94;
 }
 
 function nearestStop(pct: number, count: number): number {

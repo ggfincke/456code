@@ -135,6 +135,6 @@ html[data-theme-id="fincke-ocean"]
 
 html[data-theme-id="fincke-ocean"]
   [data-effort-level]
-  :is([data-composer-control-label], .lucide-brain, .lucide-gauge) {
+  :is([data-composer-control-label], [data-slot="effort-bars"], .lucide-brain, .lucide-gauge) {
   color: var(--fincke-effort-tint, inherit);
 }

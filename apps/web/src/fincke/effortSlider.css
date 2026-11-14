@@ -1,18 +1,15 @@
 /* apps/web/src/fincke/effortSlider.css */
-/* effort popover track, thumb & one-shot ultra effects; every theme, fincke tokens win when present */
+/* effort popover: slim slider, segments & one-shot ultra effects; fincke tokens win when present */
 
 [data-slot="effort-panel"] {
-  --effort-accent: var(--fincke-teal, var(--primary));
+  /* the panel carries the chip's data-effort-level, so ocean gives it the same level tint */
+  --effort-accent: var(--fincke-effort-tint, var(--fincke-teal, var(--primary)));
   --effort-ultra-from: var(--fincke-blue, #82aaff);
   --effort-ultra-to: var(--fincke-purple, #c792ea);
-  --effort-track: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --effort-rail: color-mix(in srgb, var(--foreground) 10%, transparent);
   /* eases into the stop with no overshoot */
   --effort-snap: cubic-bezier(0.22, 1, 0.36, 1);
   --effort-snap-duration: 0.32s;
-}
-
-html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
-  --effort-track: var(--sidebar);
 }
 
 /* the composer chip turns purple on ultra levels */
@@ -24,7 +21,9 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
 [data-slot="effort-level"] {
   font-size: 15px;
   color: var(--effort-accent);
-  transition: opacity 0.18s;
+  transition:
+    opacity 0.18s,
+    color 0.2s;
   animation: fincke-effort-label-in 0.18s ease-out;
 }
 
@@ -75,12 +74,10 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   outline-offset: 1px;
 }
 
+/* a tall hit area around a thin rail */
 [data-slot="effort-track"] {
   position: relative;
-  height: 28px;
-  border: 1px solid color-mix(in srgb, #ffffff 5%, transparent);
-  border-radius: 14px;
-  background: var(--effort-track);
+  height: 24px;
   cursor: grab;
   touch-action: none;
   outline: none;
@@ -97,28 +94,34 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   opacity: 0.5;
 }
 
-[data-slot="effort-track"]:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--effort-accent) 40%, transparent);
+[data-slot="effort-track"]:focus-visible [data-slot="effort-thumb"] {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--effort-ring) 45%, transparent);
 }
 
+/* the rail; it clips the fill, so the fill needs no rounding of its own */
 [data-slot="effort-clip"] {
   position: absolute;
-  inset: 0;
+  inset-inline: 0;
+  top: 50%;
+  height: 6px;
+  margin-top: -3px;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 3px;
+  background: var(--effort-rail);
 }
 
-/* a full-width fill slid left so its rounded end sits just past the thumb */
+/* a full-width fill slid left so it ends under the thumb */
 [data-slot="effort-fill"] {
   position: absolute;
   inset-block: 0;
   left: 0;
   width: 100%;
   overflow: hidden;
-  border-radius: 14px;
   background: var(--effort-accent);
-  translate: calc((var(--effort-pct) - 100) * 1cqw + 13px) 0;
-  transition: translate var(--effort-snap-duration) var(--effort-snap);
+  translate: calc((var(--effort-pct) - 100) * 1cqw) 0;
+  transition:
+    translate var(--effort-snap-duration) var(--effort-snap),
+    background-color 0.2s;
 }
 
 /* counter-slid inside the fill, so the gradient & sparks stay pinned to the track */
@@ -129,7 +132,7 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   width: 100cqw;
   background: linear-gradient(90deg, var(--effort-ultra-from), var(--effort-ultra-to));
   opacity: 0;
-  translate: calc((100 - var(--effort-pct)) * 1cqw - 13px) 0;
+  translate: calc((100 - var(--effort-pct)) * 1cqw) 0;
   transition:
     opacity 0.2s ease-out,
     translate var(--effort-snap-duration) var(--effort-snap);
@@ -141,8 +144,8 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
 
 [data-slot="effort-spark"] {
   position: absolute;
-  width: 2px;
-  height: 2px;
+  width: 1.5px;
+  height: 1.5px;
   border-radius: 50%;
   background: #ffffff;
 }
@@ -172,11 +175,11 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   position: absolute;
   top: 50%;
   z-index: 1;
-  width: 5px;
-  height: 5px;
-  margin: -2.5px 0 0 -2.5px;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--foreground) 30%, transparent);
+  background: color-mix(in srgb, var(--foreground) 40%, transparent);
   pointer-events: none;
   transition: background-color 0.15s;
 }
@@ -189,18 +192,16 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   background: color-mix(in srgb, #000000 45%, transparent);
 }
 
-/* the default level is a hollow ring */
-[data-slot="effort-stop"][data-default] {
-  width: 7px;
-  height: 7px;
-  margin: -3.5px 0 0 -3.5px;
-  background: transparent;
-  box-shadow: 0 0 0 1.5px var(--muted-foreground);
-}
-
-[data-slot="effort-stop"][data-default][data-filled] {
-  background: transparent;
-  box-shadow: 0 0 0 1.5px color-mix(in srgb, #000000 55%, transparent);
+/* the default level gets a notch under the rail */
+[data-slot="effort-stop"][data-default]::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 0.5px;
+  width: 2px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--muted-foreground);
 }
 
 [data-slot="effort-thumb"] {
@@ -209,12 +210,11 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   top: 50%;
   left: 0;
   z-index: 2;
-  width: 22px;
-  height: 22px;
-  margin: -11px 0 0 -11px;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 4px color-mix(in srgb, #000000 53%, transparent);
+  background: var(--foreground);
   pointer-events: none;
   translate: calc(var(--effort-pct) * 1cqw) 0;
   transition:
@@ -228,9 +228,7 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
 }
 
 [data-slot="effort-track"]:hover [data-slot="effort-thumb"] {
-  box-shadow:
-    0 1px 4px color-mix(in srgb, #000000 53%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--effort-ring) 14%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--effort-ring) 20%, transparent);
 }
 
 /* the thumb gives under a press before the drag starts */
@@ -240,9 +238,7 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
 
 [data-slot="effort-track"][data-dragging] [data-slot="effort-thumb"] {
   scale: 1.14;
-  box-shadow:
-    0 2px 8px color-mix(in srgb, #000000 63%, transparent),
-    0 0 0 6px color-mix(in srgb, var(--effort-ring) 20%, transparent);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--effort-ring) 28%, transparent);
 }
 
 /* while dragging the thumb & fill follow the pointer directly */
@@ -253,7 +249,7 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
 }
 
 [data-slot="effort-track"][data-dragging] [data-slot="effort-fill"] {
-  transition: none;
+  transition: background-color 0.2s;
 }
 
 [data-slot="effort-track"][data-dragging] [data-slot="effort-ultra"] {
@@ -322,9 +318,9 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
 /* a shockwave ring expands from the thumb */
 [data-slot="effort-ring"] {
   position: absolute;
-  width: 22px;
-  height: 22px;
-  margin: -11px 0 0 -11px;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
   border: 2px solid var(--effort-ultra-to);
   border-radius: 50%;
   animation: fincke-effort-ring 0.7s cubic-bezier(0.2, 0.7, 0.3, 1) 0.18s both;
@@ -341,11 +337,14 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   }
 }
 
-/* the whole track glows once */
+/* the whole rail glows once */
 [data-slot="effort-glow"] {
   position: absolute;
-  inset: -1px;
-  border-radius: 14px;
+  inset-inline: -1px;
+  top: 50%;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 4px;
   box-shadow:
     0 0 14px 2px color-mix(in srgb, var(--effort-ultra-to) 70%, transparent),
     0 0 4px var(--effort-ultra-from);
@@ -363,6 +362,39 @@ html[data-theme-id="fincke-ocean"] [data-slot="effort-panel"] {
   100% {
     opacity: 0;
   }
+}
+
+/* segments mode: the level row is a toggle group stretched across the popover */
+[data-effort-segments] {
+  width: 100%;
+}
+
+/* the tooltip trigger takes over data-slot, so segments carry their own attribute */
+[data-effort-segment] {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: 6px;
+}
+
+[data-effort-segment][data-pressed] {
+  color: var(--effort-accent);
+}
+
+[data-effort-segment][data-ultra][data-pressed] {
+  color: var(--effort-ultra-to);
+}
+
+/* marks the default level */
+[data-slot="effort-default-dot"] {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
 }
 
 @media (prefers-reduced-motion: reduce) {
