@@ -101,7 +101,9 @@ import { selectThreadModel } from "../../state/thread-model-selection";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { threadAllowsProviderSwitch } from "../../state/thread-provider-switching";
 import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
+import { EffortBars, useEffortTint } from "../../fincke/EffortBars";
 import { ProviderLimitsLine } from "../../fincke/ProviderLimitsLine";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useNewTaskFlow } from "./new-task-flow-provider";
@@ -1142,11 +1144,33 @@ function ThreadEffortSlider(props: {
   const shown = props.state.choices[previewIndex ?? props.state.currentIndex];
   const defaultChoice = props.state.choices[props.state.defaultIndex];
   const disabled = props.disabled || props.state.locked;
+  const { themeVariables } = useAppearancePreferences();
+  // follows the previewed level, so the color moves with the drag like the web picker
+  const tint = useEffortTint(shown?.id);
   return (
     <View className="gap-3">
       <View className="overflow-hidden rounded-2xl bg-grouped-card">
         <SliderRow
           icon="brain"
+          iconSlot={
+            <EffortBars
+              levelIds={props.state.choices.map((choice) => choice.id)}
+              levelId={shown?.id ?? null}
+              color={tint ?? themeVariables["--color-primary-text"]}
+              height={18}
+            />
+          }
+          tintColor={tint ?? undefined}
+          footer={
+            <View className="flex-row justify-between gap-4">
+              <Text className="flex-1 text-xs text-foreground-muted">
+                {props.state.choices[0]?.label}
+              </Text>
+              <Text className="flex-1 text-right text-xs text-foreground-muted">
+                {props.state.choices.at(-1)?.label}
+              </Text>
+            </View>
+          }
           label={props.label}
           valueLabel={`${previewIndex !== null && previewIndex !== props.state.currentIndex ? "Preview · " : ""}${shown?.label ?? "Default"}${shown?.isDefault ? " (default)" : ""}`}
           min={0}
@@ -1162,14 +1186,6 @@ function ThreadEffortSlider(props: {
             if (!selection.commit(value)) setPreviewIndex(null);
           }}
         />
-        <View className="flex-row justify-between gap-4 px-4 pb-4">
-          <Text className="flex-1 text-xs text-foreground-muted">
-            {props.state.choices[0]?.label}
-          </Text>
-          <Text className="flex-1 text-right text-xs text-foreground-muted">
-            {props.state.choices.at(-1)?.label}
-          </Text>
-        </View>
       </View>
       {shown?.description ? (
         <Text className="px-1 text-sm text-foreground-secondary">{shown.description}</Text>

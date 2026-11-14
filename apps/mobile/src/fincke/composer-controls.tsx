@@ -8,6 +8,7 @@ import { ComposerToolbarRow, ComposerToolbarScroller } from "../components/Compo
 import { AppText as Text } from "../components/ui/AppText";
 import { SymbolView } from "../components/ui/AppSymbol";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
+import { EffortBars, useEffortTint } from "./EffortBars";
 
 function UsageRing({ remaining }: { readonly remaining: number }) {
   const { themeVariables } = useAppearancePreferences();
@@ -49,6 +50,8 @@ export function ComposerControls(props: {
   };
   readonly effort?: {
     readonly label: string;
+    readonly levelIds: ReadonlyArray<string>;
+    readonly levelId: string | null;
     readonly disabled: boolean;
     readonly onPress: () => void;
   };
@@ -58,6 +61,8 @@ export function ComposerControls(props: {
     readonly onPress: () => void;
   };
 }) {
+  const { themeVariables } = useAppearancePreferences();
+  const effortTint = useEffortTint(props.effort?.levelId);
   // like codex, plan mode shows only while it is on; /plan turns it on & the chip turns it off
   const planMode = props.mode?.value === "plan" ? props.mode : undefined;
   if (!planMode && !props.effort && !props.usage) return null;
@@ -106,15 +111,16 @@ export function ComposerControls(props: {
             className="h-11 max-w-[220px] flex-row items-center gap-1.5 rounded-xl px-3 active:bg-subtle"
             style={{ opacity: props.effort.disabled ? 0.45 : 1 }}
           >
-            <SymbolView
-              name="brain"
-              size={15}
-              tintColorClassName="accent-primary-text"
-              type="monochrome"
+            <EffortBars
+              levelIds={props.effort.levelIds}
+              levelId={props.effort.levelId}
+              color={effortTint ?? themeVariables["--color-primary-text"]}
+              height={12}
             />
             <Text
               className="shrink text-sm font-t3-medium text-foreground-secondary"
               numberOfLines={1}
+              style={effortTint ? { color: effortTint } : undefined}
             >
               {props.effort.label}
             </Text>
