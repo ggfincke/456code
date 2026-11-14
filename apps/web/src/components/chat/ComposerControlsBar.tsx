@@ -275,9 +275,12 @@ export function ComposerControlsBar(props: {
         <EffortPicker
           {...traitsInput}
           isComposerOwned
+          popupAlign={composerControlsCollapsed ? "start" : "end"}
+          // fincke: a new thread's headline sits right above the composer, so open downward there
+          popupSide={routeKind === "draft" ? "bottom" : "top"}
           size={controlSize}
           hidden={composerControlsHidden}
-          triggerClassName={cn("ps-1.5 pe-1", TEXT_CONTROL_STATES)}
+          triggerClassName={cn("px-1.5", TEXT_CONTROL_STATES)}
         />
       ) : null}
       <ComposerLimitIndicator

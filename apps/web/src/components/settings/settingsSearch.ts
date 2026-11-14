@@ -360,6 +360,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["reasoning effort thinking bars graph word label level composer"],
   },
   {
+    id: "effort-control",
+    title: "Effort control",
+    to: "/settings/appearance",
+    searchTerms: ["reasoning effort thinking slider segments buttons level picker popover"],
+  },
+  {
     id: "math-rendering",
     title: "Render math",
     to: "/settings/appearance",

@@ -7,6 +7,10 @@
       "types": "./src/fincke-draft-headline.ts",
       "import": "./src/fincke-draft-headline.ts"
     },
+    "./fincke-effort-scale": {
+      "types": "./src/fincke-effort-scale.ts",
+      "import": "./src/fincke-effort-scale.ts"
+    },
     "./fincke-folder-tint": {
       "types": "./src/fincke-folder-tint.ts",
       "import": "./src/fincke-folder-tint.ts"

@@ -1,5 +1,5 @@
 // apps/web/src/fincke/EffortPicker.tsx
-// composer effort chip whose popover is a level slider with fast mode & the remaining model options
+// composer effort chip whose popover picks a level by segments or slider, w/ fast mode & other options
 import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
@@ -10,19 +10,20 @@ import {
 } from "@t3tools/client-runtime/model-traits";
 import type { ProviderOptionDescriptor, ProviderOptionSelection } from "@t3tools/contracts";
 import {
+  finckeEffortBarHeights,
+  finckeEffortBars,
+  isFinckeUltraEffort,
+} from "@t3tools/shared/fincke-effort-scale";
+import {
   buildProviderOptionSelectionsFromDescriptors,
   normalizeModelSlug,
 } from "@t3tools/shared/model";
 // oxlint-disable-next-line t3code/no-sparkles-icon -- preserves the fork's approved ultra effort indicator
-import { BrainIcon, GaugeIcon, RotateCcwIcon, SparklesIcon, ZapIcon } from "lucide-react";
+import { RotateCcwIcon, SparklesIcon, ZapIcon } from "lucide-react";
 import { type ComponentProps, memo, type ReactNode, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
-import {
-  ComposerControl,
-  ComposerControlChevron,
-  ComposerControlIcon,
-} from "../components/chat/ComposerControl";
+import { ComposerControl, ComposerControlIcon } from "../components/chat/ComposerControl";
 import { useComposerMenuProps } from "../components/chat/composerEventScope";
 import { getTraitsSectionVisibility, TraitsPicker } from "../components/chat/TraitsPicker";
 import { useComposerMenuState } from "../components/chat/useComposerMenuState";
@@ -38,13 +39,28 @@ import {
 } from "../components/ui/select";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
+import { useClientSettings } from "../hooks/useSettings";
 import { cn } from "../lib/utils";
+import { EffortSegments } from "./EffortSegments";
 import { type EffortLevel, EffortSlider } from "./EffortSlider";
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 type BooleanDescriptor = Extract<ProviderOptionDescriptor, { type: "boolean" }>;
 
-const ULTRA_LEVEL_IDS: ReadonlySet<string> = new Set(["ultra", "ultracode", "ultrathink"]);
+// the chip's icon: one rising bar per ordinary level, lit up to the current one
+function EffortBars(props: { count: number; filled: number; size: "sm" | "xs" }) {
+  return (
+    <span aria-hidden="true" data-slot="effort-bars" className="flex shrink-0 items-end gap-px">
+      {finckeEffortBarHeights(props.count, props.size === "xs" ? 10 : 12).map((height, index) => (
+        <span
+          key={height}
+          className={cn("w-0.5 rounded-full bg-current", index >= props.filled && "opacity-25")}
+          style={{ height }}
+        />
+      ))}
+    </span>
+  );
+}
 
 // codex exposes speed as a service tier select; the bolt toggles standard <-> its fast tier
 function codexSpeedTier(descriptor: SelectDescriptor | undefined) {
@@ -63,7 +79,12 @@ function codexSpeedTier(descriptor: SelectDescriptor | undefined) {
  * Models without a reasoning level, or whose catalog entry is missing, fall back to it.
  */
 export const EffortPicker = memo(function EffortPicker(
-  props: ComponentProps<typeof TraitsPicker> & { isComposerOwned?: boolean },
+  props: ComponentProps<typeof TraitsPicker> & {
+    isComposerOwned?: boolean;
+    // the chip resizes w/ its level name, so the popover hangs from the edge that stays put
+    popupAlign?: "start" | "end";
+    popupSide?: "top" | "bottom";
+  },
 ) {
   const {
     provider,
@@ -86,6 +107,8 @@ export const EffortPicker = memo(function EffortPicker(
   const [open, setOpen] = useComposerMenuState(hidden || disabled);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
+  const segmentRef = useRef<HTMLButtonElement | null>(null);
+  const segmented = useClientSettings((settings) => settings.effortControl) === "segments";
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
 
   const selected = getTraitsSectionVisibility({
@@ -145,7 +168,7 @@ export const EffortPicker = memo(function EffortPicker(
       label: option.label,
       description: option.description,
       isDefault: option.isDefault,
-      ultra: ULTRA_LEVEL_IDS.has(option.id),
+      ultra: isFinckeUltraEffort(option.id),
     }),
   );
   const currentValue =
@@ -161,6 +184,10 @@ export const EffortPicker = memo(function EffortPicker(
   const levelIndex = currentIndex >= 0 ? currentIndex : defaultIndex;
   const level = levels[levelIndex];
   const shownLevel = levels[previewIndex ?? levelIndex] ?? level;
+  const commitLevel = (index: number) => {
+    const next = levels[index];
+    if (next) selectValue(reasoning, next.id);
+  };
 
   const fastMode = selected.fastModeDescriptor;
   const serviceTier =
@@ -204,6 +231,10 @@ export const EffortPicker = memo(function EffortPicker(
     model;
   const isCodexStyle = provider === "codex";
   const chipUltra = level?.ultra === true;
+  const bars = finckeEffortBars(
+    levels.map((option) => option.id),
+    level?.id,
+  );
 
   return (
     <Popover
@@ -244,50 +275,33 @@ export const EffortPicker = memo(function EffortPicker(
                 className="fill-current text-(--fincke-yellow,var(--warning))"
               />
             ) : null}
-            {/* the redesign swaps TraitsPicker's brain for a gauge; ultra keeps its sparkle */}
+            {/* ultra levels sit above the scale, so they keep their sparkle */}
             {chipUltra ? (
               <ComposerControlIcon icon={SparklesIcon} size={size} className="text-current" />
             ) : (
-              <>
-                <ComposerControlIcon icon={BrainIcon} size={size} className="redesign:hidden" />
-                <ComposerControlIcon
-                  icon={GaugeIcon}
-                  size={size}
-                  className="hidden redesign:block"
-                />
-              </>
+              <EffortBars count={bars.count} filled={bars.filled} size={size} />
             )}
-            {/* every level name shares one cell, so the chip keeps the widest one's width */}
-            <span data-composer-control-label className="grid min-w-0 text-start">
-              {level
-                ? levels.map((option) => (
-                    <span
-                      key={option.id}
-                      aria-hidden={option.id !== level.id || undefined}
-                      className={cn(
-                        "col-start-1 row-start-1 truncate",
-                        option.id !== level.id && "invisible",
-                      )}
-                    >
-                      {option.label}
-                    </span>
-                  ))
-                : triggerLabel}
+            <span data-composer-control-label className="min-w-0 truncate text-start">
+              {level?.label ?? triggerLabel}
             </span>
-            <ComposerControlChevron size={size} />
           </span>
         </TooltipTrigger>
         <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
       </Tooltip>
       <PopoverPopup
         {...(isComposerOwned ? composerMenuProps : {})}
-        side="top"
-        align="start"
+        side={props.popupSide ?? "top"}
+        align={props.popupAlign ?? "start"}
         width="md"
         padding="compact"
-        initialFocus={levelLocked ? true : trackRef}
+        initialFocus={levelLocked ? true : segmented ? segmentRef : trackRef}
       >
-        <div data-slot="effort-panel" className="flex flex-col gap-3 py-1">
+        {/* reusing the chip's level attribute gives the panel the chip's level tint */}
+        <div
+          data-slot="effort-panel"
+          data-effort-level={shownLevel?.id}
+          className="flex flex-col gap-3 py-1"
+        >
           <div className="flex items-center gap-2">
             {toggleFast ? (
               <button
@@ -303,15 +317,20 @@ export const EffortPicker = memo(function EffortPicker(
               <span aria-hidden="true" className="size-7 shrink-0" />
             )}
             <div className="min-w-0 flex-1 text-center leading-tight">
-              <div
-                key={shownLevel?.id}
-                data-slot="effort-level"
-                className="truncate font-semibold"
-                data-ultra={shownLevel?.ultra ? "" : undefined}
-                data-preview={previewIndex !== null && previewIndex !== levelIndex ? "" : undefined}
-              >
-                {shownLevel?.label}
-              </div>
+              {/* segments already name every level, so only the slider needs the readout */}
+              {segmented ? null : (
+                <div
+                  key={shownLevel?.id}
+                  data-slot="effort-level"
+                  className="truncate font-semibold"
+                  data-ultra={shownLevel?.ultra ? "" : undefined}
+                  data-preview={
+                    previewIndex !== null && previewIndex !== levelIndex ? "" : undefined
+                  }
+                >
+                  {shownLevel?.label}
+                </div>
+              )}
               <div className="truncate text-muted-foreground text-xs">{modelName}</div>
             </div>
             <Tooltip>
@@ -334,19 +353,27 @@ export const EffortPicker = memo(function EffortPicker(
               <TooltipPopup side="top">Reset to default</TooltipPopup>
             </Tooltip>
           </div>
-          <EffortSlider
-            key={`${instanceId ?? provider}:${model}:${reasoning.id}`}
-            levels={levels}
-            index={levelIndex}
-            label={reasoning.label}
-            disabled={levelLocked}
-            trackRef={trackRef}
-            onCommit={(index) => {
-              const next = levels[index];
-              if (next) selectValue(reasoning, next.id);
-            }}
-            onPreviewChange={setPreviewIndex}
-          />
+          {segmented ? (
+            <EffortSegments
+              levels={levels}
+              index={levelIndex}
+              label={reasoning.label}
+              disabled={levelLocked}
+              currentRef={segmentRef}
+              onCommit={commitLevel}
+            />
+          ) : (
+            <EffortSlider
+              key={`${instanceId ?? provider}:${model}:${reasoning.id}`}
+              levels={levels}
+              index={levelIndex}
+              label={reasoning.label}
+              disabled={levelLocked}
+              trackRef={trackRef}
+              onCommit={commitLevel}
+              onPreviewChange={setPreviewIndex}
+            />
+          )}
           {levelLocked ? (
             <p className="text-center text-muted-foreground text-xs">
               Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this
