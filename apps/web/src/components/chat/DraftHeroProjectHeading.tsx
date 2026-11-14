@@ -1,12 +1,15 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import type { ProjectHeadline } from "@t3tools/shared/fincke-draft-headline";
 
 import { observeResize } from "~/lib/observeResize";
 
 export function DraftHeroProjectHeading({
   children,
+  headline,
   projectName,
 }: {
   children: ReactNode;
+  headline: ProjectHeadline;
   projectName: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,7 +42,9 @@ export function DraftHeroProjectHeading({
           ref={inlineRef}
           className="flex w-max items-baseline gap-2 whitespace-nowrap font-normal text-3xl tracking-tight"
         >
-          <span>What should we build in</span>
+          <span>
+            {headline.lead} {headline.joiner}
+          </span>
           <span>
             <span className="font-medium">{projectName}</span>?
           </span>
@@ -47,9 +52,12 @@ export function DraftHeroProjectHeading({
       </span>
       <h1 className="flex w-full flex-col items-center justify-center gap-2 text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl lg:group-data-[inline=true]/draft-hero:flex-row">
         <span className="max-w-full lg:group-data-[inline=true]/draft-hero:shrink-0 [@media(max-height:28rem)]:sr-only">
-          What should we build
+          {headline.lead}
           <span className="lg:group-data-[inline=true]/draft-hero:hidden">?</span>
-          <span className="hidden lg:group-data-[inline=true]/draft-hero:inline"> in</span>
+          <span className="hidden lg:group-data-[inline=true]/draft-hero:inline">
+            {" "}
+            {headline.joiner}
+          </span>
         </span>
         <span className="flex min-w-0 max-w-full items-baseline justify-center text-base tracking-normal lg:group-data-[inline=true]/draft-hero:text-3xl lg:group-data-[inline=true]/draft-hero:tracking-tight">
           <span className="min-w-0">{children}</span>

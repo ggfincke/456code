@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./fincke-draft-headline": {
+      "types": "./src/fincke-draft-headline.ts",
+      "import": "./src/fincke-draft-headline.ts"
+    },
     "./fincke-folder-tint": {
       "types": "./src/fincke-folder-tint.ts",
       "import": "./src/fincke-folder-tint.ts"
