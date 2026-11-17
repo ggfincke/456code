@@ -41,6 +41,18 @@ export function cliArchiveFileName(version: string, platformKey: CliArchivePlatf
   return `t3-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
 }
 
+/** Reads a `sha256sum`-style checksum list into file name -> lowercase digest. */
+export function parseChecksums(text: string): ReadonlyMap<string, string> {
+  const checksums = new Map<string, string>();
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^([0-9a-fA-F]{64})\s+\*?(\S.*)$/.exec(line.trim());
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      checksums.set(match[2], match[1].toLowerCase());
+    }
+  }
+  return checksums;
+}
+
 export type CliReleaseChannel = "stable" | "nightly" | "preview";
 
 export function cliReleaseChannelOf(version: string): CliReleaseChannel {

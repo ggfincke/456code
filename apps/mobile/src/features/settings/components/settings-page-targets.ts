@@ -4,6 +4,7 @@ export const SETTINGS_PAGE_TARGETS = [
   "SettingsThreads",
   "SettingsAbout",
   "SettingsAppearance",
+  "SettingsLanguage",
   "SettingsNavigation",
   "SettingsOrganization",
   "SettingsProjectOverview",

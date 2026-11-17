@@ -22,7 +22,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { toastManager } from "../ui/toast";
-import { usePendingThreadRequests } from "./usePendingThreadRequests";
+import { usePendingThreadRequests, usePendingUserInputDraft } from "./usePendingThreadRequests";
 
 const threadRef = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
 
@@ -89,16 +89,23 @@ interface ProbeProps {
 }
 
 function useProbeRequests({ environmentId, projection, loading = false }: ProbeProps) {
-  return usePendingThreadRequests({
+  const requests = usePendingThreadRequests({
     environmentId,
     activeThreadId: projection.thread.id,
     serverProjection: loading ? null : projection,
     supportsQuestionAttachments: false,
     setThreadError: () => {},
   });
+  const draft = usePendingUserInputDraft({
+    environmentId,
+    activeThreadId: projection.thread.id,
+    activePendingUserInput: requests.activePendingUserInput,
+    supportsQuestionAttachments: false,
+  });
+  return { ...requests, ...draft };
 }
 
-let requests: ReturnType<typeof usePendingThreadRequests>;
+let requests: ReturnType<typeof useProbeRequests>;
 
 function PendingRequestsProbe(props: ProbeProps) {
   const state = useProbeRequests(props);
@@ -268,7 +275,10 @@ it("isolates drafts by environment, thread and request and discards only resolve
     makeThreadRequestsResolvedAnnouncer(
       environmentId,
       threadRef.threadId,
-    )([RuntimeRequestId.make("second")]),
+    )([
+      { id: RuntimeRequestId.make("first"), status: "resolved" },
+      { id: RuntimeRequestId.make("second"), status: "pending" },
+    ]),
   );
   for (const [index, scope] of scopes.entries()) {
     await show(scope);
@@ -284,13 +294,7 @@ it("submits the answer typed into the card's Something else field", async () => 
   const projection = questionProjection(threadRef.threadId, ["only"], [prompt.questions[0]!]);
   const submitted = vi.fn();
   function Card() {
-    const state = usePendingThreadRequests({
-      environmentId,
-      activeThreadId: projection.thread.id,
-      serverProjection: projection,
-      supportsQuestionAttachments: false,
-      setThreadError: () => {},
-    });
+    const state = useProbeRequests({ environmentId, projection });
     return (
       <ComposerPendingUserInputPanel
         pendingUserInputs={state.pendingUserInputs}

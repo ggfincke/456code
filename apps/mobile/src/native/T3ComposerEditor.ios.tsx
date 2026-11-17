@@ -31,7 +31,7 @@ import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { createNativeComposerTheme } from "../lib/nativeComposerTheme";
 import { finckeFileIconColor } from "../fincke/file-icon-color";
 import { FONT_FAMILIES } from "../lib/fontFamilies";
-import { useScaledTextRole } from "../features/settings/appearance/useScaledTextRole";
+import { useComposerTextRole } from "../features/settings/appearance/useScaledTextRole";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import {
   acknowledgeComposerNativeEvent,
@@ -181,7 +181,7 @@ export function ComposerEditor({
     });
     setConfirmedTokens({ value: props.value, tokens });
   }
-  const bodyText = useScaledTextRole("body");
+  const bodyText = useComposerTextRole();
   const theme = useUniwindTheme();
   const { themeId } = useAppearancePreferences();
   const fontFamily = FONT_FAMILIES.regular;

@@ -11,6 +11,9 @@ export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRunt
   usageLimitsCommand: true,
   hostAppUpdate: true,
   providerCatalogsOnDemand: true,
+  providerCatalogDigests: true,
+  providerStatusDeltas: true,
+  omitRefreshedProviders: true,
 });
 export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,

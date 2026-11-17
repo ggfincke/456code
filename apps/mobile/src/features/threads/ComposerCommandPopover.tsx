@@ -167,7 +167,7 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
     case "pull-request":
       return "No matching pull requests.";
     case "path":
-      return "No matching files or folders.";
+      return "No matching mentions.";
     case "skill":
       return "No skills found.";
     case "slash-command":
@@ -242,7 +242,10 @@ const CommandRow = memo(function CommandRow(props: {
       ) : null}
       <Text
         className="min-w-0 shrink text-base font-t3-medium text-foreground"
-        style={{ color: props.color, maxWidth: props.item.description ? "65%" : "100%" }}
+        style={{
+          color: props.color,
+          maxWidth: props.item.type === "thread" ? "45%" : props.item.description ? "65%" : "100%",
+        }}
         numberOfLines={1}
       >
         {props.isSlashSkill && props.item.type === "skill" ? (

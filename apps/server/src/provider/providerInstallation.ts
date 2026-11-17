@@ -186,9 +186,25 @@ const make = Effect.fn("makeProviderInstallation")(function* () {
       .pipe(Effect.mapError(failure(input.instanceId)));
   });
 
+  // Watching an installation is when its owner can act on an update, so the lookup runs then,
+  // in the background, only for a managed install and unless update checks are off.
   const subscribe = (input: ProviderSetupInput) =>
     Stream.unwrap(
       requireInstance(input.instanceId, "observe-install").pipe(
+        Effect.tap(() =>
+          requireInstance(input.instanceId, "observe-install", true).pipe(
+            Effect.flatMap(({ installation }) =>
+              settings.getSettings.pipe(
+                Effect.flatMap((current) =>
+                  current.enableProviderUpdateChecks
+                    ? Effect.forkDetach(installation.checkForUpdate)
+                    : Effect.void,
+                ),
+              ),
+            ),
+            Effect.ignore,
+          ),
+        ),
         Effect.map(({ installation }) => installation.changes),
       ),
     );

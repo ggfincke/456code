@@ -3,6 +3,7 @@
 
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
+import * as Application from "expo-application";
 import Constants from "expo-constants";
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
 import { useRef, useState } from "react";
@@ -56,9 +57,12 @@ function AppSettingsSection() {
   // Match app.config.ts's production fallback to avoid mislabeling builds as development.
   const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? "production";
   const variantLabel = variant === "production" ? "" : capitalize(variant);
+  // EAS assigns build numbers remotely; only the installed binary knows its own.
+  const build = Application.nativeBuildVersion;
+  const versionWithBuild = build ? `${version} (${build})` : version;
   // fincke: only staged OTA bundles carry the build number, so the embedded bundle shows none
   const finckeBuild = Constants.expoConfig?.extra?.finckeBuild as string | undefined;
-  const versionLabel = [version, finckeBuild, variantLabel].filter(Boolean).join(" · ");
+  const versionLabel = [versionWithBuild, finckeBuild, variantLabel].filter(Boolean).join(" · ");
   const updateCheckAvailable = isAppUpdateCheckAvailable();
   const busy =
     updateState === "checking" || updateState === "downloading" || updateState === "restarting";

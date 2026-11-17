@@ -12,7 +12,7 @@ html[data-theme-id="fincke-ocean"] [data-slot="composer-stop-button"] {
   box-shadow: none;
 }
 
-html[data-theme-id="fincke-ocean"] [data-slot="composer-stop-button"]:hover {
+html[data-theme-id="fincke-ocean"] [data-slot="composer-stop-button"]:enabled:hover {
   background: color-mix(in srgb, var(--fincke-red) 13%, transparent);
   color: var(--fincke-red);
 }
@@ -35,7 +35,7 @@ html[data-theme-id="fincke-ocean"] [data-fincke-stop-ring-arc] {
 }
 
 html[data-theme-id="fincke-ocean"]
-  [data-slot="composer-stop-button"]:hover
+  [data-slot="composer-stop-button"]:enabled:hover
   [data-fincke-stop-ring-arc] {
   stroke: var(--fincke-red);
 }
@@ -46,6 +46,17 @@ html[data-theme-id="fincke-ocean"]
   html[data-theme-id="fincke-ocean"] [data-slot="composer-stop-button"] [data-fincke-stop-ring] {
     animation: fincke-stop-ring-turn 1.1s linear infinite;
   }
+}
+
+/* while a stop is pending the ring freezes where it is, so nothing repaints */
+html[data-theme-id="fincke-ocean"] [data-slot="composer-stop-button"][data-stop-phase="pending"] {
+  opacity: 0.5;
+}
+
+html[data-theme-id="fincke-ocean"]
+  [data-slot="composer-stop-button"][data-stop-phase="pending"]
+  [data-fincke-stop-ring] {
+  animation-play-state: paused;
 }
 
 @keyframes fincke-stop-ring-turn {

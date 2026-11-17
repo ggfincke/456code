@@ -16,7 +16,6 @@ export function useConnectionController() {
   });
   const updateBearer = useAtomCommand(updateBearerConnection, { reportFailure: false });
   const removeEnvironmentMutation = useAtomCommand(environmentCatalog.remove, "environment remove");
-  const retryEnvironmentMutation = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const setEnvironmentEnabledMutation = useAtomCommand(
     environmentCatalog.setEnabled,
     "environment toggle",
@@ -32,8 +31,6 @@ export function useConnectionController() {
   );
   const removeEnvironment = (environmentId: EnvironmentId) =>
     removeEnvironmentMutation(environmentId);
-  const retryEnvironment = (environmentId: EnvironmentId) =>
-    retryEnvironmentMutation(environmentId);
   const setEnvironmentEnabled = (environmentId: EnvironmentId, enabled: boolean) =>
     setEnvironmentEnabledMutation({ environmentId, enabled });
   const updateEnvironment = (
@@ -50,7 +47,6 @@ export function useConnectionController() {
     connectedEnvironments,
     connectPairingUrl,
     removeEnvironment,
-    retryEnvironment,
     setEnvironmentEnabled,
     updateEnvironment,
   };

@@ -2,6 +2,9 @@
 // owned copy of the activity sidebar's unsent drafts w/ the two-line card, from components/sidebar/SidebarDraftBlock.tsx
 import "./sidebarTokens.css";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
+import type { ContextMenuSource } from "@t3tools/contracts";
+import { contextMenuSourceOf } from "../contextMenuSource";
+import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { SquarePenIcon, XIcon } from "lucide-react";
 import {
@@ -31,11 +34,17 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   isActive: boolean;
   onNavigate: (draftId: DraftId) => void;
   onDiscard: (draftId: DraftId) => void;
-  onContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
+  onContextMenu: (
+    draftId: DraftId,
+    position: { x: number; y: number },
+    source: ContextMenuSource,
+  ) => void;
 }) {
   const { composer, draftId, onContextMenu, onDiscard, onNavigate } = props;
   const promptPreview =
-    replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label)
+    assistantCitationsToPlainText(
+      replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label),
+    )
       .trim()
       .split("\n", 1)[0] ?? "";
   // images mirrors persistedAttachments once rehydration finishes; before
@@ -65,7 +74,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       event.preventDefault();
       const rect = event.currentTarget.getBoundingClientRect();
-      onContextMenu(draftId, { x: rect.left, y: rect.bottom });
+      onContextMenu(draftId, { x: rect.left, y: rect.bottom }, "keyboard");
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onNavigate(draftId);
@@ -73,7 +82,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   };
   const handleContextMenu = (event: ReactMouseEvent) => {
     event.preventDefault();
-    onContextMenu(draftId, { x: event.clientX, y: event.clientY });
+    onContextMenu(draftId, { x: event.clientX, y: event.clientY }, contextMenuSourceOf(event));
   };
   const handleDiscard = (event: ReactMouseEvent) => {
     event.preventDefault();
@@ -99,12 +108,10 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         onContextMenu={handleContextMenu}
         onKeyDown={handleKeyDown}
       >
-        <span className="sr-only">{preview}</span>
         <div className="relative z-10 h-12.5 px-(--sidebar-row-content-inset) py-1.5">
           <div className="flex h-5 min-w-0 items-center gap-1.5">
             <SquarePenIcon aria-hidden className={draftPenClassName} />
             <span
-              aria-hidden
               className={cn(
                 "min-w-0 flex-1 truncate text-start text-(length:--fincke-sidebar-row-text) font-normal",
                 props.isActive ? "text-(--fincke-sidebar-selected-text)" : "text-foreground/90",
@@ -167,7 +174,11 @@ export const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   scopedProjectKeys: ReadonlySet<string> | null;
   routeDraftId: string | null;
   onNavigateToDraft: (draftId: DraftId) => void;
-  onDraftContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
+  onDraftContextMenu: (
+    draftId: DraftId,
+    position: { x: number; y: number },
+    source: ContextMenuSource,
+  ) => void;
 }) {
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const draftsByThreadKey = useComposerDraftStore((store) => store.draftsByThreadKey);

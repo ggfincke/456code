@@ -24,6 +24,20 @@ html[data-theme-id="fincke-ocean"] [data-slot="user-message-bubble"] .chat-markd
   color: inherit;
 }
 
+/* a quoted response sits in a canvas well, its quoted words in teal */
+html[data-theme-id="fincke-ocean"] [data-response-card] {
+  background: color-mix(in srgb, var(--background) 70%, transparent);
+}
+
+html[data-theme-id="fincke-ocean"] [data-response-card]:hover {
+  background: var(--background);
+}
+
+html[data-theme-id="fincke-ocean"] [data-response-card] mark {
+  background: color-mix(in srgb, var(--fincke-teal) 14%, transparent);
+  color: var(--fincke-teal);
+}
+
 /* the approval drawer becomes a neutral card; FinckeApprovalCard owns its padding and tint */
 html[data-theme-id="fincke-ocean"]
   [data-chat-composer-top-drawer]:has(> [data-slot="fincke-approval-card"]) {

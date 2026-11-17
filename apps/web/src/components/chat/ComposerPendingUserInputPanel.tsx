@@ -237,7 +237,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       }
       if (
         target instanceof HTMLElement &&
-        target.closest('[contenteditable]:not([contenteditable="false"])')
+        target.closest(
+          'select, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [aria-modal="true"], [role="menu"], [role="combobox"], [data-slot$="popup"]',
+        )
       ) {
         return;
       }
@@ -392,6 +394,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               text={activeQuestion.question}
               cwd={cwd}
               threadRef={threadRef}
+              lineBreaks
               className={cn("pt-0.5 text-foreground/85", questionTextAlign)}
             />
             {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
@@ -404,44 +407,55 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 const isSelected =
                   isOptimisticallySelected || draftSelectedOptions?.[index] === true;
                 // The h-5 slots match the label's line box, so the indicator and shortcut stay on its first line.
+                // The preview sits outside the button: it can hold links, and a click on a single-select option advances.
                 return (
-                  <button
-                    key={`${activeQuestion.id}:${optionValue}`}
-                    type="button"
-                    aria-pressed={isSelected}
-                    disabled={responseDisabled}
-                    data-pending-user-input-enter
-                    onClick={() => {
-                      handleOptionSelection(activeQuestion.id, optionValue);
-                    }}
-                    className={optionRowClassName(isSelected)}
-                  >
-                    <span className="pointer-events-none flex h-5 shrink-0 items-center">
-                      {activeQuestion.multiSelect ? (
-                        <CheckboxMark checked={isSelected} variant="contrast" />
-                      ) : (
-                        <OptionRadio checked={isSelected} />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                      <span className="text-sm font-medium" dir={textDirection(option.label)}>
-                        {option.label}
+                  <div key={`${activeQuestion.id}:${optionValue}`}>
+                    <button
+                      type="button"
+                      aria-pressed={isSelected}
+                      disabled={responseDisabled}
+                      data-pending-user-input-enter
+                      onClick={() => {
+                        handleOptionSelection(activeQuestion.id, optionValue);
+                      }}
+                      className={optionRowClassName(isSelected)}
+                    >
+                      <span className="pointer-events-none flex h-5 shrink-0 items-center">
+                        {activeQuestion.multiSelect ? (
+                          <CheckboxMark checked={isSelected} variant="contrast" />
+                        ) : (
+                          <OptionRadio checked={isSelected} />
+                        )}
                       </span>
-                      {option.description && option.description !== option.label ? (
-                        <span
-                          className="text-secondary-label text-2xs"
-                          dir={textDirection(option.description)}
-                        >
-                          {option.description}
+                      <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                        <span className="text-sm font-medium" dir={textDirection(option.label)}>
+                          {option.label}
+                        </span>
+                        {option.description && option.description !== option.label ? (
+                          <span
+                            className="text-secondary-label text-2xs"
+                            dir={textDirection(option.description)}
+                          >
+                            {option.description}
+                          </span>
+                        ) : null}
+                      </div>
+                      {index < 9 ? (
+                        <span className="flex h-5 w-7 shrink-0 items-center justify-center sm:w-6">
+                          <Kbd>{index + 1}</Kbd>
                         </span>
                       ) : null}
-                    </div>
-                    {index < 9 ? (
-                      <span className="flex h-5 w-7 shrink-0 items-center justify-center sm:w-6">
-                        <Kbd>{index + 1}</Kbd>
-                      </span>
+                    </button>
+                    {option.preview ? (
+                      <ChatMarkdown
+                        text={option.preview}
+                        cwd={cwd}
+                        threadRef={threadRef}
+                        lineBreaks
+                        className="ps-9 pe-2 pb-1.5 text-xs text-foreground/70 sm:ps-8"
+                      />
                     ) : null}
-                  </button>
+                  </div>
                 );
               })}
               {allowsCustomAnswer ? (
