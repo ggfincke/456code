@@ -485,7 +485,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     );
   });
 
-  const waitForEstablishmentInterrupt = Effect.fnUntraced(function* () {
+  const waitForEstablishmentInterrupt = Effect.fnUntraced(function* (ignoreOffline: boolean) {
     // A primary attempt keeps running through an offline report, so the
     // network returning restarts it in case it stalled meanwhile.
     let deviceOffline = (yield* connectivity.status) === "offline";
@@ -493,11 +493,17 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       const next = yield* Queue.take(signals);
       switch (next._tag) {
         case "DisconnectRequested":
-        case "RetryRequested":
           return false;
+        case "RetryRequested":
+          // Once the loop has taken this retry's flag, the running attempt is
+          // the one the retry asked for.
+          if (yield* Ref.get(resetRetryState)) {
+            return false;
+          }
+          break;
         case "NetworkChanged":
           if (target._tag !== "PrimaryConnectionTarget") {
-            if (next.network === "offline") {
+            if (next.network === "offline" && !ignoreOffline) {
               return false;
             }
           } else if (next.network === "offline") {
@@ -582,6 +588,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     }
   };
 
+  const isForegroundProbe = (next: SupervisorSignal) =>
+    next._tag === "Wakeup" && next.reason === "application-active";
+
   // Ends "silent" when the host answers a fresh request while the socket
   // delivers nothing, as when iOS kills a suspended socket without a close
   // event, and "alive" once the socket delivers a frame. A slow or
@@ -663,7 +672,11 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         continue;
       }
       yield* Ref.set(probeUnanswered, true);
-      const probe = yield* Effect.forkChild(lease.session.probe);
+      let probe = yield* Effect.forkChild(lease.session.probe);
+      // A busy server can miss one foreground probe while the socket is still
+      // healthy, so the first miss asks again and only the follow-up's miss
+      // replaces the session.
+      let toleratesMiss = isForegroundProbe(next);
       let silentSocket: Fiber.Fiber<"silent" | "alive"> | undefined;
       // A signal during a running check, such as a network change that kills
       // the socket, needs a fresh check only if the running one sees a frame.
@@ -676,7 +689,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       // The web and desktop foreground probe allows a busy host 15 seconds,
       // and a busy host can answer a fresh request before a queued probe.
       const armSilentSocketCheck = Effect.fnUntraced(function* (signal: SupervisorSignal) {
-        if (signal._tag === "Wakeup" && signal.reason === "application-active") return;
+        if (isForegroundProbe(signal)) return;
         if (silentSocket !== undefined) {
           recheck = true;
           return;
@@ -728,6 +741,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           return true;
         }
         if (probeEvent._tag === "TimedOut") {
+          if (toleratesMiss) {
+            toleratesMiss = false;
+            yield* Fiber.interrupt(probe);
+            probe = yield* Effect.forkChild(lease.session.probe);
+            deadline = (yield* Clock.monotonicTimeNanos) + Duration.toNanosUnsafe(probeTimeout);
+            continue;
+          }
           yield* stopProbe;
           // A long suspension leaves the socket suspect even when the network
           // reports offline, so it is replaced like a silent one.
@@ -752,6 +772,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         }
         const signalTimeout = probeTimeoutFor(probeEvent.signal, routeKind);
         if (signalTimeout !== undefined) {
+          // A retry or network signal wants a definite answer, even when its
+          // own deadline lands after the foreground one.
+          if (!isForegroundProbe(probeEvent.signal)) toleratesMiss = false;
           if (isLongResume(probeEvent.signal) && !longResume) {
             longResume = true;
             longResumeStartedAt = yield* Clock.monotonicTimeNanos;
@@ -790,7 +813,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           exit,
         })),
       ),
-      waitForEstablishmentInterrupt().pipe(
+      waitForEstablishmentInterrupt(ignoreOffline).pipe(
         Effect.map((resetRetry): EstablishmentEvent => ({
           _tag: "Interrupted",
           resetRetry,
@@ -991,7 +1014,8 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     let replacing = false;
 
     for (;;) {
-      if (yield* Ref.getAndSet(resetRetryState, false)) {
+      const retryRequested = yield* Ref.getAndSet(resetRetryState, false);
+      if (retryRequested) {
         failureCount = 0;
         latestFailure = null;
         pendingRetry = Option.none();
@@ -1005,7 +1029,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         yield* waitForSignal;
         continue;
       }
-      if (currentIntent.network === "offline" && !replacing) {
+      // The platform's offline report can stay wrong after the network is back,
+      // so an explicit retry still tries instead of waiting for it to change.
+      const ignoreOffline = replacing || retryRequested;
+      if (currentIntent.network === "offline" && !ignoreOffline) {
         yield* clearLease;
         yield* setState(offlineState(currentIntent, generation, failureCount + 1, latestFailure));
         const applicationActivated = yield* waitForSignal;
@@ -1018,7 +1045,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       const attempt = failureCount + 1;
       const nextGeneration = generation + 1;
       const outcome: AttemptOutcome = yield* Effect.scoped(
-        runAttempt(attempt, nextGeneration, latestFailure, pendingRetry, replacing),
+        runAttempt(attempt, nextGeneration, latestFailure, pendingRetry, ignoreOffline),
       );
       replacing = false;
       const failedProbe = yield* Ref.getAndSet(probeUnanswered, false);

@@ -22,6 +22,8 @@ import {
   type DesktopUpdateState,
   type DesktopWslState,
   type EnvironmentId,
+  type ServerAuthPolicy,
+  type ServerDirectEndpoint,
 } from "@t3tools/contracts";
 import {
   getDesktopUpdateDownloadedVersion,
@@ -299,6 +301,15 @@ export function selectPairingEndpoint(
     availableEndpoints.find((endpoint) => endpoint.reachability !== "loopback") ??
     null
   );
+}
+
+/** A loopback server advertises a direct endpoint only once its Tailscale Serve URL answers. */
+export function isServerNetworkAccessible(input: {
+  readonly authPolicy: ServerAuthPolicy | null;
+  readonly directEndpoints: ReadonlyArray<ServerDirectEndpoint> | undefined;
+}): boolean {
+  if (input.authPolicy === "remote-reachable") return true;
+  return input.authPolicy === "loopback-browser" && (input.directEndpoints?.length ?? 0) > 0;
 }
 
 export function isTailscaleHttpsEndpoint(endpoint: AdvertisedEndpoint): boolean {

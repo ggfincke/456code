@@ -1,5 +1,7 @@
 // packages/shared/src/promptLinks.ts
 // parses explicit prompt links without sending messages
+import { parseUrl } from "./url.ts";
+
 const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
 
 export interface PromptLinkRepository {
@@ -168,8 +170,8 @@ const APP_SCHEME = /^(?:t3code(?:-[a-z]+)?|code456-thin(?:-dev)?):$/;
 const THREAD_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
 
 export function promptLinkAppPath(value: string): string | null {
-  if (!URL.canParse(value)) return null;
-  const url = new URL(value);
+  const url = parseUrl(value);
+  if (!url) return null;
   if (!APP_SCHEME.test(url.protocol)) return null;
   if (url.host === "new" && (url.pathname === "" || url.pathname === "/")) {
     return `/new${url.search}`;

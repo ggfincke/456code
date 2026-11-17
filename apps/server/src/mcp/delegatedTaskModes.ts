@@ -10,7 +10,7 @@ import {
 import * as Effect from "effect/Effect";
 
 /** How much a runtime mode allows, narrowest first. */
-function runtimeModeRank(mode: RuntimeMode): number {
+export function runtimeModeRank(mode: RuntimeMode): number {
   switch (mode) {
     case "approval-required":
       return 0;

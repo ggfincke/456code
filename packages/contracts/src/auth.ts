@@ -317,16 +317,6 @@ export const AuthPairingCredentialResult = Schema.Struct({
 });
 export type AuthPairingCredentialResult = typeof AuthPairingCredentialResult.Type;
 
-export const AuthPairingLink = Schema.Struct({
-  id: TrimmedNonEmptyString,
-  ...authScopeResponseFields,
-  subject: TrimmedNonEmptyString,
-  label: Schema.optionalKey(TrimmedNonEmptyString),
-  createdAt: Schema.DateTimeUtc,
-  expiresAt: Schema.DateTimeUtc,
-});
-export type AuthPairingLink = typeof AuthPairingLink.Type;
-
 export const AuthClientMetadata = Schema.Struct({
   label: Schema.optionalKey(TrimmedNonEmptyString),
   ipAddress: Schema.optionalKey(TrimmedNonEmptyString),
@@ -336,6 +326,16 @@ export const AuthClientMetadata = Schema.Struct({
   browser: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type AuthClientMetadata = typeof AuthClientMetadata.Type;
+
+export const AuthPairingLink = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  ...authScopeResponseFields,
+  subject: TrimmedNonEmptyString,
+  label: Schema.optionalKey(TrimmedNonEmptyString),
+  createdAt: Schema.DateTimeUtc,
+  expiresAt: Schema.DateTimeUtc,
+});
+export type AuthPairingLink = typeof AuthPairingLink.Type;
 
 export const AuthClientSession = Schema.Struct({
   sessionId: AuthSessionId,

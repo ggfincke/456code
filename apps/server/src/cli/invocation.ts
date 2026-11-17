@@ -152,7 +152,8 @@ export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand
 ) {
   const platform = yield* HostProcess.Platform;
   const withArgs = (prefix: string) =>
-    [prefix, ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
+    // An empty subcommand names the root `t3` command.
+    [prefix.trimEnd(), ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
   const command = yield* resolveCliCommand(subcommand);
   if (command !== `t3 ${subcommand}`) return { command: withArgs(command), launcher: false };
   const onPath = yield* resolveCommandPath("t3");
@@ -160,8 +161,17 @@ export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand
     const shim = (yield* HostProcess.Environment).T3CODE_CLI_PATH?.trim();
     const fs = yield* FileSystem.FileSystem;
     const real = (file: string) => fs.realPath(file).pipe(Effect.orElseSucceed(() => null));
-    const shimReal = shim ? yield* real(shim) : null;
-    if (shimReal === null || shimReal === (yield* real(onPath))) {
+    // Windows `t3.cmd` shims are text files that never realpath to the executable they run.
+    const own = shim
+      ? yield* real(shim)
+      : platform !== "win32" && (yield* HostProcess.IsExecutable)
+        ? yield* resolveEntryPath.pipe(
+            Effect.flatMap((entry) =>
+              real(entry).pipe(Effect.map((resolved) => resolved ?? entry)),
+            ),
+          )
+        : null;
+    if (own === null || own === (yield* real(onPath))) {
       return { command: withArgs(command), launcher: false };
     }
   }

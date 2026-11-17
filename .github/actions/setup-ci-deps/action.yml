@@ -17,7 +17,7 @@ runs:
     - name: Cache Vite+
       id: vp_cache
       if: steps.vp.outputs.version != ''
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.vite-plus
         key: vite-plus-home-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.vp.outputs.version }}-node${{ steps.vp.outputs.node }}-${{ steps.vp.outputs.pnpm }}
@@ -35,7 +35,7 @@ runs:
 
     - name: Setup Vite+
       if: steps.vp_cache.outputs.cache-hit != 'true'
-      uses: voidzero-dev/setup-vp@v1
+      uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
       with:
         node-version-file: package.json
         cache: false
@@ -55,7 +55,7 @@ runs:
     # package across filesystems instead of hard-linking it: install took 28-49s
     # against 9s plus an 11s restore.
     - name: Cache full pnpm store
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.pnpm_store.outputs.path }}
         key: pnpm-full-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json') }}

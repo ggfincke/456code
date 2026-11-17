@@ -8,6 +8,7 @@
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
 - Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
 - September 14 upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101`.
+- November 17 upstream base: stable tag `v0.1.10`, `7d32075e3757ded707914e2450c3e392a9665765` (1,924 commits after v0.1.9).
 - November 9 upstream base: stable tag `v0.1.8`, `bf469bb19669671d0df2efda74ed73867a7137c0` (510 commits after v0.1.7).
 - November 4 upstream base: stable tag `v0.1.7`, `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`.
 - October 31 upstream base: stable tag `v0.1.6`, `2359643cffa6ba9ee84d6f2694b935de54a8013e` (521 commits after v0.1.5).
@@ -88,6 +89,19 @@ Kept: `build-desktop-artifact.ts` with its Windows internals, `update-release-pa
 - Android build, e2e, showcase and Kotlin lint tooling, the `android*`, `eas:android:*` and `icons:export:android` scripts, the EAS Android profiles, and the Android fingerprint check.
 
 Remaining: the Device panel's Android emulator support for agent testing (`DevicePlatform` `"android"`, the server's adb/AVD code, fold controls and the iOS app's display of remote Android streams), `ClientOs` `"Android"` for Android browsers, the inline `Platform.OS === "android"` ternaries in shared mobile files (kept to limit upstream conflicts), and mixed patches such as `expo-audio`, `expo-video`, `expo-sharing` and `react-native-image-viewing`. Upstream updates must not restore the removed Android client files. The iOS native fingerprint changed, so the next OTA needs a fresh `ios:release` build first.
+
+## November 17 update (v0.1.10)
+
+Merged stable tag `v0.1.10` (`7d32075e37`), 1,924 commits past `v0.1.9`. Principles review notes:
+
+- T3 Connect device approval is removed. Migrations 090 and 091 stay registered as unused schema so migration IDs match upstream.
+- The dormant service launcher keeps the fork's shape. Upstream's service selection lock, legacy server owner and older boot-service home check were not taken.
+- Kept: keep the computer awake while agents work (on by default), agent-published themes and background images, reply from an assistant message, quote cards, and sidebar folder drop. Folder drop also covers the project sidebar and only adds folders to this computer's server.
+- Translation plumbing is kept but the Language setting is hidden on web and iOS, so the app stays English.
+- The question card keeps the fork's step layout on top of upstream's draft state, with upstream's preview, line break, Stop and upload fixes.
+- Outbound, managed provider installs only, throttled by the update-check interval: managed Codex checks `registry.npmjs.org/@openai/codex/latest` and downloads checksums and releases from `github.com/openai/codex/releases`. Managed Antigravity reads its manifest from `antigravity-cli-auto-updater-974169037036.us-central1.run.app` and downloads from `storage.googleapis.com/antigravity-public`. Custom binary paths skip both.
+- Removed again: scheduled-task webhook URLs (relay only), triage, the relay client ledger, desktop SSH update markers, upstream's PR limit and vouch workflows, Android additions and marketing additions. GitHub Actions are pinned to commit SHAs.
+- The desktop update poll stays at the fork's 4 minutes for staged local updates, not upstream's 4 hours.
 
 ## November 9 update (v0.1.8)
 

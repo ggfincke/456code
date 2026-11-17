@@ -131,7 +131,7 @@ vi.mock("../features/settings/appearance/AppearancePreferencesProvider", () => (
   useAppearancePreferences: () => ({ themeId: "t3-classic" }),
 }));
 vi.mock("../features/settings/appearance/useScaledTextRole", () => ({
-  useScaledTextRole: () => ({ fontSize: 16, lineHeight: 22 }),
+  useComposerTextRole: () => ({ fontSize: 16, lineHeight: 22 }),
 }));
 vi.mock("../lib/uuid", () => ({ uuidv4: () => "uuid", randomHex: () => "0000" }));
 vi.mock("../state/assets", () => ({ assetEnvironment: {} }));

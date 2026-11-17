@@ -42,11 +42,13 @@ prints one JSON line; on failure it names the next command. Authorized mobile
 verification includes that step unless the user prohibits it.
 
 For a device you opened in an agent-device session elsewhere (a device pool,
-cloud, or remote host), run `vp run mobile:install ios --session <s>`
-from the directory you opened the session in. It installs the cached build into
-that session (`--metro <url>` also opens it against Metro), building it here first on a cache miss. Run
-`vp run mobile:install ios --prepare` before leasing a device so a
-build does not outlast the lease.
+cloud, or remote host), run `vp run mobile:install ios --session <s>
+--config <file>` from the directory you opened the session in, passing the
+`--config` file from `device_open`'s `targetArgs`. Without it, a device pool's
+gateway refuses the install, wrongly saying agent-device is too old. It installs
+the cached build into that session (`--metro <url>` also opens it against Metro).
+Without a cached build for this checkout it builds first, which can outlast the
+lease, so run `vp run mobile:install ios --prepare` before you open the device.
 
 Start `vp run dev:client` from `apps/mobile`, or reuse a healthy Metro belonging
 to this checkout. Open its printed development-client URL with AgentDevice
