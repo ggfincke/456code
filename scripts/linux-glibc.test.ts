@@ -111,10 +111,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("packaged ELF s
           await afterPack({ appOutDir: app, electronPlatformName: "linux", targets: [deb] });
         }
         expect(deb.options.depends).toEqual(["libnss3", "libc6 (>= 2.34)"]);
-        await NodeFSP.writeFile(NodePath.join(native, "helper"), elfFixture(machine, "2.40"));
+        await NodeFSP.writeFile(NodePath.join(native, "helper"), elfFixture(machine, "2.99"));
         await expect(
           afterPack({ appOutDir: app, electronPlatformName: "linux", targets: [deb] }),
-        ).rejects.toThrow(/helper.*GLIBC_2\.40.*2\.39/s);
+        ).rejects.toThrow(/helper.*GLIBC_2\.99.*exceeding build ceiling/s);
         await NodeFSP.writeFile(NodePath.join(native, "helper"), Buffer.from("\x7fELFbroken"));
         await expect(scanGlibcNeeds(app)).rejects.toThrow(/helper/);
       } finally {
