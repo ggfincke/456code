@@ -1,5 +1,6 @@
 // apps/mobile/src/connection/platform.ts
 // supplies native client connectivity and authentication capabilities
+import { DpopProof } from "@t3tools/client-runtime/authorization";
 import { ClientCapabilities, PlatformConnectionSource } from "@t3tools/client-runtime/platform";
 import { Connectivity, Wakeups } from "@t3tools/client-runtime/connection";
 import * as Clock from "effect/Clock";
@@ -13,8 +14,10 @@ import * as Network from "expo-network";
 import { AppState } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
+import * as ExpoCrypto from "../lib/expoCrypto";
 import * as Runtime from "../lib/runtime";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
+import { loadOrCreateProofKey } from "./dpop";
 import * as EnvironmentOwnedDataCleanup from "./environment-owned-data-cleanup";
 import * as ConnectionStorage from "./storage";
 
@@ -161,6 +164,9 @@ const layerPlatformConnectionSource = Layer.succeed(
 
 const layerProvidedConnectionStorage = ConnectionStorage.layer.pipe(Layer.provide(Runtime.layer));
 const layerProvidedCapabilities = layerCapabilities.pipe(Layer.provide(Runtime.layer));
+const layerDpopSigner = DpopProof.layerSigner(loadOrCreateProofKey()).pipe(
+  Layer.provide(ExpoCrypto.layer),
+);
 
 type ConnectionPlatformLayerSource =
   | typeof layerProvidedConnectionStorage
@@ -168,6 +174,7 @@ type ConnectionPlatformLayerSource =
   | typeof layerConnectivity
   | typeof layerWakeups
   | typeof layerProvidedCapabilities
+  | typeof layerDpopSigner
   | typeof layerPlatformConnectionSource
   | typeof EnvironmentOwnedDataCleanup.layer;
 
@@ -181,6 +188,7 @@ export const layer: Layer.Layer<
   layerConnectivity,
   layerWakeups,
   layerProvidedCapabilities,
+  layerDpopSigner,
   layerPlatformConnectionSource,
   EnvironmentOwnedDataCleanup.layer,
 );

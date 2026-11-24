@@ -14,11 +14,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import { appendClientConnectionParams } from "../authorization/remote.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
-import {
-  BearerConnectionCredential,
-  BearerConnectionProfile,
-  type ConnectionCatalogEntry,
-} from "./catalog.ts";
+import { BearerConnectionProfile, type ConnectionCatalogEntry } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import {
   credentialMissingError,
@@ -61,7 +57,6 @@ export class ConnectionResolver extends Context.Service<
 >()("@t3tools/client-runtime/connection/resolver/ConnectionResolver") {}
 
 const isBearerProfile = Schema.is(BearerConnectionProfile);
-const isBearerCredential = Schema.is(BearerConnectionCredential);
 
 function primarySocketUrl(
   target: PrimaryConnectionTarget,
@@ -140,16 +135,21 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         }),
       ),
     );
-    if (!isBearerCredential(credential)) {
-      return yield* credentialMissingError(target.connectionId);
-    }
-    const authorized = yield* remote.authorizeBearer({
-      expectedEnvironmentId: target.environmentId,
-      httpBaseUrl: profile.httpBaseUrl,
-      wsBaseUrl: profile.wsBaseUrl,
-      bearerToken: credential.token,
-      connectionMethod: "direct",
-    });
+    const authorized =
+      credential._tag === "DpopConnectionCredential"
+        ? yield* remote.authorizeDirectDpop({
+            expectedEnvironmentId: target.environmentId,
+            connectionId: credentialConnectionId(target.connectionId),
+            httpBaseUrl: profile.httpBaseUrl,
+            wsBaseUrl: profile.wsBaseUrl,
+          })
+        : yield* remote.authorizeBearer({
+            expectedEnvironmentId: target.environmentId,
+            httpBaseUrl: profile.httpBaseUrl,
+            wsBaseUrl: profile.wsBaseUrl,
+            bearerToken: credential.token,
+            connectionMethod: "direct",
+          });
     return {
       ...authorized,
       target,

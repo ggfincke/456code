@@ -52,6 +52,7 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
     remove: (connectionId) => Effect.sync(() => void credentials.delete(connectionId)),
   });
   const remote = RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization.of({
+    authorizeDirectDpop: () => Effect.die("unused"),
     authorizeBearer:
       options?.authorizeBearer ??
       ((input) =>

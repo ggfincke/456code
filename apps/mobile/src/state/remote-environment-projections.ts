@@ -62,7 +62,7 @@ export function createRemoteEnvironmentProjectionAtoms(input: {
         displayUrl,
         httpBaseUrl,
         wsBaseUrl,
-        bearerToken: authorization?.token ?? null,
+        bearerToken: authorization?._tag === "Bearer" ? authorization.token : null,
       };
       return previous;
     }).pipe(Atom.withLabel(`mobile:saved-connection:${environmentId}`));

@@ -1,4 +1,5 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+import type * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 const ConnectionTargetBase = {
@@ -116,9 +117,47 @@ export class ConnectionBlockedError extends Schema.TaggedError<ConnectionBlocked
 
 export type ConnectionAttemptError = ConnectionTransientError | ConnectionBlockedError;
 
-export interface PreparedHttpAuthorization {
-  readonly _tag: "Bearer";
-  readonly token: string;
+export const DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
+
+export interface DirectDpopConnection {
+  /** The credential store key. */
+  readonly connectionId: string;
+  readonly httpBaseUrl: string;
+}
+
+/**
+ * A device-key token plus what it needs to stay valid, so request sites never handle the signer
+ * or credential store themselves.
+ */
+export interface DpopHttpAuthorization {
+  readonly _tag: "Dpop";
+  readonly accessToken: string;
+  readonly expiresAtEpochMs: number;
+  readonly directConnection: DirectDpopConnection;
+  /** The current token, renewed when near expiry or when the host rejected `rejectedAccessToken`. */
+  readonly current: (
+    rejectedAccessToken?: string,
+  ) => Effect.Effect<DpopHttpAuthorization, ConnectionAttemptError>;
+  readonly createProof: (input: {
+    readonly method: string;
+    readonly url: string;
+    readonly accessToken: string;
+  }) => Effect.Effect<string, ConnectionAttemptError>;
+  /** Keeps a live socket's session renewed until interrupted or its credential is refused. */
+  readonly renewBeforeExpiry: Effect.Effect<void, ConnectionAttemptError>;
+}
+
+export type PreparedHttpAuthorization =
+  | {
+      readonly _tag: "Bearer";
+      readonly token: string;
+    }
+  | DpopHttpAuthorization;
+
+export interface DirectDpopConnection {
+  /** The credential store key. */
+  readonly connectionId: string;
+  readonly httpBaseUrl: string;
 }
 
 export interface PreparedConnection {

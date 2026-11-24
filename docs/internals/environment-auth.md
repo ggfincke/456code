@@ -25,6 +25,16 @@ DPoP proofs for clients that send them. DPoP binds a token to a client's proof k
 an invalid proof must fail rather than fall back to bearer authentication. The OAuth token-exchange
 vocabulary gives these grants a familiar meaning.
 
+A device that exchanges a plain pairing link with a DPoP proof gets a one-hour
+token on a session that renews: presenting the token, even expired, with a
+proof from the same key moves the session's expiry 30 days out and returns a
+fresh token for the same session. The session itself must still be unexpired
+and unrevoked, so a device idle past the window pairs again. Renewal stays in place rather than issuing a
+successor, so live sockets keep their session, Sharing & access shows one row
+per device for its whole renewal window, and one revoke ends it. CLI,
+desktop and peer sessions never renew, so rotating their credential still
+cuts a device off.
+
 ### MCP clients are a separate audience
 
 Agents T3 Code did not launch sign in to `/mcp` through a narrow OAuth
