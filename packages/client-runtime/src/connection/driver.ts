@@ -212,6 +212,15 @@ export const make = Effect.gen(function* () {
         const session = yield* sessions.connect(prepared);
         yield* reportProgress({ stage: "synchronizing", prepared });
         yield* session.ready;
+        // the server closes a socket when its session expires unless the same key renewed it
+        if (prepared.httpAuthorization?._tag === "Dpop") {
+          yield* prepared.httpAuthorization.renewBeforeExpiry.pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Could not renew the connection's credential.", { error }),
+            ),
+            Effect.forkScoped,
+          );
+        }
         return { prepared, session } satisfies EnvironmentConnectionLease;
       }),
     );

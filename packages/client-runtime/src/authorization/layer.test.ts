@@ -67,6 +67,7 @@ const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (
   const layer = RemoteEnvironmentAuthorization.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
+        ConnectionCredentialStore.layerMemory(),
         RpcHttp.layerRemoteHttpClient(fetch.fetchFn),
         Layer.succeed(
           ClientCapabilities.ClientPresentation,

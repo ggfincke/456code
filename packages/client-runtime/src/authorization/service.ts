@@ -1,21 +1,43 @@
 // packages/client-runtime/src/authorization/service.ts
 // authorizes remote environments with bearer tokens
 import {
+  AuthAccessTokenType,
   type ClientConnectionMethod,
   EnvironmentId,
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
-import { resolveRemoteWebSocketConnectionUrl } from "./remote.ts";
-import { environmentMismatchError, mapRemoteEnvironmentError } from "../connection/errors.ts";
-import type { ConnectionAttemptError, PreparedHttpAuthorization } from "../connection/model.ts";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
+import * as DpopProof from "./dpopProof.ts";
+import {
+  exchangeRemoteDpopAccessToken,
+  resolveRemoteDpopWebSocketConnectionUrl,
+  resolveRemoteWebSocketConnectionUrl,
+} from "./remote.ts";
+import { DpopConnectionCredential } from "../connection/catalog.ts";
+import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
+import {
+  credentialMissingError,
+  environmentMismatchError,
+  mapRemoteEnvironmentError,
+} from "../connection/errors.ts";
+import {
+  ConnectionBlockedError,
+  DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS,
+  type ConnectionAttemptError,
+  type DirectDpopConnection,
+  type DpopHttpAuthorization,
+  type PreparedHttpAuthorization,
+} from "../connection/model.ts";
 import { isNearbyAddress } from "../connection/routes.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
+import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as HttpClient from "effect/http/HttpClient";
 
 export interface AuthorizedRemoteEnvironment {
@@ -36,6 +58,13 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
       readonly wsBaseUrl: string;
       readonly bearerToken: string;
       readonly connectionMethod: ClientConnectionMethod;
+    }) => Effect.Effect<AuthorizedRemoteEnvironment, ConnectionAttemptError>;
+    /** A saved address paired with this device's DPoP key, which renews with the host itself. */
+    readonly authorizeDirectDpop: (input: {
+      readonly expectedEnvironmentId: EnvironmentId;
+      readonly connectionId: string;
+      readonly httpBaseUrl: string;
+      readonly wsBaseUrl: string;
     }) => Effect.Effect<AuthorizedRemoteEnvironment, ConnectionAttemptError>;
     /**
      * Lets the next direct authorization of this address skip its own descriptor
@@ -67,6 +96,9 @@ const fetchDescriptor = Effect.fn("clientRuntime.connection.remote.fetchDescript
 const make = Effect.gen(function* () {
   const presentation = yield* ClientCapabilities.ClientPresentation;
   const httpClient = yield* HttpClient.HttpClient;
+  const signer = yield* Effect.serviceOption(DpopProof.DpopSigner);
+  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+  const directTokenLocks = yield* KeyedLock.make<string>();
 
   // A route or host check hands its descriptor to the connect it leads to, once,
   // so the connect skips a round trip. Only over HTTPS or loopback: any other
@@ -145,8 +177,151 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const createProof = (proof: DpopProof.DpopProofRequest) =>
+    Option.isNone(signer)
+      ? Effect.fail(
+          new ConnectionBlockedError({
+            reason: "configuration",
+            detail: "This client cannot sign with a device key.",
+          }),
+        )
+      : signer.value.createProof(proof).pipe(
+          Effect.mapError(
+            () =>
+              new ConnectionBlockedError({
+                reason: "configuration",
+                detail: "Could not create the environment authorization proof.",
+              }),
+          ),
+        );
+
+  // requests for one credential share a renewal w/o waiting on other hosts
+  const directDpopToken = Effect.fn("clientRuntime.connection.remote.directDpopToken")(function* (
+    connection: DirectDpopConnection,
+    rejectedAccessToken?: string,
+  ) {
+    return yield* directTokenLocks.withLock(
+      connection.connectionId,
+      Effect.gen(function* () {
+        const stored = yield* credentials.get(connection.connectionId);
+        if (Option.isNone(stored) || stored.value._tag !== "DpopConnectionCredential") {
+          return yield* credentialMissingError(connection.connectionId);
+        }
+        const current = stored.value;
+        const now = yield* Clock.currentTimeMillis;
+        if (
+          current.accessToken !== rejectedAccessToken &&
+          current.expiresAtEpochMs - DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS > now
+        ) {
+          return current;
+        }
+        const dpopProof = yield* createProof({
+          method: "POST",
+          url: environmentEndpointUrl(connection.httpBaseUrl, "/oauth/token"),
+        });
+        const access = yield* exchangeRemoteDpopAccessToken({
+          httpBaseUrl: connection.httpBaseUrl,
+          credential: current.accessToken,
+          credentialType: AuthAccessTokenType,
+          dpopProof,
+        }).pipe(
+          Effect.mapError((error) => mapRemoteEnvironmentError(error, "direct")),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.withSpan("environment.authorization.directRenewal"),
+        );
+        const renewed = new DpopConnectionCredential({
+          accessToken: access.access_token,
+          expiresAtEpochMs: (yield* Clock.currentTimeMillis) + access.expires_in * 1_000,
+        });
+        yield* credentials.put(connection.connectionId, renewed);
+        return renewed;
+      }),
+    );
+  });
+
+  // untraced since a span here would stay open for the socket's lifetime
+  const renewDirectDpopBeforeExpiry = Effect.fnUntraced(function* (
+    connection: DirectDpopConnection,
+    initialExpiresAtEpochMs: number,
+  ) {
+    let expiresAtEpochMs = initialExpiresAtEpochMs;
+    while (true) {
+      const now = yield* Clock.currentTimeMillis;
+      // the floor spaces out retries & keeps a wall-clock jump from spinning
+      const floor = now < expiresAtEpochMs ? 5_000 : DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS;
+      yield* Effect.sleep(
+        Math.max(floor, expiresAtEpochMs - DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS - now),
+      );
+      const renewed = yield* directDpopToken(connection).pipe(
+        Effect.map((credential) => credential.expiresAtEpochMs),
+        Effect.withSpan("environment.authorization.renewSocket"),
+        Effect.catchTags({ ConnectionTransientError: () => Effect.succeed(expiresAtEpochMs) }),
+      );
+      expiresAtEpochMs = Math.max(expiresAtEpochMs, renewed);
+    }
+  });
+
+  const directHttpAuthorization = (
+    connection: DirectDpopConnection,
+    credential: DpopConnectionCredential,
+  ): DpopHttpAuthorization => ({
+    _tag: "Dpop",
+    accessToken: credential.accessToken,
+    expiresAtEpochMs: credential.expiresAtEpochMs,
+    directConnection: connection,
+    current: (rejectedAccessToken) =>
+      directDpopToken(connection, rejectedAccessToken).pipe(
+        Effect.map((renewed) => directHttpAuthorization(connection, renewed)),
+      ),
+    createProof,
+    renewBeforeExpiry: renewDirectDpopBeforeExpiry(connection, credential.expiresAtEpochMs),
+  });
+
+  const authorizeDirectDpop = Effect.fn("clientRuntime.connection.remote.authorizeDirectDpop")(
+    function* (
+      input: Parameters<RemoteEnvironmentAuthorization["Service"]["authorizeDirectDpop"]>[0],
+    ) {
+      const descriptor = yield* verifyDirectEndpoint({
+        expectedEnvironmentId: input.expectedEnvironmentId,
+        httpBaseUrl: input.httpBaseUrl,
+        connectionMethod: "direct",
+      });
+      const connection = { connectionId: input.connectionId, httpBaseUrl: input.httpBaseUrl };
+      const openSocket = (credential: DpopConnectionCredential) =>
+        resolveRemoteDpopWebSocketConnectionUrl({
+          wsBaseUrl: input.wsBaseUrl,
+          httpBaseUrl: input.httpBaseUrl,
+          accessToken: credential.accessToken,
+          createProof,
+          clientMetadata: presentation.metadata,
+        }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.result);
+      let credential = yield* directDpopToken(connection);
+      let socket = yield* openSocket(credential);
+      // a token the host refuses before its expiry, like after a clock jump, renews once
+      if (Result.isFailure(socket) && socket.failure._tag === "EnvironmentAuthInvalidError") {
+        credential = yield* directDpopToken(connection, credential.accessToken);
+        socket = yield* openSocket(credential);
+      }
+      if (Result.isFailure(socket)) {
+        const failure = socket.failure;
+        return yield* failure._tag === "ConnectionBlockedError"
+          ? failure
+          : mapRemoteEnvironmentError(failure, "direct");
+      }
+      return {
+        environmentId: descriptor.environmentId,
+        label: descriptor.label,
+        httpBaseUrl: input.httpBaseUrl,
+        socketUrl: socket.success,
+        descriptor,
+        httpAuthorization: directHttpAuthorization(connection, credential),
+      };
+    },
+  );
+
   return RemoteEnvironmentAuthorization.of({
     authorizeBearer,
+    authorizeDirectDpop,
     // Untraced: it runs on every route and host check.
     rememberCheckedDescriptor: Effect.fnUntraced(function* (httpBaseUrl, descriptor, keepsItsHost) {
       if (Option.isNone(descriptor) || !keepsItsHost) {

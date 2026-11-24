@@ -19,7 +19,7 @@ import {
   PrimaryConnectionTarget,
   Wakeups,
 } from "@t3tools/client-runtime/connection";
-import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
+import { bootstrapRemoteBearerSession, DpopProof } from "@t3tools/client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
 import { EnvironmentRpcRequestObserver } from "@t3tools/client-runtime/rpc";
 import {
@@ -38,6 +38,7 @@ import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/http";
 
 import { APP_VERSION } from "../branding";
+import * as ConnectionDpop from "./dpop";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
@@ -569,11 +570,16 @@ const layerRpcRequestObserver = Layer.succeed(
   }),
 );
 
+const layerDpopSigner = DpopProof.layerSigner(ConnectionDpop.loadOrCreateProofKey()).pipe(
+  Layer.provide(ConnectionDpop.layerCrypto),
+);
+
 type ConnectionPlatformLayerSource =
   | typeof ConnectionStorage.layer
   | typeof layerConnectivity
   | typeof layerWakeups
   | typeof layerCapabilities
+  | typeof layerDpopSigner
   | typeof layerPlatformConnectionSource
   | typeof layerEnvironmentOwnedDataCleanup
   | typeof layerRpcRequestObserver;
@@ -587,6 +593,7 @@ export const layer: Layer.Layer<
   layerConnectivity,
   layerWakeups,
   layerCapabilities,
+  layerDpopSigner,
   layerPlatformConnectionSource,
   layerEnvironmentOwnedDataCleanup,
   layerRpcRequestObserver,

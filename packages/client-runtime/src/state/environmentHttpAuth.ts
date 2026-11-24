@@ -2,6 +2,7 @@
 // authenticates environment requests without sharing upstream traces
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import {
   ORCHESTRATION_PROTOCOL_HEADER,
@@ -22,6 +23,7 @@ import {
 
 export interface EnvironmentHttpAuthHeaders {
   readonly authorization?: string;
+  readonly dpop?: string;
 }
 
 export function withOrchestrationProtocolHeader(
@@ -53,10 +55,25 @@ const withEnvironmentRequestInit = <A, E, R>(
   );
 };
 
-const environmentAuthHeaders = (
+const environmentAuthHeaders = Effect.fnUntraced(function* (
   authorization: PreparedHttpAuthorization | null,
-): EnvironmentHttpAuthHeaders =>
-  authorization === null ? {} : { authorization: `Bearer ${authorization.token}` };
+  method: HttpMethod.HttpMethod,
+  url: string,
+) {
+  if (authorization === null) return {} satisfies EnvironmentHttpAuthHeaders;
+  if (authorization._tag === "Bearer") {
+    return { authorization: `Bearer ${authorization.token}` } satisfies EnvironmentHttpAuthHeaders;
+  }
+  const dpop = yield* authorization.createProof({
+    method,
+    url,
+    accessToken: authorization.accessToken,
+  });
+  return {
+    authorization: `DPoP ${authorization.accessToken}`,
+    dpop,
+  } satisfies EnvironmentHttpAuthHeaders;
+});
 
 export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   "clientRuntime.state.executeAuthenticatedEnvironmentHttpRequest",
@@ -84,18 +101,45 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
 > {
   const httpBaseUrl = input.prepared.httpBaseUrl;
-  const authorization = input.prepared.httpAuthorization;
   const requestUrl = input.url(makeEnvironmentHttpApiUrlBuilder(httpBaseUrl)[input.group]);
   const client = yield* makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group);
-  return yield* executeEnvironmentHttpRequest(
-    requestUrl,
-    input.timeoutMs,
-    withEnvironmentRequestInit(
-      authorization,
-      input.requestInit,
-      input.request({ client, headers: environmentAuthHeaders(authorization) }),
-    ),
-  ).pipe(
+  const authFetchError = (cause: unknown) =>
+    new RemoteEnvironmentAuthFetchError({
+      message: "Could not authorize the environment request.",
+      cause,
+    });
+  const send = Effect.fnUntraced(function* (authorization: PreparedHttpAuthorization | null) {
+    const headers = yield* environmentAuthHeaders(authorization, input.method, requestUrl).pipe(
+      Effect.mapError(authFetchError),
+    );
+    return yield* executeEnvironmentHttpRequest(
+      requestUrl,
+      input.timeoutMs,
+      withEnvironmentRequestInit(
+        authorization,
+        input.requestInit,
+        input.request({ client, headers }),
+      ),
+    );
+  });
+  return yield* Effect.gen(function* () {
+    const prepared = input.prepared.httpAuthorization;
+    if (prepared?._tag !== "Dpop") return yield* send(prepared);
+    const current = yield* prepared.current().pipe(Effect.mapError(authFetchError));
+    const first = yield* send(current).pipe(Effect.result);
+    if (Result.isSuccess(first)) return first.success;
+    if (
+      first.failure._tag !== "EnvironmentAuthInvalidError" ||
+      first.failure.reason !== "invalid_credential"
+    ) {
+      return yield* first.failure;
+    }
+    // a token refused before its expiry, like after a clock jump, renews once
+    const renewed = yield* prepared
+      .current(current.accessToken)
+      .pipe(Effect.mapError(authFetchError));
+    return yield* send(renewed);
+  }).pipe(
     Effect.timeoutOrElse({
       duration: input.timeoutMs,
       orElse: () =>
