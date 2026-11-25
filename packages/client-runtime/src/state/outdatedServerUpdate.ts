@@ -10,11 +10,7 @@ import { updateOutdatedHost } from "../connection/outdatedHostUpdate.ts";
 import type * as ConnectionResolver from "../connection/resolver.ts";
 import type * as EnvironmentRegistry from "../connection/registry.ts";
 import { createAtomCommandScheduler, createRuntimeCommand } from "./runtime.ts";
-import {
-  serverUpdateFailureMessage,
-  serverUpdateStateAtom,
-  type ServerUpdateStage,
-} from "./server.ts";
+import { serverUpdateFailure, serverUpdateStateAtom, type ServerUpdateStage } from "./server.ts";
 
 export interface OutdatedServerUpdateTarget {
   readonly environmentId: EnvironmentId;
@@ -65,7 +61,7 @@ export function createOutdatedServerUpdateCommand<E>(
               stage: currentStage,
               fromVersion,
               targetVersion,
-              message: serverUpdateFailureMessage(Cause.squash(exit.cause)),
+              ...serverUpdateFailure(Cause.squash(exit.cause)),
             });
           }),
         ),

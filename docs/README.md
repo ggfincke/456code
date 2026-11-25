@@ -11,6 +11,7 @@ The [456code guiding principles](./principles.md) define what I want from this p
 - [Terminal history](./user/terminal.md)
 - [Source control](./user/source-control.md)
 - [Project settings](./user/project-settings.md)
+- [Projects with several repositories](./user/multi-repo-projects.md)
 - [Appearance and themes](./user/appearance.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Voice input](./user/voice-input.md)
@@ -34,32 +35,33 @@ The [456code guiding principles](./principles.md) define what I want from this p
 
 Start with the [development runbook](./operations/development.md).
 
-Internal notes preserve architectural decisions, constraints, and implementation traps that the
-source alone does not explain. Most code changes do not need an internal documentation update. Follow the
-[documentation rules](../AGENTS.md#documentation) before adding one.
+Internal docs preserve architectural decisions, trust boundaries, conventions, and cross-cutting
+traps that the source alone does not explain. Most code changes do not need an internal
+documentation update. Follow the [documentation rules](../AGENTS.md#documentation) before adding
+anything.
 
-- [Architecture overview](./internals/overview.md)
-- [Glossary](./internals/glossary.md)
-- [Connection runtime](./internals/connection-runtime.md)
-- [Providers](./internals/providers.md)
-- [Adding a provider](./internals/adding-a-provider.md)
-- [Pull request file revisions](./internals/pull-request-file-revisions.md)
-- [Model classification](./internals/model-manifest.md)
-- [Remote environments](./internals/remote.md)
-- [Server updates](./internals/server-updates.md)
-- [Resource telemetry](./internals/resource-telemetry.md)
-- [Environment auth](./internals/environment-auth.md)
-- [Assistant citations](./internals/assistant-citations.md)
-- [Mobile layout](./internals/mobile-layout.md)
-- [Mobile navigation](./internals/mobile-navigation.md)
-- [Mobile development lifecycle](./internals/mobile-development.md)
-- [Terminal runtime](./internals/terminal-runtime.md)
-- [Devices](./internals/devices.md)
-- [Voice input](./internals/voice-input.md)
+### Internals (in reading order)
+
+- [00 · Glossary](./internals/00_glossary.md)
+- [01 · Architecture](./internals/01_architecture.md)
+- [02 · Effect services](./internals/02_effect-services.md)
+- [03 · Providers](./internals/03_providers.md)
+- [04 · Environment auth](./internals/04_environment-auth.md)
+- [05 · Remote environments](./internals/05_remote.md)
+- [07 · Server updates](./internals/07_server-updates.md)
+- [09 · Connection runtime](./internals/09_connection-runtime.md)
+- [10 · Web UI](./internals/10_web-ui.md)
+- [11 · Mobile layout](./internals/11_mobile-layout.md)
+- [12 · Mobile navigation](./internals/12_mobile-navigation.md)
+- [13 · Mobile development lifecycle](./internals/13_mobile-development.md)
+- [14 · Translating the UI (i18n)](./internals/14_i18n.md)
+- [15 · Testing](./internals/15_testing.md)
+- [16 · Performance regression checks](./internals/16_performance-regressions.md)
+- [17 · Scripts](./internals/17_scripts.md)
 
 ### Runbooks
 
 - [Development and local builds](./operations/development.md)
-- [Release](./operations/release.md)
-- [Observability](./operations/observability.md)
-- [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+- [Local packaging and staged updates](./operations/release.md)
+- [Observability](./operations/04_observability.md)
+- [Coral setup](./operations/coral-setup.md)

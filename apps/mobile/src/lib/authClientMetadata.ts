@@ -6,6 +6,7 @@ import { Platform } from "react-native";
 
 export function authClientMetadata(appVersion?: string): AuthClientPresentationMetadata {
   return {
+    // oxlint-disable-next-line t3code/no-untranslated-copy -- product name
     label: "456code Mobile",
     deviceType:
       Device.deviceType === Device.DeviceType.TABLET

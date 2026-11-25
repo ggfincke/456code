@@ -1,5 +1,6 @@
 // packages/client-runtime/src/state/environmentHttpAuth.ts
 // authenticates environment requests without sharing upstream traces
+import { msg } from "gt-i18n";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -11,6 +12,7 @@ import {
 import { FetchHttpClient, type HttpMethod } from "effect/http";
 
 import type { PreparedConnection, PreparedHttpAuthorization } from "../connection/model.ts";
+import { translatableMessage } from "../errors/translatable.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import {
   executeEnvironmentHttpRequest,
@@ -95,6 +97,8 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
     readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
     readonly headers: EnvironmentHttpAuthHeaders;
   }) => Effect.Effect<A, E, R>;
+  /** Some endpoints report rejected credentials in a successful response. */
+  readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
 }): Effect.fn.Return<
   A,
   RemoteEnvironmentRequestError,
@@ -105,7 +109,7 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   const client = yield* makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group);
   const authFetchError = (cause: unknown) =>
     new RemoteEnvironmentAuthFetchError({
-      message: "Could not authorize the environment request.",
+      ...translatableMessage(msg("Could not authorize the environment request.")),
       cause,
     });
   const send = Effect.fnUntraced(function* (authorization: PreparedHttpAuthorization | null) {
@@ -127,8 +131,9 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
     if (prepared?._tag !== "Dpop") return yield* send(prepared);
     const current = yield* prepared.current().pipe(Effect.mapError(authFetchError));
     const first = yield* send(current).pipe(Effect.result);
-    if (Result.isSuccess(first)) return first.success;
-    if (
+    if (Result.isSuccess(first)) {
+      if (input.isUnauthorizedResponse?.(first.success) !== true) return first.success;
+    } else if (
       first.failure._tag !== "EnvironmentAuthInvalidError" ||
       first.failure.reason !== "invalid_credential"
     ) {
@@ -138,7 +143,14 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
     const renewed = yield* prepared
       .current(current.accessToken)
       .pipe(Effect.mapError(authFetchError));
-    return yield* send(renewed);
+    const second = yield* send(renewed);
+    if (input.isUnauthorizedResponse?.(second) === true) {
+      return yield* new RemoteEnvironmentAuthFetchError({
+        ...translatableMessage(msg("The environment rejected the renewed session authorization.")),
+        cause: second,
+      });
+    }
+    return second;
   }).pipe(
     Effect.timeoutOrElse({
       duration: input.timeoutMs,
@@ -163,7 +175,7 @@ export const executeConnectedEnvironmentHttpRequest = Effect.fn(
   const prepared = yield* SubscriptionRef.get(supervisor.prepared);
   if (Option.isNone(prepared)) {
     return yield* new RemoteEnvironmentAuthFetchError({
-      message: "The environment is not connected.",
+      ...translatableMessage(msg("The environment is not connected.")),
       cause: supervisor.target._tag,
     });
   }

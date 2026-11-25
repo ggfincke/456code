@@ -1,3 +1,6 @@
+import { msg } from "gt-react";
+import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
+import { m } from "~/i18n/messages";
 import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import {
   AuthOrchestrationOperateScope,
@@ -310,7 +313,7 @@ export function usePendingThreadRequests(input: {
       const error = squashAtomCommandFailure(result);
       setThreadError(
         activeThreadId,
-        error instanceof Error ? error.message : "Failed to submit approval decision.",
+        thrownErrorMessage(error, m) ?? m(msg("Failed to submit approval decision.")),
       );
     }
     setRespondingRequestIds((existing) => existing.filter((id) => id !== requestId));
@@ -363,7 +366,7 @@ export function usePendingThreadRequests(input: {
         ) {
           setThreadError(
             activeThreadId,
-            "Answer changed while preparing attachments. Review it and send again.",
+            m(msg("Answer changed while preparing attachments. Review it and send again.")),
           );
           return;
         }
@@ -371,7 +374,7 @@ export function usePendingThreadRequests(input: {
         if (!uploaded) {
           setThreadError(
             activeThreadId,
-            "Wait for attachments to finish uploading, or remove failed uploads.",
+            m(msg("Wait for attachments to finish uploading, or remove failed uploads.")),
           );
           return;
         }
@@ -390,7 +393,7 @@ export function usePendingThreadRequests(input: {
       ) {
         setThreadError(
           activeThreadId,
-          "Answer changed while preparing attachments. Review it and send again.",
+          m(msg("Answer changed while preparing attachments. Review it and send again.")),
         );
         return;
       }
@@ -409,7 +412,7 @@ export function usePendingThreadRequests(input: {
         const error = squashAtomCommandFailure(result);
         setThreadError(
           activeThreadId,
-          error instanceof Error ? error.message : "Failed to submit user input.",
+          thrownErrorMessage(error, m) ?? m(msg("Failed to submit user input.")),
         );
       }
       return result;
@@ -434,7 +437,7 @@ export function usePendingThreadRequests(input: {
       const error = squashAtomCommandFailure(result);
       setThreadError(
         activeThreadId,
-        error instanceof Error ? error.message : "Failed to dismiss the question.",
+        thrownErrorMessage(error, m) ?? m(msg("Failed to dismiss the question.")),
       );
     }
     setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));

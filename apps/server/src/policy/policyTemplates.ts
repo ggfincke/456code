@@ -120,6 +120,18 @@ const policies = (): ReadonlyArray<Policy> => [
     toggle: "BrowserCookieImport",
   },
   {
+    id: "PreviewTunnel",
+    title: "Allow the preview tunnel",
+    help: "Disabled stops other devices from opening this machine's local servers through 456code: no in-app browser tabs loaded on the device, no Open on this device, no port forwarding. Browser tabs still stream from this machine.",
+    toggle: "PreviewTunnel",
+  },
+  {
+    id: "WorktreeLayoutCommands",
+    title: "Allow project worktree layout commands",
+    help: "Disabled stops 456code from running the worktreeLayout commands a project's t3.json declares, whether or not a user approved them. Such a project gets no new worktree threads; existing thread folders are restored and removed without the project's commands.",
+    toggle: "WorktreeLayoutCommands",
+  },
+  {
     id: "Telemetry",
     title: "Allow usage data",
     help: "Compatibility setting only. 456code does not collect vendor product analytics or relay traces.",

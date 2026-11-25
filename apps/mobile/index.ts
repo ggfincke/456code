@@ -1,6 +1,8 @@
 // Must stay first: the render counter and behavior probe wrap the DevTools hook before any React commit.
 import "./src/features/development/render-counter-entry";
 import "./src/features/development/behavior-probe-entry";
+// Before anything that can load GT, which captures Hermes's Intl constructors.
+import "./src/i18n/intl-polyfills";
 import { registerRootComponent } from "expo";
 import "react-native-gesture-handler";
 import { LogBox } from "react-native";

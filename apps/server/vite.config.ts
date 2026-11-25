@@ -68,8 +68,7 @@ export default mergeConfig(
     run: {
       tasks: {
         dev: {
-          command:
-            "node --watch --watch-path=src --watch-path=../../packages --watch-path=package.json src/bin.ts",
+          command: "node scripts/dev.ts",
           dependsOn: ["@t3tools/cartographer-core#build"],
           cache: false,
         },
@@ -83,15 +82,25 @@ export default mergeConfig(
           dependsOn: ["@t3tools/cartographer-core#build", "@t3tools/web#build"],
           cache: false,
         },
+        // A local tsbuildinfo is leftover build state, not a typecheck input.
+        typecheck: {
+          command: "effect-tsgo tsrs --noEmit",
+          cache: { input: [{ auto: true }, "!*.tsbuildinfo"] },
+        },
       },
     },
     pack: {
-      // SEA embeds one entry; expose the history worker as a hidden subcommand.
+      // SEA embeds one entry; expose the workers as hidden subcommands.
       entry: packBootstrap
         ? ["src/bin.ts"]
         : packExecutable
           ? ["src/binMain.ts"]
-          : ["src/bin.ts", "src/claude-history-worker.ts", "src/cartographerWorker.ts"],
+          : [
+              "src/bin.ts",
+              "src/claude-history-worker.ts",
+              "src/cartographerWorker.ts",
+              "src/process-launcher.ts",
+            ],
       outDir: packBootstrap ? "dist-exe" : packExecutable ? cliAssetDir : "dist",
       // Cartographer's bundled TypeScript parser reads CommonJS file globals.
       // Use the bundler's ESM shims for the Node/desktop worker output.

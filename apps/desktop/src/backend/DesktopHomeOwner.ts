@@ -7,9 +7,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import { msg } from "gt-i18n";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { DESKTOP_APP_NAME } from "../fincke/build.ts";
+import { m } from "../i18n/messages.ts";
 import { BACKEND_QUIT_STOP_TIMEOUT } from "./DesktopBackendManager.ts";
 
 // The fields of the server's `server-runtime.json` that identify the owner of a data directory.
@@ -89,11 +91,34 @@ export const readLiveHomeOwner = Effect.fn("DesktopHomeOwner.readLiveHomeOwner")
   );
 });
 
-export const homeOwnedMessage = (owner: Option.Option<HomeOwner>): string => {
-  const detail = Option.match(owner, {
-    onNone: () => "",
-    onSome: (owner) =>
-      ` (PID ${owner.pid}, port ${owner.port}${owner.serverVersion ? `, version ${owner.serverVersion}` : ""})`,
+export const homeOwnedMessage = (owner: Option.Option<HomeOwner>): string =>
+  Option.match(owner, {
+    onNone: () =>
+      m(
+        msg(
+          "Another {app} server is using this data directory. Stop that server, then reopen {app}. You can also set a separate T3CODE_HOME and pair with the running server.",
+        ),
+        { app: DESKTOP_APP_NAME },
+      ),
+    onSome: (owner) => {
+      const variables = {
+        app: DESKTOP_APP_NAME,
+        pid: String(owner.pid),
+        port: String(owner.port),
+        version: owner.serverVersion ?? "",
+      };
+      return owner.serverVersion
+        ? m(
+            msg(
+              "Another {app} server is using this data directory (PID {pid}, port {port}, version {version}). Stop that server, then reopen {app}. You can also set a separate T3CODE_HOME and pair with the running server.",
+            ),
+            variables,
+          )
+        : m(
+            msg(
+              "Another {app} server is using this data directory (PID {pid}, port {port}). Stop that server, then reopen {app}. You can also set a separate T3CODE_HOME and pair with the running server.",
+            ),
+            variables,
+          );
+    },
   });
-  return `Another ${DESKTOP_APP_NAME} server is using this data directory${detail}. Stop that server, then reopen ${DESKTOP_APP_NAME}. You can also set a separate T3CODE_HOME and pair with the running server.`;
-};

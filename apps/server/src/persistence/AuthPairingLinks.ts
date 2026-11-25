@@ -17,10 +17,11 @@ import {
 } from "./Errors.ts";
 
 /**
- * Subjects of codes that approve one agent sign-in at a set level, as `mcp-approval:<level>`.
- * Only that sign-in may spend one, so every other use of a pairing code refuses them.
+ * These subjects are reserved for one kind and level of MCP authorization.
+ * Keep peer-link subjects under the same prefix so older servers refuse them too.
  */
 export const MCP_APPROVAL_SUBJECT_PREFIX = "mcp-approval:";
+export const PEER_LINK_PAIRING_SUBJECT_PREFIX = `${MCP_APPROVAL_SUBJECT_PREFIX}peer-link:`;
 
 export const AuthPairingLinkRecord = Schema.Struct({
   id: Schema.String,
@@ -55,8 +56,8 @@ export const ConsumeAuthPairingLinkInput = Schema.Struct({
   proofKeyThumbprint: Schema.NullOr(Schema.String),
   requestedScopes: Schema.optionalKey(AuthEnvironmentScopes),
   requiredScopes: Schema.optionalKey(AuthEnvironmentScopes),
-  /** Also spends a code with exactly this `mcp-approval:` subject. Others are always refused. */
-  mcpApprovalSubject: Schema.optionalKey(Schema.String),
+  /** Allow a purpose-bound code only when its subject matches the request. */
+  allowedSubject: Schema.optionalKey(Schema.String),
   consumedAt: Schema.DateTimeUtcFromString,
   now: Schema.DateTimeUtcFromString,
 });
@@ -77,6 +78,18 @@ export const GetAuthPairingLinkByCredentialInput = Schema.Struct({
   credential: Schema.String,
 });
 export type GetAuthPairingLinkByCredentialInput = typeof GetAuthPairingLinkByCredentialInput.Type;
+
+/**
+ * Unspent links bound to `proofKeyThumbprint`, or with `keepProofKeyThumbprint` every other bound
+ * one. `includeUnbound` adds the links no key is bound to: pairing and approval codes.
+ */
+export const RevokeUnspentByProofKeyInput = Schema.Struct({
+  proofKeyThumbprint: Schema.NullOr(Schema.String),
+  keepProofKeyThumbprint: Schema.NullOr(Schema.String),
+  includeUnbound: Schema.Boolean,
+  revokedAt: Schema.DateTimeUtcFromString,
+});
+export type RevokeUnspentByProofKeyInput = typeof RevokeUnspentByProofKeyInput.Type;
 
 const AuthPairingLinkRawDbRow = Schema.Struct({
   id: Schema.String,
@@ -112,6 +125,9 @@ export class AuthPairingLinkRepository extends Context.Service<
     readonly getByCredential: (
       input: GetAuthPairingLinkByCredentialInput,
     ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    readonly revokeUnspentByProofKey: (
+      input: RevokeUnspentByProofKeyInput,
+    ) => Effect.Effect<ReadonlyArray<string>, AuthPairingLinkRepositoryError>;
   }
 >()("t3/persistence/AuthPairingLinks/AuthPairingLinkRepository") {}
 
@@ -175,7 +191,7 @@ export const make = Effect.gen(function* () {
       proofKeyThumbprint,
       requestedScopes,
       requiredScopes,
-      mcpApprovalSubject,
+      allowedSubject,
       consumedAt,
       now,
     }) =>
@@ -188,7 +204,7 @@ export const make = Effect.gen(function* () {
           AND expires_at > ${now}
           AND (
             subject NOT LIKE ${`${MCP_APPROVAL_SUBJECT_PREFIX}%`}
-            OR subject = ${mcpApprovalSubject ?? null}
+            OR subject = ${allowedSubject ?? null}
           )
           AND (
             proof_key_thumbprint IS NULL
@@ -384,12 +400,47 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const revokeUnspentByProofKeyRows = SqlSchema.findAll({
+    Request: RevokeUnspentByProofKeyInput,
+    Result: Schema.Struct({ id: Schema.String }),
+    execute: ({ proofKeyThumbprint, keepProofKeyThumbprint, includeUnbound, revokedAt }) =>
+      sql`
+        UPDATE auth_pairing_links
+        SET revoked_at = ${revokedAt}
+        WHERE revoked_at IS NULL
+          AND consumed_at IS NULL
+          AND (
+            (
+              proof_key_thumbprint IS NOT NULL
+              AND (${proofKeyThumbprint} IS NULL OR proof_key_thumbprint = ${proofKeyThumbprint})
+              AND proof_key_thumbprint IS NOT ${keepProofKeyThumbprint}
+            )
+            OR (proof_key_thumbprint IS NULL AND ${includeUnbound ? 1 : 0} = 1)
+          )
+        RETURNING id AS "id"
+      `,
+  });
+
+  const revokeUnspentByProofKey: AuthPairingLinkRepository["Service"]["revokeUnspentByProofKey"] = (
+    input,
+  ) =>
+    revokeUnspentByProofKeyRows(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "AuthPairingLinkRepository.revokeUnspentByProofKey:query",
+          "AuthPairingLinkRepository.revokeUnspentByProofKey:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => rows.map((row) => row.id)),
+    );
+
   return {
     create,
     consumeAvailable,
     listActive,
     revoke,
     getByCredential,
+    revokeUnspentByProofKey,
   } satisfies AuthPairingLinkRepository["Service"];
 });
 

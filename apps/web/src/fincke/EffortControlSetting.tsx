@@ -3,7 +3,7 @@
 import { DEFAULT_UNIFIED_SETTINGS, type EffortControl } from "@t3tools/contracts/settings";
 
 import { SettingResetButton, SettingsRow } from "../components/settings/settingsLayout";
-import { searchableSetting } from "../components/settings/settingsSearch";
+import { useSearchableSetting } from "../components/settings/settingsSearch";
 import {
   useScopedSettings,
   useUpdateScopedSettings,
@@ -26,6 +26,7 @@ function isEffortControl(value: unknown): value is EffortControl {
 }
 
 export function EffortControlSetting() {
+  const searchableSetting = useSearchableSetting();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
 
@@ -36,7 +37,7 @@ export function EffortControlSetting() {
       resetAction={
         settings.effortControl !== DEFAULT_UNIFIED_SETTINGS.effortControl ? (
           <SettingResetButton
-            label="effort control"
+            ariaLabel="Reset effort control to default"
             onClick={() =>
               updateSettings({ effortControl: DEFAULT_UNIFIED_SETTINGS.effortControl })
             }

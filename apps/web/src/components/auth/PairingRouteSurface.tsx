@@ -1,5 +1,6 @@
 import { Alert, AlertDescription } from "../ui/alert";
 import type { AuthSessionState } from "@t3tools/contracts";
+import { msg, T, useGT, useMessages } from "gt-react";
 import React, { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import {
@@ -10,13 +11,15 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
+import { m, type MessageResolver } from "../../i18n/messages";
 
 export function PairingPendingSurface() {
+  const gt = useGT();
   return (
     <StandalonePage>
       <StandalonePageHeader
-        title="Pairing with this environment"
-        description="Validating the pairing link and preparing your session."
+        title={gt("Pairing with this environment")}
+        description={gt("Validating the pairing link and preparing your session.")}
       />
     </StandalonePage>
   );
@@ -31,6 +34,8 @@ export function PairingRouteSurface({
   initialErrorMessage?: string;
   onAuthenticated: () => void;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const [autoPairToken] = useState(peekPairingTokenFromUrl);
   const [credential, setCredential] = useState(autoPairToken ?? "");
   const [errorMessage, setErrorMessage] = useState(initialErrorMessage ?? "");
@@ -81,14 +86,14 @@ export function PairingRouteSurface({
   return (
     <StandalonePage>
       <StandalonePageHeader
-        title="Pair with this environment"
-        description={describeAuthGate(auth.bootstrapMethods)}
+        title={gt("Pair with this environment")}
+        description={describeAuthGate(auth.bootstrapMethods, messages)}
       />
 
       <form className="mt-6 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
         <div className="space-y-2">
           <label className="text-sm font-medium" htmlFor="pairing-token">
-            Pairing token
+            <T>Pairing token</T>
           </label>
           <Input
             id="pairing-token"
@@ -98,7 +103,7 @@ export function PairingRouteSurface({
             disabled={isSubmitting}
             nativeInput
             onChange={(event) => setCredential(event.currentTarget.value)}
-            placeholder="Paste a one-time token or pairing secret"
+            placeholder={gt("Paste a one-time token or pairing secret")}
             spellCheck={false}
             value={credential}
           />
@@ -112,7 +117,7 @@ export function PairingRouteSurface({
 
         <div className="flex flex-wrap gap-2">
           <Button disabled={isSubmitting} size="sm" type="submit">
-            {isSubmitting ? "Pairing..." : "Continue"}
+            {isSubmitting ? gt("Pairing...") : gt("Continue")}
           </Button>
           <Button
             disabled={isSubmitting}
@@ -120,13 +125,13 @@ export function PairingRouteSurface({
             size="sm"
             variant="outline"
           >
-            Reload app
+            <T>Reload app</T>
           </Button>
         </div>
       </form>
 
       <div className="mt-6 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-        {describeSupportedMethods(auth.bootstrapMethods)}
+        {describeSupportedMethods(auth.bootstrapMethods, messages)}
       </div>
     </StandalonePage>
   );
@@ -141,28 +146,48 @@ function errorMessageFromUnknown(error: unknown): string {
     return error;
   }
 
-  return "Authentication failed.";
+  return m(msg("Authentication failed."));
 }
 
-function describeAuthGate(bootstrapMethods: ReadonlyArray<string>): string {
+function describeAuthGate(
+  bootstrapMethods: ReadonlyArray<string>,
+  resolve: MessageResolver,
+): string {
   if (bootstrapMethods.includes("desktop-bootstrap")) {
-    return "This environment expects a trusted pairing credential before the app can connect.";
+    return resolve(
+      msg("This environment expects a trusted pairing credential before the app can connect."),
+    );
   }
 
-  return "Enter a pairing token to start a session with this environment.";
+  return resolve(msg("Enter a pairing token to start a session with this environment."));
 }
 
-function describeSupportedMethods(bootstrapMethods: ReadonlyArray<string>): string {
+function describeSupportedMethods(
+  bootstrapMethods: ReadonlyArray<string>,
+  resolve: MessageResolver,
+): string {
   if (
     bootstrapMethods.includes("desktop-bootstrap") &&
     bootstrapMethods.includes("one-time-token")
   ) {
-    return "Desktop-managed pairing and one-time pairing tokens are both accepted for this environment.";
+    return resolve(
+      msg(
+        "Desktop-managed pairing and one-time pairing tokens are both accepted for this environment.",
+      ),
+    );
   }
 
   if (bootstrapMethods.includes("desktop-bootstrap")) {
-    return "This environment is desktop-managed. Open it from the desktop app or paste a bootstrap credential if one was issued explicitly.";
+    return resolve(
+      msg(
+        "This environment is desktop-managed. Open it from the desktop app or paste a bootstrap credential if one was issued explicitly.",
+      ),
+    );
   }
 
-  return "This environment accepts one-time pairing tokens. Pairing links can open this page directly, or you can paste the token here.";
+  return resolve(
+    msg(
+      "This environment accepts one-time pairing tokens. Pairing links can open this page directly, or you can paste the token here.",
+    ),
+  );
 }

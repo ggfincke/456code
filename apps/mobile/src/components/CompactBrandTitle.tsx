@@ -5,6 +5,7 @@ import { NATIVE_WORKSPACE_COLUMNS_SUPPORTED } from "../native/NativeWorkspaceCol
 import { JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono/700Bold";
 import Constants from "expo-constants";
 import { useFonts } from "expo-font";
+import { useGT } from "gt-react-native";
 import { useState } from "react";
 import { Platform, Text as RNText, View } from "react-native";
 
@@ -35,6 +36,7 @@ export function CompactBrandTitle(
     readonly wave?: boolean;
   } = {},
 ) {
+  const gt = useGT();
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
   // fincke: the ocean wave sits behind the title, so it reads white as on desktop
   const ocean = useAppearancePreferences().themeId === "fincke-ocean";
@@ -57,7 +59,7 @@ export function CompactBrandTitle(
         props.fit && showStage ? (event) => setFullWidth(event.nativeEvent.layout.width) : undefined
       }
       aria-level={1}
-      accessibilityLabel={props.accessibilityLabel ?? "456code, Threads"}
+      accessibilityLabel={props.accessibilityLabel ?? gt("456code, Threads")}
       accessible={!steppedAside}
       accessibilityElementsHidden={steppedAside}
       importantForAccessibility={steppedAside ? "no-hide-descendants" : "auto"}

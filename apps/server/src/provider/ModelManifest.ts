@@ -12,7 +12,10 @@ import * as Schema from "effect/Schema";
 
 import { hasValidClaudeManifestAdapters } from "./ClaudeModelManifest.ts";
 import bundledManifestJson from "./model-manifest.json" with { type: "json" };
-import { ProviderCompatibilityPolicy } from "./providerCompatibility.ts";
+import {
+  ProviderCompatibilityPolicy,
+  resolveProviderCompatibility,
+} from "./providerCompatibility.ts";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 
 const MODEL_NEW_BADGE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -84,6 +87,15 @@ export type ModelManifestData = typeof ModelManifestSchema.Type;
 
 export const BUNDLED_MODEL_MANIFEST: ModelManifestData =
   Schema.decodeUnknownSync(ModelManifestSchema)(bundledManifestJson);
+
+/** A manifest with no policy for this driver and release falls back to the bundled one. */
+export const providerCompatibility = (
+  manifest: ModelManifestData,
+  driver: ProviderDriverKind,
+  version: string | null,
+) =>
+  resolveProviderCompatibility(manifest.compatibility, driver, version) ??
+  resolveProviderCompatibility(BUNDLED_MODEL_MANIFEST.compatibility, driver, version);
 
 export function resolveProviderCatalog(
   manifest: ModelManifestData,

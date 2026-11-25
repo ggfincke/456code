@@ -1,7 +1,7 @@
 // apps/web/src/fincke/ActivityThreadRow.tsx
 // owned copy of the activity sidebar row w/ a two-line card, from components/sidebar/SidebarThreadRow.tsx
 import "./sidebarTokens.css";
-import { useAtomMount } from "@effect/atom-react";
+import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../components/ThreadHoverCard";
 import { ThreadTerminalStatusButton } from "../components/ThreadStatusIndicators";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
@@ -70,7 +70,12 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { useNowSecond } from "../hooks/useNowSecond";
 import { vcsEnvironment, vcsBranchRevalidation } from "../state/vcs";
 import { useEnvironmentQuery } from "../state/query";
-import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
+import { threadEnvironment } from "../state/threads";
+import {
+  readEnvironmentScope,
+  useEnvironmentScope,
+  useEnvironmentScopeDenied,
+} from "../state/session";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -93,15 +98,22 @@ import {
 } from "../components/Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "../components/BranchToolbar.logic";
 import {
+  ThreadLinkBadge,
   ThreadPullRequestBadgeControl,
   ThreadPullRequestsMiniList,
-  ThreadWorktreeIndicator,
   prStatusIndicator,
   resolveThreadPullRequestBadge,
   terminalStatusFromRunningIds,
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
 } from "../components/ThreadStatusIndicators";
+import { ThreadWorktreeIndicator } from "./ThreadWorktreeIndicator";
+import { useSidebarLinkedIssueState } from "../state/issues";
+import { ThreadDetailsIssueRows } from "../components/chat/ThreadDetailsIssueRows";
+import { IssueGlyph, issueStatePresentation } from "../components/issue/issuePresentation";
+import { useThreadIntentPrefetch } from "../components/sidebar/useThreadIntentPrefetch";
+import { ActivityShimmerOverlay } from "../components/chat/TimelineRowParts";
+import { observeVisibleAnimation } from "~/lib/visibleAnimation";
 import { resolveSnoozePresets, type SnoozePreset } from "../components/Sidebar.snooze";
 import { useThreadShell } from "../state/entities";
 import { ProjectFavicon, type ProjectFaviconProject } from "../components/ProjectFavicon";
@@ -148,7 +160,17 @@ export function RelativeTimeLabel(props: { timestamp: string | null }) {
       );
 }
 
-function JumpHintBadge(props: { label: string }) {
+// an archive or snooze queued while the thread's machine is offline
+function PendingSyncLabel() {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span />}>Pending</TooltipTrigger>
+      <TooltipPopup side="top">Waiting to sync with its environment</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+export function JumpHintBadge(props: { label: string }) {
   return (
     <span
       aria-hidden
@@ -272,7 +294,7 @@ function SidebarThreadTooltip({
               showBadge={showInstanceBadge && providerEntry?.accentColor !== undefined}
               badgeContent="none"
               badgeClassName="h-2 min-w-2 px-0"
-              iconClassName="size-3 shrink-0 grayscale opacity-60"
+              iconClassName="size-3 shrink-0 opacity-60"
             />
             <div className="min-w-0 truncate text-foreground/75">
               {showInstanceBadge && providerEntry
@@ -609,6 +631,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const canTriageThread = !useEnvironmentScopeDenied(
+    thread.environmentId,
+    AuthOrchestrationOperateScope,
+  );
+  const pendingSync = useAtomValue(
+    threadEnvironment.pendingSyncAtom(thread.environmentId),
+    (threads) => threads.has(thread.id),
+  );
   const { leaseLiveStatus, rowRef: leaseRowRef } = useSidebarRowSubscriptionLease(props.isActive);
   const { revealRef } = props;
   const rowRef = (row: HTMLElement | null) => {
@@ -663,7 +693,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     JSON.stringify([thread.environmentId, gitCwd]),
     gitStatus.data,
   );
-  const checkoutThread = withoutRemovedCheckout(thread, visibleGitStatus);
+  const checkoutThread = withoutRemovedCheckout(thread, visibleGitStatus, props.project);
   const pr = linkedPullRequestStatus?.pr ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
   const currentLinkedPr = supportsMultiplePullRequests
@@ -795,6 +825,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     />
   );
 
+  const intentPrefetch = useThreadIntentPrefetch(threadRef);
   const handleClick = (event: ReactMouseEvent) => {
     onThreadClick(event, threadRef);
   };
@@ -894,7 +925,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     setSnoozeGateClock({ thread, now: new Date(snoozeGateOpensAt).toISOString() });
   }
   const showSnoozeButton =
-    canOperateThread && props.snoozeSupported && canSnooze(thread, { now: snoozeGateNow });
+    canTriageThread && props.snoozeSupported && canSnooze(thread, { now: snoozeGateNow });
   // Closing here, not just masking, keeps the menu from reopening when the button returns.
   if (snoozeMenuOpenRaw && !showSnoozeButton) setSnoozeMenuOpen(false);
   const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
@@ -912,7 +943,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" &&
       !props.isActive &&
-      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70 redesign:[&:not(:hover):not(:focus-within)_*]:text-secondary-label",
+      "[&:not(:hover):not(:focus-within)_*:not(.live-activity-focus_*)]:text-secondary-label/70 redesign:[&:not(:hover):not(:focus-within)_*:not(.live-activity-focus_*)]:text-secondary-label",
     // fincke: the open thread gets an accent bar on every theme; under fincke ocean
     // the bar is teal over a faint wash instead of the row-active fill
     props.isActive
@@ -966,7 +997,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
-    statusLabel: topStatus?.label ?? null,
+    statusLabel: pendingSync ? "Pending" : (topStatus?.label ?? null),
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
@@ -980,39 +1011,49 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     />
   ) : (
     <span
+      ref={isRegeneratingTitle ? observeVisibleAnimation : undefined}
       className={cn(
         "min-w-0 flex-1 text-start transition-opacity motion-reduce:transition-none",
-        variant === "card"
+        isRegeneratingTitle
           ? cn(
-              "truncate text-(length:--fincke-sidebar-row-text) font-normal",
-              props.isActive
-                ? "text-(--fincke-sidebar-selected-text)"
-                : shouldRecede
-                  ? "text-secondary-label redesign:text-foreground/75 redesign:group-hover/sidebar-row:text-foreground redesign:group-focus-visible/sidebar-row:text-foreground"
-                  : isUnread || isWoke || status === "input"
-                    ? "text-foreground [html[data-theme-id=fincke-ocean]_&]:text-white"
-                    : status === "failed"
-                      ? "text-foreground/95"
-                      : "text-foreground/90 redesign:text-foreground",
+              "relative truncate text-muted-foreground",
+              variant === "card"
+                ? "text-(length:--fincke-sidebar-row-text) font-normal"
+                : "text-sm font-medium",
             )
-          : cn(
-              "truncate text-sm group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
-              shouldRecede ? "font-normal" : "font-medium",
-              shouldRecede
-                ? "text-secondary-label/70 redesign:text-secondary-label"
-                : props.isActive
+          : variant === "card"
+            ? cn(
+                "truncate text-(length:--fincke-sidebar-row-text) font-normal",
+                props.isActive
                   ? "text-(--fincke-sidebar-selected-text)"
-                  : isWoke || status === "input"
-                    ? "text-foreground"
-                    : isUnread
-                      ? "text-muted-foreground"
-                      : "text-secondary-label/70",
-            ),
-        isRegeneratingTitle && "opacity-55",
+                  : shouldRecede
+                    ? "text-secondary-label redesign:text-foreground/75 redesign:group-hover/sidebar-row:text-foreground redesign:group-focus-visible/sidebar-row:text-foreground"
+                    : isUnread || isWoke || status === "input"
+                      ? "text-foreground [html[data-theme-id=fincke-ocean]_&]:text-white"
+                      : status === "failed"
+                        ? "text-foreground/95"
+                        : "text-foreground/90 redesign:text-foreground",
+              )
+            : cn(
+                "truncate text-sm group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+                shouldRecede ? "font-normal" : "font-medium",
+                shouldRecede
+                  ? "text-secondary-label/70 redesign:text-secondary-label"
+                  : props.isActive
+                    ? "text-(--fincke-sidebar-selected-text)"
+                    : isWoke || status === "input"
+                      ? "text-foreground"
+                      : isUnread
+                        ? "text-muted-foreground"
+                        : "text-secondary-label/70",
+              ),
       )}
       dir={textDirection(thread.title)}
     >
       {thread.title}
+      {isRegeneratingTitle ? (
+        <ActivityShimmerOverlay className="truncate">{thread.title}</ActivityShimmerOverlay>
+      ) : null}
     </span>
   );
 
@@ -1036,6 +1077,44 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         onOpenPullRequest={handlePrClick}
       />
     ) : null;
+  const firstIssue = thread.issues?.[0];
+  const issueCount = thread.issues?.length ?? 0;
+  const issueState = useSidebarLinkedIssueState(
+    thread.environmentId,
+    leaseLiveStatus ? thread.issues : undefined,
+  );
+  const issueStatus = issueState === null ? null : issueStatePresentation(issueState);
+  const issueLabel =
+    issueCount === 1 && firstIssue
+      ? `Issue ${firstIssue.displayKey}: ${firstIssue.title}${issueStatus ? `, ${issueStatus.label}` : ""}`
+      : `${issueCount} linked ${issueCount === 1 ? "issue" : "issues"}`;
+  const issueBadge = firstIssue ? (
+    <ThreadLinkBadge
+      control={
+        <InlineButton
+          aria-label={issueLabel}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            handlePrListClick();
+          }}
+        />
+      }
+      Icon={issueStatus?.Icon ?? IssueGlyph.issue}
+      toneClassName={issueStatus?.toneClassName ?? "text-muted-foreground"}
+      text={issueCount === 1 ? firstIssue.displayKey.replace(/^#/, "") : issueCount}
+    >
+      <ThreadDetailsIssueRows
+        links={thread.issues ?? []}
+        threadRef={threadRef}
+        compact={false}
+        mountScope="sidebar-tooltip"
+        onOpen={() => {
+          if (!props.isRouteThread) onThreadActivate(threadRef);
+        }}
+      />
+    </ThreadLinkBadge>
+  ) : null;
   const terminalStatusIcon = (
     <ThreadTerminalStatusButton
       threadRef={threadRef}
@@ -1123,6 +1202,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-project-hue={projectHue ? "" : undefined}
                 style={projectHue}
                 onClick={handleClick}
+                onPointerEnter={intentPrefetch.onPointerEnter}
+                onPointerLeave={intentPrefetch.onPointerLeave}
+                onPointerDown={intentPrefetch.onPointerDown}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
                 onContextMenu={handleContextMenu}
@@ -1149,6 +1231,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             ) : null}
             {/* Shelf rows are one line; the New design gives the title the room a PR number takes. */}
             {prBadge ? <span className="contents redesign:hidden">{prBadge}</span> : null}
+            {issueBadge}
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -1164,7 +1247,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     !isWoke && "group-any-hover/sidebar-row:opacity-0",
                   )}
                 >
-                  {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
+                  {pendingSync ? (
+                    <span className="text-xs">
+                      <PendingSyncLabel />
+                    </span>
+                  ) : variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
                     <span className="inline-flex items-center gap-1 text-xs text-info-foreground tabular-nums">
                       {/* The clock tells a wake time from an age at a glance. */}
                       <AlarmClockIcon aria-hidden className="hidden size-3 redesign:block" />
@@ -1312,6 +1399,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               data-project-hue={projectHue ? "" : undefined}
               style={projectHue}
               onClick={handleClick}
+              onPointerEnter={intentPrefetch.onPointerEnter}
+              onPointerLeave={intentPrefetch.onPointerLeave}
+              onPointerDown={intentPrefetch.onPointerDown}
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
               onContextMenu={handleContextMenu}
@@ -1337,7 +1427,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     props.sweepAction !== null && "hidden",
                   )}
                 >
-                  {topStatus ? (
+                  {pendingSync ? (
+                    <span
+                      className={cn(
+                        "pointer-events-none flex items-center self-center justify-self-end text-muted-foreground group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0",
+                        snoozeMenuOpen && "absolute right-0 opacity-0",
+                      )}
+                    >
+                      <PendingSyncLabel />
+                    </span>
+                  ) : topStatus ? (
                     <span
                       className={cn(
                         isWokeStatus
@@ -1464,6 +1563,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {checkoutThread.branch ? <ThreadWorktreeIndicator thread={checkoutThread} /> : null}
               {terminalStatusIcon}
               {prBadge}
+              {issueBadge}
               {diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-diff-addition-foreground">

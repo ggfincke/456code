@@ -102,6 +102,8 @@ export const fetchEnvironmentSessionState = Effect.fn(
       url: (urls) => urls.session(),
       timeoutMs,
       request: ({ client, headers }) => client.session({ headers }),
+      // This endpoint returns 200 with authenticated:false for expired credentials.
+      isUnauthorizedResponse: (response) => !response.authenticated,
     }).pipe(
       // A timeout says nothing about grants; failing would show a busy host as read-only.
       Effect.catchTags({
@@ -254,6 +256,7 @@ function makeEnvironmentSessionAtoms<R, E>(
     preparedConnectionValueAtom,
     sessionStateAtom,
     sessionStateValueAtom,
+    transportSessionAtom,
   };
 }
 

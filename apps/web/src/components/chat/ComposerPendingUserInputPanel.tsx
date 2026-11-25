@@ -2,6 +2,7 @@
 // presents collapsible questions with inline answer recovery
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
 import { markdownProseDirection, textDirection } from "~/textDirection";
+import { useGT } from "gt-react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import {
   memo,
@@ -89,6 +90,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   prompt: PendingUserInput;
   isResponding: boolean;
 }) {
+  const gt = useGT();
   // Message-mode requests remain answerable after their provider turn ends.
   const canRespond = prompt.responseCapability !== "not_resumable";
   const responseDisabled = disabled || isResponding || !canRespond;
@@ -229,7 +231,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   useEffect(() => {
     if (!activeQuestion || responseDisabled || backgroundThread) return;
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (isInSideChatPane(target)) return;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
@@ -294,8 +296,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     },
     value: customAnswerValue,
     disabled: responseDisabled,
-    placeholder: "Something else…",
-    "aria-label": "Something else",
+    placeholder: gt("Something else…"),
+    "aria-label": gt("Something else"),
     "data-pending-user-input-enter": true,
     onFocus: () => {
       const kept = keptCustomAnswers[activeQuestion.id];
@@ -321,7 +323,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       <ComposerBanner.Row className="px-4 pt-1.5">
         <ComposerBanner.Content>
           {prompt.questions.length > 1 ? (
-            <span role="list" aria-label="Questions" className="flex min-w-0 flex-wrap gap-1">
+            <span role="list" aria-label={gt("Questions")} className="flex min-w-0 flex-wrap gap-1">
               {prompt.questions.map((question, index) => {
                 const answered =
                   resolvePendingUserInputAnswer(question, answers[question.id]) !== null;
@@ -332,7 +334,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                       size="xs"
                       variant={current ? "secondary" : "ghost-muted"}
                       aria-current={current ? "step" : undefined}
-                      aria-label={`${question.header}${answered ? ", answered" : ""}`}
+                      aria-label={
+                        answered
+                          ? gt("{header}, answered", { header: question.header })
+                          : question.header
+                      }
                       disabled={isResponding}
                       data-pending-user-input-step={answered ? "answered" : "unanswered"}
                       onClick={() => selectQuestion(index)}
@@ -364,13 +370,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
             render={<Button size="icon-xs" variant="ghost" />}
             aria-label={
               isCollapsed
-                ? "Show the question and its options"
-                : "Hide the question and its options"
+                ? gt("Show the question and its options")
+                : gt("Hide the question and its options")
             }
             title={
               isCollapsed
-                ? "Show the question and its options"
-                : "Hide the question and its options"
+                ? gt("Show the question and its options")
+                : gt("Hide the question and its options")
             }
             data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
           >
@@ -378,8 +384,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           </CollapsibleTrigger>
           {prompt.dismissible ? (
             <ComposerBanner.Dismiss
-              aria-label="Dismiss question without answering"
-              title="Dismiss question without answering"
+              aria-label={gt("Dismiss question without answering")}
+              title={gt("Dismiss question without answering")}
               disabled={isResponding}
               data-pending-user-input-dismiss
               onClick={() => onDismiss(prompt.requestId)}
@@ -496,7 +502,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         <div className="flex items-center justify-end gap-2 ps-6 pe-4 pt-1.5 pb-1 sm:ps-5.5">
           {!canRespond ? (
             <span className="me-auto text-muted-foreground">
-              The provider can no longer take this answer.
+              {gt("The provider can no longer take this answer.")}
             </span>
           ) : attachmentBlockReason ? (
             <span className="me-auto min-w-0 truncate text-muted-foreground">
@@ -510,11 +516,15 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               disabled={isResponding}
               onClick={() => selectQuestion(progress.questionIndex - 1)}
             >
-              Back
+              {gt("Back", { $context: "button that goes to the previous question" })}
             </Button>
           ) : null}
           <Button size="xs" disabled={!canGoNext} onClick={goNext}>
-            {isResponding ? "Submitting…" : progress.isLastQuestion ? "Submit" : "Next"}
+            {isResponding
+              ? gt("Submitting…")
+              : progress.isLastQuestion
+                ? gt("Submit", { $context: "verb, submits answers" })
+                : gt("Next", { $context: "button that goes to the next question" })}
           </Button>
         </div>
       </CollapsiblePanel>
