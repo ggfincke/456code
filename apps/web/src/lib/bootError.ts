@@ -81,7 +81,10 @@ export function buildErrorReport(error: unknown, environment: BootErrorEnvironme
   }
   let details = redact(parts.join("\n") || "(no error message)");
   if (details.length > MAX_ERROR_CHARS) {
-    details = `${details.slice(0, MAX_ERROR_CHARS)}\n[truncated]`;
+    let end = MAX_ERROR_CHARS;
+    const last = details.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    details = `${details.slice(0, end)}\n[truncated]`;
   }
   return [
     details,
@@ -275,6 +278,7 @@ export function showBootError(error: unknown) {
       details,
       () => {
         copyDetails.textContent = "Copied";
+        // oxlint-disable-next-line t3code/no-untranslated-copy -- boot failure page renders before the i18n runtime loads
         announce("Copied to clipboard.");
       },
       (hint) => {

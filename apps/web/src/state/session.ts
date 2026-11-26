@@ -1,5 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
-import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
+import {
+  createEnvironmentSessionAtoms,
+  sessionDeniesScope,
+} from "@t3tools/client-runtime/state/session";
 import {
   type AuthEnvironmentScope,
   type AuthSessionState,
@@ -31,6 +34,16 @@ export function useEnvironmentScope(
       ? EMPTY_SESSION_STATE_ATOM
       : environmentSession.sessionStateAtom(environmentId),
     (result) => sessionHasScope(result, scope),
+  );
+}
+
+/** This client's own session on the environment, or null until the host has said. */
+export function useEnvironmentSessionId(environmentId: EnvironmentId | null): string | null {
+  return useAtomValue(
+    environmentId === null
+      ? EMPTY_SESSION_STATE_ATOM
+      : environmentSession.sessionStateAtom(environmentId),
+    (result) => AsyncResult.getOrElse(result, () => null)?.sessionId ?? null,
   );
 }
 
@@ -68,6 +81,29 @@ export function readEnvironmentScope(
   scope: AuthEnvironmentScope,
 ): boolean {
   return sessionHasScope(
+    appAtomRegistry.get(environmentSession.sessionStateAtom(environmentId)),
+    scope,
+  );
+}
+
+/** Unlike `!useEnvironmentScope`, stays false until the host has answered without the scope. */
+export function useEnvironmentScopeDenied(
+  environmentId: EnvironmentId | null,
+  scope: AuthEnvironmentScope,
+): boolean {
+  return useAtomValue(
+    environmentId === null
+      ? EMPTY_SESSION_STATE_ATOM
+      : environmentSession.sessionStateAtom(environmentId),
+    (result) => sessionDeniesScope(result, scope),
+  );
+}
+
+export function readEnvironmentScopeDenied(
+  environmentId: EnvironmentId,
+  scope: AuthEnvironmentScope,
+): boolean {
+  return sessionDeniesScope(
     appAtomRegistry.get(environmentSession.sessionStateAtom(environmentId)),
     scope,
   );

@@ -108,6 +108,10 @@ export function usePullRequestsSupported() {
   return useAtomValue(environmentSummaries.pullRequestsSupportedAtom);
 }
 
+export function useIssuesSupported() {
+  return useAtomValue(environmentSummaries.issuesSupportedAtom);
+}
+
 export function useEnvironmentMachines() {
   return useAtomValue(environmentSummaries.machineByIdAtom);
 }

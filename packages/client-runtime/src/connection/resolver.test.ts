@@ -142,7 +142,7 @@ describe("ConnectionResolver", () => {
         label: "Primary",
         httpBaseUrl: "http://127.0.0.1:3777",
         socketUrl:
-          "ws://127.0.0.1:3777/ws?clientSurface=web&orchestrationProtocol=2&clientCapabilities=settingsSecretReferences",
+          "ws://127.0.0.1:3777/ws?clientSurface=web&orchestrationProtocol=2&clientCapabilities=settingsSecretReferences%2ChttpUsageLimitSources",
         httpAuthorization: null,
         target,
         // The shell reads the server's build and shell flags here before the socket opens.
@@ -173,7 +173,7 @@ describe("ConnectionResolver", () => {
       expect([...new URL(prepared.socketUrl).searchParams.entries()]).toEqual([
         ["clientSurface", "web"],
         ["orchestrationProtocol", "2"],
-        ["clientCapabilities", "settingsSecretReferences"],
+        ["clientCapabilities", "settingsSecretReferences,httpUsageLimitSources"],
       ]);
       expect(prepared.httpAuthorization).toBeNull();
     }),

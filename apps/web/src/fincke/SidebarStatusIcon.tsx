@@ -20,6 +20,7 @@ export function sidebarStatusKindForPill(label: ThreadStatusPill["label"]): Side
     case "Plan Ready":
       return "plan";
     case "Completed":
+    default:
       return "unread";
   }
 }

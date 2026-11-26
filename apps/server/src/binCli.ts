@@ -22,6 +22,7 @@ import { extendConnectionAttemptTimeout, keepOutboundFetchOnHttp1 } from "./outb
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { threadCommand } from "./cli/thread.ts";
+import { workflowCommand } from "./cli/workflow.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { runServiceLauncherCli } from "./cli/serviceLauncher.ts";
 import { speechWorkerCommand } from "./cli/speechWorker.ts";
@@ -53,6 +54,7 @@ export const makeCli = () =>
       browserCommand,
       projectCommand,
       threadCommand,
+      workflowCommand,
       // bin.ts runs the bare service invocation; this keeps flags and help working like other commands.
       Command.make("__service-launcher").pipe(
         Command.unlisted,

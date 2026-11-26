@@ -3,7 +3,7 @@
 import { DEFAULT_UNIFIED_SETTINGS, type CodeTheme } from "@t3tools/contracts/settings";
 
 import { SettingResetButton, SettingsRow } from "../components/settings/settingsLayout";
-import { searchableSetting } from "../components/settings/settingsSearch";
+import { useSearchableSetting } from "../components/settings/settingsSearch";
 import {
   useScopedSettings,
   useUpdateScopedSettings,
@@ -27,6 +27,7 @@ function isCodeTheme(value: unknown): value is CodeTheme {
 }
 
 export function CodeThemeSetting() {
+  const searchableSetting = useSearchableSetting();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
 
@@ -37,7 +38,7 @@ export function CodeThemeSetting() {
       resetAction={
         settings.codeTheme !== DEFAULT_UNIFIED_SETTINGS.codeTheme ? (
           <SettingResetButton
-            label="code theme"
+            ariaLabel="Reset code theme to default"
             onClick={() => updateSettings({ codeTheme: DEFAULT_UNIFIED_SETTINGS.codeTheme })}
           />
         ) : null

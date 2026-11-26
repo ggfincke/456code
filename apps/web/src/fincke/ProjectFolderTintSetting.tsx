@@ -3,7 +3,7 @@
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 
 import { SettingResetButton, SettingsRow } from "../components/settings/settingsLayout";
-import { searchableSetting } from "../components/settings/settingsSearch";
+import { useSearchableSetting } from "../components/settings/settingsSearch";
 import {
   useScopedSettings,
   useUpdateScopedSettings,
@@ -11,6 +11,7 @@ import {
 import { Switch } from "../components/ui/switch";
 
 export function ProjectFolderTintSetting() {
+  const searchableSetting = useSearchableSetting();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
 
@@ -21,7 +22,7 @@ export function ProjectFolderTintSetting() {
       resetAction={
         settings.sidebarProjectFolderTint !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectFolderTint ? (
           <SettingResetButton
-            label="project folder colors"
+            ariaLabel="Reset project folder colors to default"
             onClick={() =>
               updateSettings({
                 sidebarProjectFolderTint: DEFAULT_UNIFIED_SETTINGS.sidebarProjectFolderTint,

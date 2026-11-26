@@ -1,5 +1,6 @@
 // apps/web/src/connection/platform.ts
 // supplies browser and desktop environment connection capabilities
+import { msg } from "gt-react";
 import {
   ClientCapabilities,
   PlatformConnectionSource,
@@ -54,7 +55,9 @@ import {
   type DesktopSecondaryBootstrapsRead,
 } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
+import { browserThreadTriageOutboxStore } from "./threadTriageOutboxStore";
 import { clientPresentationMetadata } from "./clientMetadata";
+import { m } from "../i18n/messages";
 
 let nextObservedRpcRequestId = 0;
 
@@ -164,7 +167,11 @@ const layerCapabilities = Layer.effectContext(
         catch: (cause) =>
           new ConnectionTransientError({
             reason: "remote-unavailable",
-            detail: `Could not load the desktop primary credential: ${String(cause)}`,
+            detail: m(
+              msg("Could not load the desktop primary credential: {cause}", {
+                cause: String(cause),
+              }),
+            ),
           }),
       }).pipe(Effect.map(Option.fromNullishOr)),
     });
@@ -203,7 +210,7 @@ const loadSecondaryConnectionRegistration = Effect.fn(
   ) {
     return yield* new ConnectionTransientError({
       reason: "endpoint-unavailable",
-      detail: `Desktop-local backend ${entry.id} is not ready yet.`,
+      detail: m(msg("Desktop-local backend {id} is not ready yet.", { id: entry.id })),
     });
   }
   const httpBaseUrl = entry.httpBaseUrl;
@@ -548,7 +555,11 @@ const layerEnvironmentOwnedDataCleanup = Layer.succeed(
     clear: Effect.fn("Persistence.EnvironmentOwnedDataCleanup.clear")(function (environmentId) {
       return Effect.sync(() => {
         clearComposerDraftsEnvironment(environmentId);
-      });
+      }).pipe(
+        Effect.andThen(
+          Effect.ignore(browserThreadTriageOutboxStore.clearEnvironment(environmentId)),
+        ),
+      );
     }),
   }),
 );

@@ -19,9 +19,12 @@ import {
   prStatusIndicator,
   PrStatusTooltipContent,
   ThreadTerminalStatusButton,
-  ThreadWorktreeIndicator,
   useLinkedThreadPullRequest,
 } from "../components/ThreadStatusIndicators";
+import { ThreadWorktreeIndicator } from "./ThreadWorktreeIndicator";
+import { useSidebarLinkedIssueState } from "../state/issues";
+import { ThreadDetailsIssueRows } from "../components/chat/ThreadDetailsIssueRows";
+import { IssueGlyph, issueStatePresentation } from "../components/issue/issuePresentation";
 import { EnvironmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -114,6 +117,7 @@ import {
   ORCHESTRATION_OPERATE_DENIED_MESSAGE,
   useOrchestrationCommand,
 } from "../state/use-orchestration-command";
+import { m } from "../i18n/messages";
 import { previewEnvironment } from "../state/preview";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import {
@@ -410,7 +414,7 @@ function checkTaskPermission(environmentId: EnvironmentId): boolean {
     stackedThreadToast({
       type: "error",
       title: "Action unavailable",
-      description: ORCHESTRATION_OPERATE_DENIED_MESSAGE,
+      description: m(ORCHESTRATION_OPERATE_DENIED_MESSAGE),
     }),
   );
   return false;
@@ -496,6 +500,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const pr = linkedPullRequestStatus?.pr ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
+  const issueState = useSidebarLinkedIssueState(
+    thread.environmentId,
+    leaseLiveStatus ? thread.issues : undefined,
+  );
   // Hooks must precede this ref's plain uses for the compiler to cache it.
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const fileDropHandlers = makeWorkspaceFileDropHandlers({
@@ -541,6 +549,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
     : null;
   const prStatus = prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider);
+  const firstIssue = thread.issues?.[0];
+  const issueCount = thread.issues?.length ?? 0;
+  const issueStatus = issueState === null ? null : issueStatePresentation(issueState);
+  const IssueIcon = issueStatus?.Icon ?? IssueGlyph.issue;
+  const issueLabel =
+    issueCount === 1 && firstIssue
+      ? `Issue ${firstIssue.displayKey}: ${firstIssue.title}${issueStatus ? `, ${issueStatus.label}` : ""}`
+      : `${issueCount} linked ${issueCount === 1 ? "issue" : "issues"}`;
   const isConfirmingArchive =
     canOperateThread && confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
@@ -774,6 +790,49 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           >
             <PullRequestGlyph.pullRequest className="size-3" />
           </a>
+        ) : null}
+        {firstIssue ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={issueLabel}
+                  className={cn(
+                    "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                    issueStatus?.toneClassName ?? "text-muted-foreground",
+                  )}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    useRightPanelStore.getState().open(threadRef, "pull-requests");
+                    if (!isActive) navigateToThread(threadRef);
+                  }}
+                />
+              }
+            >
+              <IssueIcon aria-hidden className="size-3" />
+            </TooltipTrigger>
+            <TooltipPopup
+              side="top"
+              sideOffset={0}
+              variant="glass"
+              className="pointer-events-auto w-80 max-w-[calc(100vw-2rem)] text-left whitespace-normal"
+              onContextMenu={(event) => event.stopPropagation()}
+            >
+              <div className="-mx-1 max-h-[calc(var(--available-height)-0.5rem-2px)] overflow-y-auto overscroll-contain">
+                <ThreadDetailsIssueRows
+                  links={thread.issues ?? []}
+                  threadRef={threadRef}
+                  compact={false}
+                  mountScope="sidebar-tooltip"
+                  onOpen={() => {
+                    if (!isActive) navigateToThread(threadRef);
+                  }}
+                />
+              </div>
+            </TooltipPopup>
+          </Tooltip>
         ) : null}
         {canOperateThread && renamingThreadKey === threadKey ? (
           <input
@@ -1862,7 +1921,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     }
 
     // Ignore trailing double-clicks after modifier handling so rename does not navigate or break selection.
-    if (isTrailingDoubleClick(event.detail)) {
+    // macOS keeps counting quick clicks across rows, so only the open row's trailing click is a double-click.
+    if (isTrailingDoubleClick(event.detail) && activeRouteThreadKey === threadKey) {
       return;
     }
 

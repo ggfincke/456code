@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProviderDriverKind } from "@t3tools/contracts";
+import { T, Var } from "gt-react";
 import { InfoIcon } from "lucide-react";
 
 import { APP_BASE_NAME } from "~/branding";
@@ -32,7 +33,10 @@ export function MultipleAccountsNote({
       <InfoIcon aria-hidden />
       <AlertDescription>
         <p>
-          We do not recommend managing multiple {providerName} accounts in {APP_BASE_NAME}.
+          <T>
+            We do not recommend managing multiple <Var>{providerName}</Var> accounts in{" "}
+            <Var>{APP_BASE_NAME}</Var>.
+          </T>
         </p>
       </AlertDescription>
     </Alert>

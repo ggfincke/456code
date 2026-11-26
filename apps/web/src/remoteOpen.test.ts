@@ -102,7 +102,9 @@ describe("resolveRemoteOpenState", () => {
     if (state.mode !== "remote-links") throw new Error("Expected a remote link");
     expect(
       buildRemoteOpenUrl({ editor: "cursor", ...state.host, absolutePath: "/work/project" }),
-    ).toBe("cursor://vscode-remote/ssh-remote+admin-user%40server.tail1234.ts.net/work/project");
+    ).toBe(
+      "cursor://vscode-remote/ssh-remote+admin-user%40server.tail1234.ts.net/work/project?windowId=_blank",
+    );
   });
 
   it("reports unavailable when a remote environment advertises no hosts", () => {
@@ -167,7 +169,7 @@ describe("buildRemoteOpenUrl", () => {
   it("roots Windows paths", () => {
     expect(
       buildRemoteOpenUrl({ editor: "vscode", host: "sol", absolutePath: "C:\\Users\\theo" }),
-    ).toBe("vscode://vscode-remote/ssh-remote+sol/C%3A/Users/theo");
+    ).toBe("vscode://vscode-remote/ssh-remote+sol/C%3A/Users/theo?windowId=_blank");
   });
 
   it("keeps a plus in the SSH username through Remote-SSH's authority parsing", () => {
@@ -194,6 +196,16 @@ describe("buildRemoteOpenUrl", () => {
     });
   });
 
+  it("asks VS Code to open a remote project folder in a new window", () => {
+    // Without windowId=_blank, VS Code reuses (and replaces) the last active window.
+    const url = buildRemoteOpenUrl({
+      editor: "vscode",
+      host: "sol",
+      absolutePath: "/work/project",
+    });
+    expect(new URL(url ?? "").searchParams.get("windowId")).toBe("_blank");
+  });
+
   it("drops the Windows drive letter for Zed", () => {
     expect(
       buildRemoteOpenUrl({ editor: "zed", host: "sol", absolutePath: "C:\\Users\\theo" }),
@@ -207,8 +219,12 @@ describe("buildRemoteOpenUrl", () => {
     const targets = [
       ["vscode", true, "vscode://vscode-remote/ssh-remote+sol/tmp/my%20file.md:1:1"],
       ["cursor", true, "cursor://vscode-remote/ssh-remote+sol/tmp/my%20file.md:1:1"],
-      ["vscode", false, "vscode://vscode-remote/ssh-remote+sol/tmp/my%20file.md"],
-      ["vscode", undefined, "vscode://vscode-remote/ssh-remote+sol/tmp/my%20file.md"],
+      ["vscode", false, "vscode://vscode-remote/ssh-remote+sol/tmp/my%20file.md?windowId=_blank"],
+      [
+        "vscode",
+        undefined,
+        "vscode://vscode-remote/ssh-remote+sol/tmp/my%20file.md?windowId=_blank",
+      ],
       ["zed", true, "zed://ssh/sol/tmp/my%20file.md"],
       [
         "pycharm",

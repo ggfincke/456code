@@ -1,5 +1,7 @@
 // packages/client-runtime/src/authorization/dpopProof.ts
 // signs RFC 9449 DPoP proofs w/ a key each client platform keeps on its device
+import { msg } from "gt-i18n";
+import { MarkedText, translatableMessage } from "../errors/translatable.ts";
 import { normalizeDpopHtu, type DpopPublicJwk } from "@t3tools/shared/dpopCommon";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
@@ -15,6 +17,7 @@ import * as Schema from "effect/Schema";
 
 export class DpopProofError extends Schema.TaggedError<DpopProofError>()("DpopProofError", {
   message: Schema.String,
+  i18nMessage: Schema.optionalKey(MarkedText),
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
@@ -50,7 +53,8 @@ const createProof = Effect.fn("DpopProof.createProof")(function* (
   input: DpopProofRequest & { readonly key: DpopProofKey },
 ) {
   const htu = normalizeDpopHtu(input.url);
-  if (htu === null) return yield* new DpopProofError({ message: "DPoP URL is invalid." });
+  if (htu === null)
+    return yield* new DpopProofError(translatableMessage(msg("DPoP URL is invalid.")));
   const random = yield* SecureRandom.SecureRandom;
   const header = encodeSegment({ typ: "dpop+jwt", alg: "ES256", jwk: input.key.publicJwk });
   const payload = encodeSegment({
@@ -84,7 +88,11 @@ export const layerSigner = <E, R>(loadOrCreateKey: Effect.Effect<DpopProofKey, E
         createProof: Effect.fn("DpopSigner.createProof")(function* (input) {
           const key = yield* loadKey.pipe(
             Effect.mapError(
-              (cause) => new DpopProofError({ message: "Could not load the device key.", cause }),
+              (cause) =>
+                new DpopProofError({
+                  ...translatableMessage(msg("Could not load the device key.")),
+                  cause,
+                }),
             ),
           );
           return yield* createProof({ ...input, key }).pipe(

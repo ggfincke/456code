@@ -236,10 +236,13 @@ export class PairingGrantStore extends Context.Service<
         readonly requestedScopes?: ReadonlyArray<AuthEnvironmentScope>;
         /** All scopes must be granted; requestedScopes only requires an overlap for OAuth. */
         readonly requiredScopes?: ReadonlyArray<AuthEnvironmentScope>;
-        /** Also spends a code issued for an agent sign-in at this level; others refuse them. */
-        readonly mcpApproval?: AuthMcpClientAccess;
+        readonly allowedSubject?: string;
       },
     ) => Effect.Effect<BootstrapGrant, BootstrapCredentialError>;
+    /** "Revoke all others" promises every other way in is gone, so unspent codes go too. */
+    readonly revokeUnspentExcept: (
+      keepProofKeyThumbprint: string | null,
+    ) => Effect.Effect<void, BootstrapCredentialInternalError>;
   }
 >()("t3/auth/PairingGrantStore") {}
 
@@ -440,8 +443,8 @@ const make = Effect.gen(function* () {
             }),
         ),
       );
-    // Approval codes stay out of the pairing links and QR codes that clients show.
-    if (!mcpApproval) {
+    // Purpose-bound codes stay out of the pairing links and QR codes that clients show.
+    if (!subject.startsWith(AuthPairingLinks.MCP_APPROVAL_SUBJECT_PREFIX)) {
       yield* emitUpsert({
         id,
         scopes: input?.scopes ?? AuthStandardClientScopes,
@@ -576,11 +579,7 @@ const make = Effect.gen(function* () {
             ? { requestedScopes: input.requestedScopes }
             : {}),
           ...(input?.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
-          ...(input?.mcpApproval
-            ? {
-                mcpApprovalSubject: `${AuthPairingLinks.MCP_APPROVAL_SUBJECT_PREFIX}${input.mcpApproval}`,
-              }
-            : {}),
+          ...(input?.allowedSubject ? { allowedSubject: input.allowedSubject } : {}),
           consumedAt: now,
           now,
         })
@@ -641,6 +640,23 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const revokeUnspentExcept: PairingGrantStore["Service"]["revokeUnspentExcept"] = Effect.fn(
+    "PairingGrantStore.revokeUnspentExcept",
+  )(function* (keepProofKeyThumbprint) {
+    const revokedAt = yield* DateTime.now;
+    const ids = yield* pairingLinks
+      .revokeUnspentByProofKey({
+        proofKeyThumbprint: null,
+        keepProofKeyThumbprint,
+        includeUnbound: true,
+        revokedAt,
+      })
+      .pipe(
+        Effect.mapError((cause) => new PairingLinkRevokeError({ pairingLinkId: "unspent", cause })),
+      );
+    yield* Effect.forEach(ids, emitRemoved, { discard: true });
+  });
+
   return PairingGrantStore.of({
     issueOneTimeToken,
     listActive,
@@ -649,6 +665,7 @@ const make = Effect.gen(function* () {
     },
     revoke,
     consume,
+    revokeUnspentExcept,
   });
 });
 

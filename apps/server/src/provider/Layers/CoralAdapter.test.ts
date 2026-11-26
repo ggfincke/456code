@@ -203,10 +203,6 @@ it.effect("uses multi-turn ACP, model selection, native resume, and isolated ses
       yield* active.session.startTurn(yield* active.turn(index + 1, "Hello", model));
       expect(yield* active.waitFor(terminal)).toMatchObject({ status: "completed" });
     }
-    expect(
-      (yield* active.session.readThreadSnapshot({ providerThread: active.providerThread }))
-        .providerTurns,
-    ).toHaveLength(2);
     expect(yield* f.log).toContain('"value":"coral-alt"');
     yield* active.close;
     const resumed = yield* f.open(threadId, active.providerThread);

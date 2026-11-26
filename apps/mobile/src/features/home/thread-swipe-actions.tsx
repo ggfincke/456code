@@ -1,3 +1,5 @@
+import { msg, useMessages } from "gt-react-native";
+
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
 import type { MenuAction } from "@react-native-menu/menu";
@@ -41,6 +43,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import type { MessageResolver } from "../../i18n/messages";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { SwipeRowActivationContext, type SwipeRowActivation } from "./swipe-row-activation";
 import { registerThreadDismissal } from "./thread-dismissal";
@@ -97,14 +100,15 @@ function resolveSecondaryAction(input: {
   readonly onDelete: () => void;
   readonly secondaryAction: ThreadSwipeAction | null | undefined;
   readonly threadTitle: string;
+  readonly resolve: MessageResolver;
 }): ThreadSwipeSecondaryAction | null {
   if (input.secondaryAction === null) return null;
   if (input.secondaryAction === undefined) {
     return {
-      accessibilityLabel: `Delete ${input.threadTitle}`,
+      accessibilityLabel: input.resolve(msg("Delete {title}", { title: input.threadTitle })),
       tone: "danger",
       icon: "trash",
-      label: "Delete",
+      label: input.resolve(msg("Delete", { $context: "verb, swipe action that deletes a thread" })),
       onPress: () => {
         input.close();
         input.onDelete();
@@ -256,6 +260,7 @@ interface ThreadSwipeableProps {
 const COLLAPSED_ROW_STYLE = { height: 0, overflow: "hidden" } as const;
 
 export function ThreadSwipeable(props: ThreadSwipeableProps) {
+  const m = useMessages();
   const swipeableRef = useRef<SwipeableMethods | null>(null);
   const hasSecondaryAction = props.secondaryAction !== null;
   const actionsWidth = swipeActionsWidth(hasSecondaryAction);
@@ -538,6 +543,7 @@ export function ThreadSwipeable(props: ThreadSwipeableProps) {
             onDelete,
             secondaryAction,
             threadTitle,
+            resolve: m,
           })}
           translation={translation}
         />
@@ -628,6 +634,8 @@ function SwipeActionButton(props: {
   readonly rowHeight: number;
   /** Leading actions sit at the left edge, so they reveal and stretch in the mirrored direction. */
   readonly side?: "leading" | "trailing";
+  /** A trailing action slides left under the stretching action's pill on a full swipe. */
+  readonly slidesUnderStretch: boolean;
   readonly stretchesOnFullSwipe: boolean;
   readonly translation: SharedValue<number>;
 }) {
@@ -636,6 +644,7 @@ function SwipeActionButton(props: {
     actionsWidth,
     entryRange: [entryRangeStart, entryRangeEnd],
     fullSwipeThreshold,
+    slidesUnderStretch,
     stretchesOnFullSwipe,
     translation,
   } = props;
@@ -703,12 +712,18 @@ function SwipeActionButton(props: {
     };
   });
   const labelStyle = useAnimatedStyle(() => {
-    if (!stretchesOnFullSwipe) {
-      return { opacity: 1 };
-    }
-
     const reveal = Math.max(-translation.value * direction, 0);
     const stretch = Math.max(reveal - actionsWidth, 0);
+    if (!stretchesOnFullSwipe) {
+      // The pill covers this action's circle but not its label, so hide the label before its
+      // circle reaches the pill; otherwise it runs into the stretching action's label.
+      return {
+        opacity: slidesUnderStretch
+          ? interpolate(stretch, [0, ACTION_ITEM_WIDTH - circleSize], [1, 0], Extrapolation.CLAMP)
+          : 1,
+      };
+    }
+
     return {
       opacity: interpolate(
         reveal,
@@ -873,6 +888,7 @@ function ThreadLeadingSwipeAction(props: {
         onPress={props.action.onPress}
         rowHeight={props.rowHeight}
         side="leading"
+        slidesUnderStretch={false}
         stretchesOnFullSwipe
         translation={translation}
       />
@@ -928,6 +944,7 @@ export function ThreadSwipeActions(props: {
         label={props.primaryAction.label}
         onPress={props.primaryAction.onPress}
         rowHeight={props.rowHeight}
+        slidesUnderStretch={false}
         stretchesOnFullSwipe={fullSwipeIsPrimary}
         translation={props.translation}
       />
@@ -944,6 +961,7 @@ export function ThreadSwipeActions(props: {
           menu={secondaryAction.menu}
           onPress={secondaryAction.onPress}
           rowHeight={props.rowHeight}
+          slidesUnderStretch={fullSwipeIsPrimary}
           stretchesOnFullSwipe={!fullSwipeIsPrimary}
           translation={props.translation}
         />

@@ -95,3 +95,38 @@ it("opens full command details for short labels and keeps pending tasks current"
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
 });
+
+it("gives a subagent the same status as the background work line", async () => {
+  await using screen = await render(
+    <ThreadNow
+      attention={null}
+      syncPhase={null}
+      goal={null}
+      work={backgroundWorkNowItem({
+        environmentId: EnvironmentId.make("test"),
+        threadId: ThreadId.make("thread"),
+        tasks: [
+          {
+            taskId: "subagent-task",
+            kind: "subagent",
+            description: "Review refactor diffs",
+            childThreadId: ThreadId.make("child"),
+          },
+        ],
+        turnItems: [],
+        stopDisabled: false,
+        stopping: false,
+        onStop: async () => undefined,
+        onOpenThread: () => undefined,
+      })}
+    />,
+  );
+  // fincke: the line keeps its Show button beside the title, so the text is not the whole element
+  await expect
+    .element(page.getByText("Waiting · Review refactor diffs", { exact: false }))
+    .toBeVisible();
+  await screen.getByRole("button", { name: "Details", exact: true }).click();
+  await expect
+    .element(page.getByRole("dialog").getByText("Waiting", { exact: true }))
+    .toBeVisible();
+});

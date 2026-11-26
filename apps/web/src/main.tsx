@@ -6,22 +6,18 @@ import "./index.css";
 import { applyGeistFontDefaults } from "./fincke/geistFonts";
 import "./fincke/oceanTokens.css";
 
+import { trackKeyboardLayout } from "./keyboardLayout";
 import { startAppServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
 import { whenLocaleReady } from "./i18n/runtime";
-import { reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { chunkLoadState } from "./lib/chunkReloadGuard";
+
+const stopTrackingKeyboardLayout = trackKeyboardLayout();
+import.meta.hot?.dispose(stopTrackingKeyboardLayout);
 
 const router = startAppServices();
 
 applyGeistFontDefaults();
-
-let reloadScheduled = false;
-window.addEventListener("vite:preloadError", (event) => {
-  if (reloadOnceForChunkLoadError()) {
-    reloadScheduled = true;
-    event.preventDefault();
-  }
-});
 
 export const startup = router
   .load()
@@ -29,7 +25,7 @@ export const startup = router
   .then(whenLocaleReady)
   .then(() => {
     // Route chunk failures resolve router.load() and surface later through the error boundary.
-    if (reloadScheduled) return;
+    if (chunkLoadState.reloadScheduled) return;
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
         <AppRoot router={router} />
@@ -37,6 +33,6 @@ export const startup = router
     );
   })
   .catch((error: unknown) => {
-    if (reloadScheduled) return;
+    if (chunkLoadState.reloadScheduled) return;
     throw error;
   });

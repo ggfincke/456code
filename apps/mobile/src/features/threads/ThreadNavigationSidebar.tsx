@@ -1,5 +1,7 @@
 // apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx
 // shared sidebar thread navigation with native chrome
+
+import { useGT, useMessages } from "gt-react-native";
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
@@ -137,6 +139,8 @@ export function ThreadNavigationSidebar(props: ThreadNavigationSidebarProps) {
 }
 
 function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
+  const gt = useGT();
+  const messages = useMessages();
   const { themeId, themeVariables: materialTheme } = useAppearancePreferences();
   const ocean = themeId === "fincke-ocean";
   const sidebarView = useSidebarView();
@@ -191,12 +195,15 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         : [];
   const projectScopes = useMemo(
     () =>
-      buildHomeProjectScopes({
-        projects,
-        environmentId: options.selectedEnvironmentId,
-        projectGroupingMode: options.projectGroupingMode,
-      }),
-    [projects, options.selectedEnvironmentId, options.projectGroupingMode],
+      buildHomeProjectScopes(
+        {
+          projects,
+          environmentId: options.selectedEnvironmentId,
+          projectGroupingMode: options.projectGroupingMode,
+        },
+        messages,
+      ),
+    [projects, options.selectedEnvironmentId, options.projectGroupingMode, messages],
   );
   const projectFilterOptions = pickableProjectGroups(
     sortHomeProjectScopes({
@@ -401,6 +408,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   useThreadJumpShortcuts(
     listItems.filter((item) => !isFinckeProjectListItem(item)),
     handleSelectThread,
+    props.onOpenPendingTask,
   );
   const sidebarItemsAreEqual = (previous: SidebarListItem, item: SidebarListItem): boolean => {
     if (isThreadListV2ListItem(previous) && isThreadListV2ListItem(item)) {
@@ -600,14 +608,14 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   });
   const header = (
     <WorkspaceListHeader
-      accessibilityLabel="456code, Threads"
+      accessibilityLabel={gt("{appName}, Threads", { appName: "456code" })}
       onOpenEnvironments={props.onOpenEnvironmentSettings}
       onOpenSettings={props.onOpenSettings}
       search={{
         value: props.searchQuery,
         onChangeText: props.onSearchQueryChange,
-        placeholder: "Search",
-        accessibilityLabel: "Search threads",
+        placeholder: gt("Search", { $context: "search field placeholder" }),
+        accessibilityLabel: gt("Search threads"),
       }}
       sidebar={{
         width: props.width,
@@ -630,16 +638,18 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         }
       >
         {catalogState.isLoadingConnections
-          ? "Loading threads…"
+          ? gt("Loading threads…")
           : showAddEnvironment
-            ? "No environments connected"
+            ? gt("No environments connected")
             : props.searchQuery.trim().length > 0
               ? threadSearch.isPending
-                ? "Searching thread messages…"
-                : "No matching threads"
+                ? gt("Searching thread messages…")
+                : threadSearch.failed
+                  ? gt("Couldn't search thread messages")
+                  : gt("No matching threads")
               : selectedProjectScope !== null
-                ? `No threads in ${selectedProjectScope.title}`
-                : "No threads yet"}
+                ? gt("No threads in {project}", { project: selectedProjectScope.title })
+                : gt("No threads yet")}
       </Text>
       {showAddEnvironment ? (
         <View className={Platform.OS === "android" ? "self-center" : "px-2"}>
@@ -647,7 +657,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             tone="primary"
             size="compact"
             icon="plus"
-            label="Add environment"
+            label={gt("Add environment")}
             onPress={props.onOpenEnvironmentSettings}
           />
         </View>

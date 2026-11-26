@@ -1,4 +1,5 @@
 import * as DateTime from "effect/DateTime";
+import { msg } from "gt-react";
 
 import { resolveDesktopPairingUrl } from "./pairingUrls";
 import {
@@ -6,7 +7,9 @@ import {
   readHostedPairingRequest,
   setPairingTokenOnUrl,
 } from "@t3tools/shared/remote";
+import { m, type MessageResolver } from "../../i18n/messages";
 import {
+  isLoopbackHostname,
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
 } from "~/environments/primary";
@@ -66,10 +69,11 @@ export function isQrShareableEndpoint(endpoint: AdvertisedEndpoint): boolean {
  * means unchecked. */
 export function missingTailscaleEndpointDescription(
   state: Pick<DesktopServerExposureState, "mode" | "tailscaleServeEnabled"> | null,
+  resolve: MessageResolver = m,
 ): string {
   return state && state.mode !== "network-accessible" && !state.tailscaleServeEnabled
-    ? "Turn on Network access to detect Tailscale."
-    : "Start Tailscale to set up HTTPS access through MagicDNS.";
+    ? resolve(msg("Turn on Network access to detect Tailscale."))
+    : resolve(msg("Start Tailscale to set up HTTPS access through MagicDNS."));
 }
 
 export function resolveTailscaleServeBaseUrl(
@@ -100,12 +104,15 @@ export function isWslSettingsRowVisible(input: {
  * Once client/server versions match, this passive Version label follows the sidebar update action,
  * including retryable failures. Rechecks retain downloaded-update labels; `state` is null outside desktop.
  */
-export function resolveLocalVersionStatusLabel(state: DesktopUpdateState | null): string {
-  if (!state) return "Up to date";
+export function resolveLocalVersionStatusLabel(
+  state: DesktopUpdateState | null,
+  resolve: MessageResolver = m,
+): string {
+  if (!state) return resolve(msg("Up to date"));
   if (state.status === "downloading") {
     return state.availableVersion
-      ? `Downloading update ${state.availableVersion}`
-      : "Downloading update";
+      ? resolve(msg("Downloading update {version}", { version: state.availableVersion }))
+      : resolve(msg("Downloading update"));
   }
   const action = resolveDesktopUpdateButtonAction(state);
   if (
@@ -114,14 +121,16 @@ export function resolveLocalVersionStatusLabel(state: DesktopUpdateState | null)
     (state.status === "checking" && state.downloadedVersion !== null)
   ) {
     const version = getDesktopUpdateDownloadedVersion(state);
-    return version ? `Update ${version} downloaded` : "Update downloaded";
+    return version
+      ? resolve(msg("Update {version} downloaded", { version }))
+      : resolve(msg("Update downloaded"));
   }
   if (action === "download") {
     return state.availableVersion
-      ? `Update ${state.availableVersion} available`
-      : "Update available";
+      ? resolve(msg("Update {version} available", { version: state.availableVersion }))
+      : resolve(msg("Update available"));
   }
-  return "Up to date";
+  return resolve(msg("Up to date"));
 }
 
 export type QrEndpointOption = {
@@ -207,10 +216,13 @@ export function parsePairingUrlFields(
   }
 }
 
-export function parseRemotePairingFields(input: {
-  readonly host: string;
-  readonly pairingCode: string;
-}): {
+export function parseRemotePairingFields(
+  input: {
+    readonly host: string;
+    readonly pairingCode: string;
+  },
+  resolve: MessageResolver = m,
+): {
   readonly host: string;
   readonly pairingCode: string;
 } {
@@ -220,10 +232,10 @@ export function parseRemotePairingFields(input: {
   const host = input.host.trim();
   const pairingCode = input.pairingCode.trim();
   if (!host) {
-    throw new Error("Enter a backend host.");
+    throw new Error(resolve(msg("Enter a backend host.")));
   }
   if (!pairingCode) {
-    throw new Error("Enter a pairing code.");
+    throw new Error(resolve(msg("Enter a pairing code.")));
   }
   return { host, pairingCode };
 }
@@ -237,11 +249,20 @@ export function sortDesktopPairingLinks(links: ReadonlyArray<ServerPairingLinkRe
 export function summarizeAuthorizedClients(
   sessions: ReadonlyArray<ServerClientSessionRecord>,
   links: ReadonlyArray<ServerPairingLinkRecord>,
+  resolve: MessageResolver = m,
 ): string {
   const parts = [
-    `${sessions.length} ${sessions.length === 1 ? "client" : "clients"}`,
+    resolve(
+      msg("{count, plural, one {{count} client} other {{count} clients}}", {
+        count: sessions.length,
+      }),
+    ),
     links.length > 0
-      ? `${links.length} ${links.length === 1 ? "pairing link" : "pairing links"}`
+      ? resolve(
+          msg("{count, plural, one {{count} pairing link} other {{count} pairing links}}", {
+            count: links.length,
+          }),
+        )
       : null,
   ];
   return parts.filter((part): part is string => part !== null).join(" · ");
@@ -345,21 +366,31 @@ export function resolveAdvertisedEndpointPairingUrl(
   return resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential);
 }
 
-export function resolveCurrentOriginPairingUrl(credential: string): string {
-  const url = new URL("/pair", window.location.href);
+export function resolveCurrentOriginPairingUrl(
+  credential: string,
+  currentHref: string = window.location.href,
+): string | null {
+  const url = new URL("/pair", currentHref);
+  // The packaged desktop window loads from t3code://app, which no other device can open.
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || isLoopbackHostname(url.hostname)) {
+    return null;
+  }
   return setPairingTokenOnUrl(url, credential).toString();
 }
 
-export function endpointShareHint(endpoint: AdvertisedEndpoint): string {
+export function endpointShareHint(
+  endpoint: AdvertisedEndpoint,
+  resolve: MessageResolver = m,
+): string {
   switch (endpoint.reachability) {
     case "lan":
-      return "Devices on the same network";
+      return resolve(msg("Devices on the same network"));
     case "private-network":
-      return "Devices on your private network";
+      return resolve(msg("Devices on your private network"));
     case "public":
-      return "Reachable from anywhere";
+      return resolve(msg("Reachable from anywhere"));
     case "loopback":
-      return "Clients on this machine";
+      return resolve(msg("Clients on this machine"));
   }
 }
 

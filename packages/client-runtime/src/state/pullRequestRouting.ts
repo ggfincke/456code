@@ -1,3 +1,5 @@
+import { msg } from "gt-i18n";
+import { translatableMessage } from "../errors/translatable.ts";
 import {
   WS_METHODS,
   PullRequestRef,
@@ -68,7 +70,7 @@ const readTimeout = (environmentId: EnvironmentId) =>
       Effect.fail(
         new EnvironmentRpcUnavailableError({
           environmentId,
-          message: "The environment did not respond to the PR request.",
+          ...translatableMessage(msg("The environment did not respond to the PR request.")),
         }),
       ),
   });
@@ -387,7 +389,7 @@ export function createPullRequestRouter() {
           isUnregistered(error)
             ? new EnvironmentRpcUnavailableError({
                 environmentId: id,
-                message: "The environment was removed.",
+                ...translatableMessage(msg("The environment was removed.")),
               })
             : error,
         ),

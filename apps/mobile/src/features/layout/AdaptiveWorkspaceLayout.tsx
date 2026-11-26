@@ -1,3 +1,4 @@
+import { useGT } from "gt-react-native";
 import {
   WorkspaceColumnsRendererContext,
   WorkspacePresentationHostContext,
@@ -13,7 +14,12 @@ import { threadSelectionDeferral } from "./deferred-navigation";
 import { uuidv4 } from "../../lib/uuid";
 import { EnvironmentId, ThreadId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { NavigationContext, NavigationRouteContext, useNavigation } from "@react-navigation/native";
+import {
+  CommonActions,
+  NavigationContext,
+  NavigationRouteContext,
+  useNavigation,
+} from "@react-navigation/native";
 import {
   use,
   useEffect,
@@ -242,6 +248,7 @@ function AdaptiveWorkspaceLayoutContent(
     readonly savedThreadListFilters?: ThreadListFilters | undefined;
   },
 ) {
+  const gt = useGT();
   const projectGroupingMode = props.projectGroupingMode;
   const nativeWorkspace = use(NativeWorkspaceModeContext);
   const usesPresentationHost = use(WorkspacePresentationHostContext);
@@ -567,23 +574,27 @@ function AdaptiveWorkspaceLayoutContent(
         .filter((environment) => environment.connectionState === "connected")
         .map((environment) => environment.environmentId),
     );
-    handleSelectThreadRoute(
-      newTaskDestination({
-        projects,
-        requestId: uuidv4(),
-        useLastProject: saved?.useLastProjectForNewThreads,
-        currentProject: environmentId && projectId ? { environmentId, projectId } : undefined,
-        filteredProject: filteredScope
-          ? newTaskFilteredProject(
-              filteredScope,
-              listEnvironmentId,
-              connectedEnvironmentIds,
-              saved?.lastThreadProject,
-            )
-          : undefined,
-        lastProject: saved?.lastThreadProject,
-      }),
-    );
+    const destination = newTaskDestination({
+      projects,
+      requestId: uuidv4(),
+      useLastProject: saved?.useLastProjectForNewThreads,
+      currentProject: environmentId && projectId ? { environmentId, projectId } : undefined,
+      filteredProject: filteredScope
+        ? newTaskFilteredProject(
+            filteredScope,
+            listEnvironmentId,
+            connectedEnvironmentIds,
+            saved?.lastThreadProject,
+          )
+        : undefined,
+      lastProject: saved?.lastThreadProject,
+    });
+    // Without a project the draft would only push the picker over itself a frame later; open it directly.
+    if (destination.draft.projectId === undefined) {
+      navigation.dispatch(CommonActions.navigate("NewTaskProject"));
+      return;
+    }
+    handleSelectThreadRoute(destination);
   };
 
   useHardwareKeyboardCommand("newTask", () => {
@@ -943,8 +954,8 @@ function AdaptiveWorkspaceLayoutContent(
                 renderFallback={(fallback) => (
                   <RenderFailureView
                     {...fallback}
-                    title="The sidebar couldn't be displayed"
-                    exit={{ label: "Open settings", onPress: handleOpenSettings }}
+                    title={gt("The sidebar couldn't be displayed")}
+                    exit={{ label: gt("Open settings"), onPress: handleOpenSettings }}
                   />
                 )}
               >
@@ -1004,7 +1015,7 @@ function AdaptiveWorkspaceLayoutContent(
           style={[{ zIndex: 1 }, scrimAnimatedStyle]}
         >
           <Pressable
-            accessibilityLabel="Hide sidebar"
+            accessibilityLabel={gt("Hide sidebar")}
             className="flex-1"
             onPress={() => setPrimarySidebarVisible(false)}
           />

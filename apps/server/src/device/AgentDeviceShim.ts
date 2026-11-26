@@ -8,11 +8,11 @@ import * as Path from "effect/Path";
 const SHIM_DIR = "device/bin";
 const TARGETS_DIR = "device/targets";
 const STALE_RUNTIME =
-  "This agent-device command is out of date because T3 Code moved or updated its runtime. Call device_open again for a fresh one.";
+  "This agent-device command is out of date because 456code moved or updated its runtime. Call device_open again for a fresh one.";
 
 const quoteShell = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 
-/** agent-device 0.21.36's flags that take a value, so the launcher can find the command past them. */
+/** agent-device 0.21.41's flags that take a value, so the launcher can find the command past them. */
 const VALUE_FLAGS: ReadonlyArray<string> = [
   "--activity",
   "--all",
@@ -43,9 +43,13 @@ const VALUE_FLAGS: ReadonlyArray<string> = [
   "--delay-ms",
   "--depth",
   "--device",
+  "--device-baseline",
+  "--device-mode",
   "--device-orientation",
   "--dsym",
   "--duration-ms",
+  "-e",
+  "--env",
   "--fps",
   "--from",
   "--geo-location",
@@ -85,6 +89,7 @@ const VALUE_FLAGS: ReadonlyArray<string> = [
   "--out",
   "--pattern",
   "--pause-ms",
+  "--pick",
   "--pixel-density",
   "--pixels",
   "--plan-digest",
@@ -112,6 +117,7 @@ const VALUE_FLAGS: ReadonlyArray<string> = [
   "--provider-timezone",
   "--proxy-base-url",
   "--public-base-url",
+  "--public-origin",
   "--quality",
   "--record-as",
   "--remote-config",
@@ -176,7 +182,7 @@ for (let index = 0; index < args.length; index++) {
 }
 const informational = args.length === 0 || ["help", "--help", "-h", "--version", "version"].includes(args[0]) || options.includes("--help") || options.includes("-h");
 if (!informational && managed.includes(name)) {
-  console.error("T3 Code manages this command's connection to the device, so \`" + name + "\` is not available through it.");
+  console.error("456code manages this command's connection to the device, so \`" + name + "\` is not available through it.");
   process.exit(1);
 }
 if (!informational && name === "device") {
@@ -206,11 +212,11 @@ if (local) {
     socket.once("error", error => resolve(error.code ?? "ERROR"));
   });
   if (failure === "EPERM" || failure === "EACCES") {
-    console.error("This shell cannot reach T3 Code's device connection at " + local.host + " (connect " + failure + "): a network sandbox is blocking localhost. Run this command again with network access, outside the sandbox.");
+    console.error("This shell cannot reach 456code's device connection at " + local.host + " (connect " + failure + "): a network sandbox is blocking localhost. Run this command again with network access, outside the sandbox.");
     process.exit(1);
   }
   if (failure) {
-    console.error("T3 Code's device connection at " + local.host + " is not reachable from this shell (connect " + failure + "). Call device_open again to reconnect; if that succeeds and this repeats, this shell runs in a network sandbox, so run the command with network access, outside the sandbox.");
+    console.error("456code's device connection at " + local.host + " is not reachable from this shell (connect " + failure + "). Call device_open again to reconnect; if that succeeds and this repeats, this shell runs in a network sandbox, so run the command with network access, outside the sandbox.");
     process.exit(1);
   }
 }

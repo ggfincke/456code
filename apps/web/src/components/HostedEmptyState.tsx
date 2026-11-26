@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { T } from "gt-react";
 
 import { APP_DISPLAY_NAME } from "~/branding";
 import { isElectron } from "../env";
@@ -22,12 +23,16 @@ export function HostedEmptyState() {
 
         <Empty className="flex-1">
           <EmptyHeader>
-            <EmptyTitle>This computer is off</EmptyTitle>
-            <EmptyDescription>Turn it back on, or connect a different computer.</EmptyDescription>
+            <EmptyTitle>
+              <T>This computer is off</T>
+            </EmptyTitle>
+            <EmptyDescription>
+              <T>Turn it back on, or connect a different computer.</T>
+            </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
             <Button render={<Link to="/settings/connections" />} size="sm">
-              Open Environments
+              <T>Open Environments</T>
             </Button>
           </EmptyContent>
         </Empty>

@@ -44,6 +44,7 @@ import {
   useAppearancePreferences,
 } from "./features/settings/appearance/AppearancePreferencesProvider";
 import { RootStack, rootPathnameFromState } from "./Stack";
+import { I18nProvider } from "./i18n/I18nProvider";
 import { appAtomRegistry } from "./state/atom-registry";
 import { subscribeComposerDraftModelReconciliation } from "./state/use-composer-drafts";
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
@@ -246,7 +247,9 @@ export default function App() {
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
       <AppearancePreferencesProvider>
-        <AppContent />
+        <I18nProvider>
+          <AppContent />
+        </I18nProvider>
       </AppearancePreferencesProvider>
     </RegistryContext.Provider>
   );

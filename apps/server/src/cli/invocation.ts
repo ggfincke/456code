@@ -127,7 +127,7 @@ const powershellWord = (value: string) =>
     .replaceAll("$", "`$")
     .replace(/["\u201C\u201D\u201E]/g, "$&$&")}"`;
 
-const hostShellWord = (platform: NodeJS.Platform, value: string) =>
+export const hostShellWord = (platform: NodeJS.Platform, value: string) =>
   platform === "win32" ? powershellWord(value) : shellWord(value);
 
 /** Script installs have no single launcher; desktop shims and standalone binaries do. */
@@ -172,7 +172,16 @@ export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand
           )
         : null;
     if (own === null || own === (yield* real(onPath))) {
-      return { command: withArgs(command), launcher: false };
+      const path = yield* Path.Path;
+      const searchPath = (yield* HostProcess.Environment).PATH ?? "";
+      // With an empty or relative PATH entry, plain `t3` depends on the directory it runs from.
+      const cwdDependent =
+        platform !== "win32" &&
+        searchPath.length > 0 &&
+        searchPath.split(":").some((entry) => !path.isAbsolute(entry));
+      if (!cwdDependent) return { command: withArgs(command), launcher: false };
+      const quoted = hostShellWord(platform, path.resolve(onPath));
+      return { command: withArgs(`${quoted} ${subcommand}`), launcher: false };
     }
   }
   const launcher = yield* resolveInstallLauncher;

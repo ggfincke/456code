@@ -6,6 +6,8 @@ import type {
   ConnectionHop,
   SupervisorConnectionState,
 } from "./model.ts";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
 
 export type ConnectionHopResult = "ok" | "failed" | "unchecked";
 
@@ -68,134 +70,168 @@ function locate(input: ConnectionDiagnosisInput): Located | null {
   return null;
 }
 
-function headline(host: string, located: Located, failure: ConnectionAttemptError | null): string {
+function headline(
+  host: string,
+  located: Located,
+  failure: ConnectionAttemptError | null,
+  resolve: MFunctionType,
+): string {
   switch (located.cause) {
     case "offline":
-      return "This device is offline";
+      return resolve(msg("This device is offline"));
     case "session_pending":
-      return "This device is still loading its T3 Connect sign-in";
+      return resolve(msg("This device is still loading its sign-in"));
     case "outdated":
-      return `${host} runs an older version`;
+      return resolve(msg("{host} runs an older version", { host }));
     case "clock_skew":
-      return "This device's clock is off";
+      return resolve(msg("This device's clock is off"));
     case "not_linked":
-      return `${host} is not linked to your relay account`;
+      return resolve(msg("{host} is not linked to your relay account", { host }));
     case "relay_error":
-      return "The relay returned an error";
+      return resolve(msg("The relay returned an error"));
     case "tunnel_pending":
-      return `${host}'s tunnel is still being set up`;
+      return resolve(msg("{host}'s tunnel is still being set up", { host }));
     case "tunnel_not_enabled":
-      return `The relay tunnel is not turned on for ${host}`;
+      return resolve(msg("The relay tunnel is not turned on for {host}", { host }));
     case "tunnel_down":
-      return `${host}'s tunnel is offline`;
+      return resolve(msg("{host}'s tunnel is offline", { host }));
     case "origin_unreachable":
-      return `Tunnel works, but the server on ${host} did not answer`;
+      return resolve(msg("Tunnel works, but the server on {host} did not answer", { host }));
     case "invalid_response":
-      return `The server on ${host} sent an unexpected answer`;
+      return resolve(msg("The server on {host} sent an unexpected answer", { host }));
     case "dns":
-      return `${host}'s tunnel address did not resolve`;
+      return resolve(msg("{host}'s tunnel address did not resolve", { host }));
     case "tls":
-      return `Secure connection to ${host}'s tunnel failed`;
+      return resolve(msg("Secure connection to {host}'s tunnel failed", { host }));
     case "refused":
-      return `${host}'s tunnel refused the connection`;
+      return resolve(msg("{host}'s tunnel refused the connection", { host }));
     case "timeout":
-      return `${host} did not answer in time`;
+      return resolve(msg("{host} did not answer in time", { host }));
     case "unknown":
     case null:
       break;
   }
   switch (located.hop) {
     case "device":
-      return "This device could not prepare the connection";
+      return resolve(msg("This device could not prepare the connection"));
     case "relay":
       return failure?.reason === "authentication"
-        ? "The relay did not accept this device's sign-in"
-        : "This device can't reach the relay";
+        ? resolve(msg("The relay did not accept this device's sign-in"))
+        : resolve(msg("This device can't reach the relay"));
     case "tunnel":
       // The relay already reached the host when this device fails on its own.
       return failure?.reason === "network" ||
         failure?.reason === "transport" ||
         failure?.reason === "timeout"
-        ? `This device can't reach ${host}'s tunnel`
-        : `The relay could not reach ${host}'s tunnel`;
+        ? resolve(msg("This device can't reach {host}'s tunnel", { host }))
+        : resolve(msg("The relay could not reach {host}'s tunnel", { host }));
     case "server":
       return failure?.reason === "authentication" || failure?.reason === "permission"
-        ? `The server on ${host} did not accept this device`
-        : `The server on ${host} did not answer`;
+        ? resolve(msg("The server on {host} did not accept this device", { host }))
+        : resolve(msg("The server on {host} did not answer", { host }));
   }
 }
 
-function steps(host: string, located: Located, failure: ConnectionAttemptError | null): string[] {
-  const checkHost = `On ${host}, check that the server is running.`;
+function steps(
+  host: string,
+  located: Located,
+  failure: ConnectionAttemptError | null,
+  resolve: MFunctionType,
+): string[] {
+  const checkHost = resolve(msg("On {host}, check that the server is running.", { host }));
   switch (located.cause) {
     case "offline":
-      return ["Connect this device to the internet. 456code reconnects on its own."];
+      return [resolve(msg("Connect this device to the internet. 456code reconnects on its own."))];
     case "session_pending":
       return [
-        "Wait a moment. 456code retries on its own.",
-        "If it keeps waiting, reload or restart 456code on this device.",
+        resolve(msg("Wait a moment. 456code retries on its own.")),
+        resolve(msg("If it keeps waiting, reload or restart 456code on this device.")),
       ];
     case "outdated":
-      return [`Update the server on ${host}.`];
+      return [resolve(msg("Update the server on {host}.", { host }))];
     case "clock_skew":
-      return [`Turn on automatic date and time on this device and on ${host}, then retry.`];
+      return [
+        resolve(
+          msg("Turn on automatic date and time on this device and on {host}, then retry.", {
+            host,
+          }),
+        ),
+      ];
     case "not_linked":
-      return ["Check that this device is signed in to the same relay account as the host."];
+      return [
+        resolve(msg("Check that this device is signed in to the same relay account as the host.")),
+      ];
     case "tunnel_pending":
-      return ["Wait a minute. The app retries on its own.", checkHost];
+      return [resolve(msg("Wait a minute. The app retries on its own.")), checkHost];
     case "relay_error":
       return [
-        "Wait a few minutes. The app retries on its own.",
-        "If it keeps failing, copy the diagnostics and report it.",
+        resolve(msg("Wait a few minutes. The app retries on its own.")),
+        resolve(msg("If it keeps failing, copy the diagnostics and report it.")),
       ];
     case "tunnel_not_enabled":
       return [checkHost];
     case "tunnel_down":
       return [
-        `Make sure ${host} is awake and the server is running on it.`,
+        resolve(msg("Make sure {host} is awake and the server is running on it.", { host })),
         checkHost,
-        `A VPN or Tailscale exit node on ${host} can block the tunnel (port 7844). Turn it off or allow the tunnel.`,
+        resolve(
+          msg(
+            "A VPN or Tailscale exit node on {host} can block the tunnel (port 7844). Turn it off or allow the tunnel.",
+            { host },
+          ),
+        ),
       ];
     case "origin_unreachable":
     case "invalid_response":
-      return [`Start or restart the server on ${host}.`, checkHost];
+      return [resolve(msg("Start or restart the server on {host}.", { host })), checkHost];
     // The relay saw these on its way to the host, so the fix is on the host.
     case "dns":
     case "tls":
     case "refused":
     case "timeout":
     case "unknown":
-      return [`Make sure ${host} is awake and online.`, checkHost];
+      return [resolve(msg("Make sure {host} is awake and online.", { host })), checkHost];
     case null:
       break;
   }
   switch (located.hop) {
     case "device":
       return [
-        "Restart the app on this device.",
-        `If it keeps failing, remove ${host} from this device and add it again.`,
+        resolve(msg("Restart the app on this device.")),
+        resolve(
+          msg("If it keeps failing, remove {host} from this device and add it again.", { host }),
+        ),
       ];
     case "relay":
       return failure?.reason === "authentication"
-        ? ["Sign out of the relay and sign in again."]
+        ? [resolve(msg("Sign out of the relay and sign in again."))]
         : [
-            "Check this device's internet connection.",
-            "A VPN, firewall, or ad blocker on this device can block the relay.",
+            resolve(msg("Check this device's internet connection.")),
+            resolve(msg("A VPN, firewall, or ad blocker on this device can block the relay.")),
           ];
     case "tunnel":
       return failure?.reason === "network" ||
         failure?.reason === "transport" ||
         failure?.reason === "timeout"
         ? [
-            "A VPN, firewall, or DNS filter on this device can block the tunnel.",
-            "Try another network, or add a direct route such as a Tailscale address.",
+            resolve(msg("A VPN, firewall, or DNS filter on this device can block the tunnel.")),
+            resolve(msg("Try another network, or add a direct route such as a Tailscale address.")),
           ]
-        : [`Make sure ${host} is awake and online.`, checkHost];
+        : [resolve(msg("Make sure {host} is awake and online.", { host })), checkHost];
     case "server":
-      return [
-        `Make sure the server is running on ${host}.`,
-        "Retry. If it keeps failing, copy the diagnostics.",
-      ];
+      return failure?.reason === "authentication"
+        ? [
+            resolve(
+              msg(
+                "This device's sign-in to {host} expired or was revoked. Pair it again with a new pairing link from {host}.",
+                { host },
+              ),
+            ),
+          ]
+        : [
+            resolve(msg("Make sure the server is running on {host}.", { host })),
+            resolve(msg("Retry. If it keeps failing, copy the diagnostics.")),
+          ];
   }
 }
 
@@ -204,16 +240,16 @@ const HOP_ORDER = {
   direct: ["device", "server"],
 } as const;
 
-function hopLabel(hop: ConnectionHop, host: string): string {
+function hopLabel(hop: ConnectionHop, host: string, resolve: MFunctionType): string {
   switch (hop) {
     case "device":
-      return "This device";
+      return resolve(msg("This device"));
     case "relay":
-      return "Relay";
+      return resolve(msg("Relay"));
     case "tunnel":
-      return `${host} tunnel`;
+      return resolve(msg("{host} tunnel", { host }));
     case "server":
-      return `Server on ${host}`;
+      return resolve(msg("Server on {host}", { host }));
   }
 }
 
@@ -223,6 +259,7 @@ function hopLabel(hop: ConnectionHop, host: string): string {
  */
 export function presentConnectionDiagnosis(
   input: ConnectionDiagnosisInput,
+  resolve: MFunctionType = mFallback,
 ): ConnectionDiagnosis | null {
   const located = locate(input);
   if (located === null) return null;
@@ -234,7 +271,7 @@ export function presentConnectionDiagnosis(
   const failedIndex = order.indexOf(located.hop);
   const hops = order.map((hop, index): ConnectionDiagnosisHop => ({
     hop,
-    label: hopLabel(hop, host),
+    label: hopLabel(hop, host, resolve),
     result:
       index === failedIndex
         ? "failed"
@@ -247,25 +284,34 @@ export function presentConnectionDiagnosis(
   const add = (label: string, value: string | number | null | undefined) => {
     if (value !== null && value !== undefined && value !== "") facts.push([label, String(value)]);
   };
-  add("Cause", located.cause ?? failure?.reason);
-  add("HTTP status", failure?.httpStatus);
-  add("Attempts", input.state.attempt > 0 ? input.state.attempt : null);
   add(
-    "Next retry",
+    resolve(msg("Cause", { $context: "diagnostics field label" })),
+    located.cause ?? failure?.reason,
+  );
+  add(resolve(msg("HTTP status")), failure?.httpStatus);
+  add(
+    resolve(msg("Attempts", { $context: "diagnostics field label" })),
+    input.state.attempt > 0 ? input.state.attempt : null,
+  );
+  add(
+    resolve(msg("Next retry")),
     input.state.retryAt === null
       ? null
       : DateTime.formatIso(DateTime.makeUnsafe(input.state.retryAt)),
   );
-  add("Route", relayPath ? "Relay" : "Direct");
-  add("App version", input.clientVersion);
-  add("Host version", input.serverVersion);
-  add("Error", failure?.detail);
-  add("Trace ID", failure?.traceId);
+  add(
+    resolve(msg("Route", { $context: "diagnostics field label" })),
+    relayPath ? resolve(msg("Relay")) : resolve(msg("Direct", { $context: "connection route" })),
+  );
+  add(resolve(msg("App version")), input.clientVersion);
+  add(resolve(msg("Host version")), input.serverVersion);
+  add(resolve(msg("Error", { $context: "diagnostics field label" })), failure?.detail);
+  add(resolve(msg("Trace ID")), failure?.traceId);
 
   return {
-    headline: headline(host, located, failure),
+    headline: headline(host, located, failure, resolve),
     hops,
-    steps: steps(host, located, failure),
+    steps: steps(host, located, failure, resolve),
     facts,
   };
 }

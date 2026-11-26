@@ -32,7 +32,7 @@ Full docs live in [docs/](./docs).
 - [Source control integrations](./docs/user/source-control.md)
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 
-For local development, use the [development runbook](docs/operations/development.md). Fork integration details are in the [fork operations record](docs/operations/thin-fork.md), and architecture starts at [docs/internals/overview.md](./docs/internals/overview.md).
+For local development, use the [development runbook](docs/operations/development.md). Fork integration details are in the [fork operations record](docs/operations/thin-fork.md), and architecture starts at [docs/internals/01_architecture.md](./docs/internals/01_architecture.md).
 
 ## T3 Code
 

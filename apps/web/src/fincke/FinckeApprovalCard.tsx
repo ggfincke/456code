@@ -9,6 +9,7 @@ import type {
   ProviderApprovalOption,
   RuntimeRequestId,
 } from "@t3tools/contracts";
+import { useMessages } from "gt-react";
 import { CircleAlertIcon, EllipsisIcon, TriangleAlertIcon } from "lucide-react";
 import { memo, type ReactElement } from "react";
 
@@ -65,8 +66,11 @@ export const FinckeApprovalCard = memo(function FinckeApprovalCard(props: {
   const { label, detail } = approvalLabels(approval.requestKind);
   const Detail = approval.requestKind === "mcp-elicitation" ? "span" : "code";
   const canRespond = approval.responseCapability === "live";
+  const m = useMessages();
+  // the default labels are encoded messages; provider-sent options are plain text
   const options: ReadonlyArray<ProviderApprovalOption> =
-    approval.options ?? DEFAULT_APPROVAL_OPTIONS;
+    approval.options ??
+    DEFAULT_APPROVAL_OPTIONS.map((option) => ({ ...option, label: m(option.label) }));
   const buttonOptions = BUTTON_ORDER.flatMap((decision) =>
     options.filter((option) => option.decision === decision),
   );

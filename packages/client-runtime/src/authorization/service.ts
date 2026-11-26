@@ -1,5 +1,7 @@
 // packages/client-runtime/src/authorization/service.ts
 // authorizes remote environments with bearer tokens
+import { msg } from "gt-i18n";
+import { translatableDetail } from "../errors/translatable.ts";
 import {
   AuthAccessTokenType,
   type ClientConnectionMethod,
@@ -182,7 +184,7 @@ const make = Effect.gen(function* () {
       ? Effect.fail(
           new ConnectionBlockedError({
             reason: "configuration",
-            detail: "This client cannot sign with a device key.",
+            ...translatableDetail(msg("This client cannot sign with a device key.")),
           }),
         )
       : signer.value.createProof(proof).pipe(
@@ -190,7 +192,7 @@ const make = Effect.gen(function* () {
             () =>
               new ConnectionBlockedError({
                 reason: "configuration",
-                detail: "Could not create the environment authorization proof.",
+                ...translatableDetail(msg("Could not create the environment authorization proof.")),
               }),
           ),
         );

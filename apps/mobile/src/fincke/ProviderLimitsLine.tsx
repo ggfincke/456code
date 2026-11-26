@@ -3,12 +3,8 @@
 
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
-import {
-  collectProviderUsageLimits,
-  formatDuration,
-  limitsNotice,
-  remainingPercent,
-} from "@t3tools/shared/usageLimits";
+import { collectProviderUsageLimits, remainingPercent } from "@t3tools/shared/usageLimits";
+import { formatDuration, limitsNotice } from "@t3tools/shared/usageLimitsCopy";
 import { Fragment, useState } from "react";
 import { View } from "react-native";
 

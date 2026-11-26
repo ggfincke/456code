@@ -102,9 +102,7 @@ and each locked control shows **Managed by**.
 ## Change or remove a policy
 
 After you deploy, change, or remove a policy, restart the 456code server on the machine: quit and
-reopen the desktop app, or run `t3 service restart` for the
-[background service](./background-service.md). Reconnecting a phone or browser does not reload the
-policy.
+reopen the desktop app. Reconnecting a phone or browser does not reload the policy.
 
 To remove a policy, delete the file, remove the profile, set the Group Policy settings to
 **Not Configured**, or delete the registry value, then restart
@@ -127,8 +125,8 @@ cannot enforce, so upgrade 456code before you deploy a policy that uses them.
 ## Settings
 
 Each key under `settings` is a setting's path in the server's `settings.json`, such as
-`storageCleanup.logsAfterDays`. To find a path, change the setting in 456code and look in
-`settings.json` under `~/.t3/userdata`.
+`storageCleanup.logsAfterDays`. Run `t3 policy settings` to list every path a policy can manage,
+with its default.
 
 - `"locked": false` sets a default. It applies wherever the user has not chosen a value of their
   own, and users can change it.
@@ -169,6 +167,8 @@ A few settings need care:
     "connect": false,
     "webhookTasks": false,
     "browserCookieImport": false,
+    "previewTunnel": false,
+    "worktreeLayoutCommands": false,
     "telemetry": false,
     "providers": {
       "allowedDrivers": ["claudeAgent", "codex"],
@@ -244,8 +244,18 @@ so restart 456code after that.
 
 - `webhookTasks: false`: scheduled tasks cannot use webhook triggers. Existing webhook tasks stay
   but do not run, and cannot be turned back on. Users can still edit or delete them.
+  Workflow webhooks are refused too.
 - `browserCookieImport: false`: users cannot import cookies from another browser into 456code's
   browser.
+- `previewTunnel: false`: other devices cannot load this machine's `localhost` pages themselves.
+  Browser tabs stream from it instead, and port forwarding and **Open on this device** are
+  unavailable. This wins over the user's
+  [Preview tunnel setting](./remote-access.md#browser-on-a-remote-environment).
+- `worktreeLayoutCommands: false`: 456code does not run the
+  [worktree layout commands](./multi-repo-projects.md#lay-the-folder-out-yourself) a project's
+  `t3.json` declares, whether or not a user approved them. Such a project gets no new worktree
+  threads; existing thread folders are restored as plain checkouts and removed without the
+  project's `remove` command.
 - Product usage collection and vendor relay tracing are removed. The `telemetry` policy field
   remains for compatibility and cannot enable them. See [diagnostics](./telemetry.md).
 

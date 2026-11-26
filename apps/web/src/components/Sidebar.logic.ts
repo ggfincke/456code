@@ -5,6 +5,8 @@ import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
+import { msg } from "gt-react";
+import { m, type MessageResolver } from "../i18n/messages";
 import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
@@ -200,11 +202,18 @@ export function useSnoozeWakeClock(
   return clockMs;
 }
 
-// Live status that says the cwd is not a repository means the checkout was removed.
+// Live status that says the cwd is not a repository means the checkout was removed. A worktree
+// thread of a project with tracked folders may sit in a plain task folder, which never is one.
 export function withoutRemovedCheckout<
   T extends { readonly branch: string | null; readonly worktreePath: string | null },
->(thread: T, gitStatus: { readonly isRepo?: boolean | undefined } | null): T {
-  return gitStatus?.isRepo === false ? { ...thread, branch: null, worktreePath: null } : thread;
+>(
+  thread: T,
+  gitStatus: { readonly isRepo?: boolean | undefined } | null,
+  project: { readonly trackedFolders?: ReadonlyArray<unknown> | undefined } | null,
+): T {
+  if (gitStatus?.isRepo !== false) return thread;
+  if (thread.worktreePath !== null && (project?.trackedFolders?.length ?? 0) > 0) return thread;
+  return { ...thread, branch: null, worktreePath: null };
 }
 
 export function useRetainedValue<T>(key: string | null, value: T | null): T | null {
@@ -653,13 +662,13 @@ export function buildBulkTitleRegenerationContextMenuItem(input: {
   if (input.actionableCount === 0) {
     return {
       id: "regenerate-title",
-      label: `Regenerating… (${input.supportedCount})`,
+      label: m(msg("Regenerating… ({count})", { count: input.supportedCount })),
       disabled: true,
     };
   }
   return {
     id: "regenerate-title",
-    label: `Regenerate titles (${input.actionableCount})`,
+    label: m(msg("Regenerate titles ({count})", { count: input.actionableCount })),
   };
 }
 
@@ -676,19 +685,12 @@ export function buildBulkUnpinContextMenuItem(input: {
   pinnedCount: number;
 }): ContextMenuItem<"unpin"> | null {
   if (input.pinnedCount === 0) return null;
-  return { id: "unpin", label: `Unpin (${input.pinnedCount})` };
+  return { id: "unpin", label: m(msg("Unpin ({count})", { count: input.pinnedCount })) };
 }
 
 export interface ThreadStatusPill {
-  label:
-    | "Working"
-    | "Connecting"
-    | "Completed"
-    | "Failed"
-    | "Pending Approval"
-    | "Awaiting Input"
-    | "Waiting"
-    | "Plan Ready";
+  /** A `msg()` string; render it through `useMessages()`. */
+  label: string;
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -774,12 +776,15 @@ const threadJumpModifierHold = createModifierHoldStore(THREAD_JUMP_HINT_SHOW_DEL
 
 function subscribeToThreadJumpHintInputs(listener: () => void): () => void {
   const unsubscribeHold = threadJumpModifierHold.subscribe(listener);
+  // The snapshot reads the modifiers; the hold stays silent when it is true across a change.
+  const unsubscribeModifiers = shortcutModifierStore.subscribe(listener);
   const unsubscribeFocus = subscribeToTerminalFocusChanges(listener);
   const unsubscribeTerminals = useTerminalUiStateStore.subscribe(listener);
   const unsubscribeRightPanels = useRightPanelStore.subscribe(listener);
   const unsubscribeModelPicker = subscribeToModelPickerVisibility(listener);
   return () => {
     unsubscribeHold();
+    unsubscribeModifiers();
     unsubscribeFocus();
     unsubscribeTerminals();
     unsubscribeRightPanels();
@@ -874,6 +879,35 @@ export function shouldCreateNewThreadInCurrentProject(
   projectGroupCount: number,
 ): boolean {
   return shiftKey || openProjectGroupCount === 1 || projectGroupCount === 0;
+}
+
+/**
+ * A sidebar filtered to one project already says where the next thread belongs,
+ * so New skips the picker there. A project grouped across environments keeps the
+ * viewed thread's environment when that thread belongs to the group.
+ */
+export function resolveScopedNewThreadProjectRef<
+  TRef extends { readonly environmentId: string; readonly projectId: string },
+>(input: {
+  shiftKey: boolean;
+  scopedProjectGroups: readonly {
+    readonly environmentId: string;
+    readonly id: string;
+    readonly memberProjectRefs: readonly TRef[];
+  }[];
+  viewed: { readonly environmentId: string; readonly projectId: string } | null | undefined;
+}): TRef | null {
+  const [group, ...otherGroups] = input.scopedProjectGroups;
+  if (input.shiftKey || !group || otherGroups.length > 0) return null;
+  const memberAt = (environmentId: string, projectId: string) =>
+    group.memberProjectRefs.find(
+      (ref) => ref.environmentId === environmentId && ref.projectId === projectId,
+    );
+  return (
+    (input.viewed && memberAt(input.viewed.environmentId, input.viewed.projectId)) ??
+    memberAt(group.environmentId, group.id) ??
+    null
+  );
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {
@@ -1017,18 +1051,21 @@ export function resolveSidebarRowStatus(
 }
 
 /** What the window title says the open thread is doing, in the words its announcer uses. */
-export function resolveWindowTitleThreadStatus(thread: SidebarThreadStatusInput): string | null {
+export function resolveWindowTitleThreadStatus(
+  thread: SidebarThreadStatusInput,
+  resolve: MessageResolver = m,
+): string | null {
   switch (resolveSidebarThreadStatus(thread)) {
     case "approval":
-      return THREAD_STATUS_TEXT.approval;
+      return resolve(THREAD_STATUS_TEXT.approval);
     case "input":
-      return THREAD_STATUS_TEXT.input;
+      return resolve(THREAD_STATUS_TEXT.input);
     case "preparing":
     case "working":
-      return THREAD_STATUS_TEXT.working;
+      return resolve(THREAD_STATUS_TEXT.working);
     case "waiting":
       // Waiting on a child thread is still this turn, so it must not read as finished.
-      return thread.runtime?.status === "running" ? THREAD_STATUS_TEXT.working : null;
+      return thread.runtime?.status === "running" ? resolve(THREAD_STATUS_TEXT.working) : null;
     default:
       return null;
   }
@@ -1259,6 +1296,8 @@ export function pullRequestMatchesSearchQuery(
   return normalizedQuery.split(" ").every((token) => haystack.includes(token));
 }
 
+export const ADD_PROJECT_SCOPE_ITEM_VALUE = "add-project";
+
 export function filterSidebarProjectScopeItems<TItem extends { readonly value: string }>(input: {
   items: readonly TItem[];
   query: string;
@@ -1266,7 +1305,12 @@ export function filterSidebarProjectScopeItems<TItem extends { readonly value: s
 }): readonly TItem[] {
   const query = input.query.trim();
   if (query.length === 0) return input.items;
-  return input.items.filter((item) => item.value !== "all" && input.matches(item, query));
+  return input.items.filter(
+    (item) =>
+      item.value !== "all" &&
+      item.value !== ADD_PROJECT_SCOPE_ITEM_VALUE &&
+      input.matches(item, query),
+  );
 }
 
 interface SidebarProjectScopeMenuState {
@@ -1307,7 +1351,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
     return {
-      label: "Pending Approval",
+      label: msg("Pending Approval"),
       colorClass:
         "text-amber-600 dark:text-amber-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-yellow)",
       dotClass:
@@ -1318,7 +1362,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingUserInput || thread.pendingSubagentRequest === "user_input") {
     return {
-      label: "Awaiting Input",
+      label: msg("Awaiting Input"),
       colorClass:
         "text-indigo-600 dark:text-indigo-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-yellow)",
       dotClass:
@@ -1332,7 +1376,7 @@ export function resolveThreadStatusPill(input: {
     thread.runtime?.status === "waiting"
   ) {
     return {
-      label: "Working",
+      label: msg("Working"),
       colorClass:
         "text-sky-600 dark:text-sky-300/80 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
       dotClass:
@@ -1347,7 +1391,7 @@ export function resolveThreadStatusPill(input: {
     thread.runtime?.status === "queued"
   ) {
     return {
-      label: "Connecting",
+      label: msg("Connecting"),
       colorClass:
         "text-sky-600 dark:text-sky-300/80 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
       dotClass:
@@ -1356,23 +1400,19 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (
-    (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) ||
-    backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])
-  ) {
-    return {
-      label: "Waiting",
-      colorClass:
-        "text-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
-      dotClass:
-        "bg-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-teal)",
-      pulse: false,
-    };
-  }
+  const waiting = {
+    label: msg("Waiting"),
+    colorClass:
+      "text-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-teal)",
+    dotClass: "bg-sidebar-muted-foreground [html[data-theme-id=fincke-ocean]_&]:bg-(--fincke-teal)",
+    pulse: false,
+  };
+  if (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) return waiting;
 
+  // A failed run goes to the inbox even while background work holds the thread.
   if (hasUnseenRunFailure(thread)) {
     return {
-      label: "Failed",
+      label: msg("Failed"),
       colorClass:
         "text-red-600 dark:text-red-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-red)",
       dotClass:
@@ -1381,9 +1421,11 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
+  if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) return waiting;
+
   if (hasPlanReadyPrompt(thread)) {
     return {
-      label: "Plan Ready",
+      label: msg("Plan Ready"),
       colorClass:
         "text-violet-600 dark:text-violet-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-purple)",
       dotClass:
@@ -1394,7 +1436,7 @@ export function resolveThreadStatusPill(input: {
 
   if (hasUnseenCompletion(thread)) {
     return {
-      label: "Completed",
+      label: msg("Completed"),
       colorClass:
         "text-emerald-600 dark:text-emerald-300/90 [html[data-theme-id=fincke-ocean]_&]:text-(--fincke-blue)",
       dotClass:
@@ -1629,7 +1671,8 @@ export function resolveProjectStatusIndicator(
     if (status === null) continue;
     if (
       highestPriorityStatus === null ||
-      THREAD_STATUS_PRIORITY[status.label] > THREAD_STATUS_PRIORITY[highestPriorityStatus.label]
+      (THREAD_STATUS_PRIORITY[status.label] ?? 0) >
+        (THREAD_STATUS_PRIORITY[highestPriorityStatus.label] ?? 0)
     ) {
       highestPriorityStatus = status;
     }

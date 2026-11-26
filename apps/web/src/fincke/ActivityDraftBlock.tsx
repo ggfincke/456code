@@ -6,32 +6,44 @@ import type { ContextMenuSource } from "@t3tools/contracts";
 import { contextMenuSourceOf } from "../contextMenuSource";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { composerFileLinksToPlainText } from "@t3tools/shared/composerInlineTokens";
 import { SquarePenIcon, XIcon } from "lucide-react";
 import {
   memo,
-  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { cn } from "~/lib/utils";
 import { resolveSidebarRowAccessibility } from "../components/Sidebar.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import {
-  composerDraftHasUserContent,
-  DraftId,
+  type DraftId,
   useComposerDraftStore,
   type ComposerThreadDraftState,
-  type DraftSessionState,
 } from "../composerDraftStore";
+import { draftTerminalLabel } from "../components/sidebar/SidebarDraftBlock";
 import { draftPenClassName, draftSurfaceClassName } from "../components/sidebar/SidebarThreadRow";
-import { RelativeTimeLabel } from "./ActivityThreadRow";
+import { JumpHintBadge, RelativeTimeLabel } from "./ActivityThreadRow";
+
+const EMPTY_COMPOSER_PARTS = {
+  prompt: "",
+  images: [],
+  persistedAttachments: [],
+  files: [],
+  terminalContexts: [],
+  previewAnnotations: [],
+  reviewComments: [],
+} as const;
 
 const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   draftId: DraftId;
-  composer: ComposerThreadDraftState;
+  composer: ComposerThreadDraftState | null;
+  terminalLabel: string | null;
   createdAt: string;
   projectDisplayName: string | null;
   isActive: boolean;
+  jumpLabel: string | null;
   onNavigate: (draftId: DraftId) => void;
   onDiscard: (draftId: DraftId) => void;
   onContextMenu: (
@@ -40,10 +52,13 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     source: ContextMenuSource,
   ) => void;
 }) {
-  const { composer, draftId, onContextMenu, onDiscard, onNavigate } = props;
+  const { draftId, onContextMenu, onDiscard, onNavigate } = props;
+  const composer = props.composer ?? EMPTY_COMPOSER_PARTS;
   const promptPreview =
     assistantCitationsToPlainText(
-      replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label),
+      composerFileLinksToPlainText(
+        replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label),
+      ),
     )
       .trim()
       .split("\n", 1)[0] ?? "";
@@ -58,7 +73,9 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   const preview =
     promptPreview.length > 0
       ? promptPreview
-      : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`;
+      : attachmentCount === 0 && props.terminalLabel !== null
+        ? props.terminalLabel
+        : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`;
   const accessibility = resolveSidebarRowAccessibility({
     title: preview,
     statusLabel: "Unsent draft",
@@ -94,6 +111,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
       <div
         role="button"
         tabIndex={0}
+        data-sidebar-row={`draft:${draftId}`}
         aria-label={accessibility.label}
         aria-current={accessibility.current}
         data-testid="sidebar-draft-row"
@@ -158,20 +176,19 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             </span>
           </div>
         </div>
+        {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
     </li>
   );
 });
 
-interface SidebarDraftRowData {
-  draftId: DraftId;
-  session: DraftSessionState;
-  composer: ComposerThreadDraftState;
-}
-
+// rows come from upstream's useSidebarDrafts, so the open draft keeps its frozen row & jump number
 export const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
+  draftIds: readonly DraftId[];
+  routeDraftComposer: ComposerThreadDraftState | null;
+  terminalLabels: ReadonlyMap<string, string>;
+  jumpLabelByDraftId: ReadonlyMap<DraftId, string> | null;
   projectDisplayNameByKey: ReadonlyMap<string, string>;
-  scopedProjectKeys: ReadonlySet<string> | null;
   routeDraftId: string | null;
   onNavigateToDraft: (draftId: DraftId) => void;
   onDraftContextMenu: (
@@ -181,51 +198,21 @@ export const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   ) => void;
 }) {
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
-  const draftsByThreadKey = useComposerDraftStore((store) => store.draftsByThreadKey);
-  const [frozenActive, setFrozenActive] = useState<{
-    routeDraftId: string | null;
-    row: SidebarDraftRowData | null;
-  }>({ routeDraftId: null, row: null });
-  if (frozenActive.routeDraftId !== props.routeDraftId) {
-    let row: SidebarDraftRowData | null = null;
-    if (props.routeDraftId !== null) {
-      const draftId = DraftId.make(props.routeDraftId);
-      const session = draftThreadsByThreadKey[draftId];
-      const composer = draftsByThreadKey[draftId];
-      row =
-        session && session.promotedTo == null && composer && composerDraftHasUserContent(composer)
-          ? { draftId, session, composer }
-          : null;
-    }
-    setFrozenActive({ routeDraftId: props.routeDraftId, row });
-  }
-  const drafts = (() => {
-    const rows: SidebarDraftRowData[] = [];
-    for (const [draftKey, session] of Object.entries(draftThreadsByThreadKey)) {
-      if (session.promotedTo != null) {
-        continue;
-      }
-      if (
-        props.scopedProjectKeys !== null &&
-        !props.scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
-      ) {
-        continue;
-      }
-      if (draftKey === props.routeDraftId) {
-        if (frozenActive.routeDraftId === draftKey && frozenActive.row !== null) {
-          rows.push(frozenActive.row);
-        }
-        continue;
-      }
-      const composer = draftsByThreadKey[draftKey];
-      if (!composer || !composerDraftHasUserContent(composer)) {
-        continue;
-      }
-      rows.push({ draftId: DraftId.make(draftKey), session, composer });
-    }
-    rows.sort((left, right) => right.session.createdAt.localeCompare(left.session.createdAt));
-    return rows;
-  })();
+  const draftsByThreadKey = useComposerDraftStore(
+    useShallow((store) =>
+      Object.fromEntries(
+        props.draftIds.map((draftId) => [draftId, store.draftsByThreadKey[draftId]] as const),
+      ),
+    ),
+  );
+  const drafts = props.draftIds.flatMap((draftId) => {
+    const session = draftThreadsByThreadKey[draftId];
+    const composer =
+      (draftId === props.routeDraftId ? props.routeDraftComposer : null) ??
+      draftsByThreadKey[draftId] ??
+      null;
+    return session ? [{ draftId, session, composer }] : [];
+  });
   if (drafts.length === 0) {
     return null;
   }
@@ -238,9 +225,11 @@ export const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
             key={draftId}
             draftId={draftId}
             composer={composer}
+            terminalLabel={draftTerminalLabel(session, props.terminalLabels)}
             createdAt={session.createdAt}
             projectDisplayName={props.projectDisplayNameByKey.get(projectKey) ?? null}
             isActive={draftId === props.routeDraftId}
+            jumpLabel={props.jumpLabelByDraftId?.get(draftId) ?? null}
             onNavigate={props.onNavigateToDraft}
             onDiscard={discardComposerDraft}
             onContextMenu={props.onDraftContextMenu}

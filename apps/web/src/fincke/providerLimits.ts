@@ -6,12 +6,8 @@ import type {
   ServerProviderUsageWindow,
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
-import {
-  collectProviderUsageLimits,
-  formatDuration,
-  limitsNotice,
-  remainingPercent,
-} from "@t3tools/shared/usageLimits";
+import { collectProviderUsageLimits, remainingPercent } from "@t3tools/shared/usageLimits";
+import { formatDuration, limitsNotice } from "@t3tools/shared/usageLimitsCopy";
 
 import type { ProviderInstanceEntry } from "../providerInstances";
 import { useEnvironment } from "../state/environments";

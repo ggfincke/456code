@@ -4,12 +4,15 @@ import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as ByteSize from "effect/ByteSize";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as Metrics from "../observability/Metrics.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import * as Workflows from "../workflows/Workflows.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 
 export const WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
@@ -22,6 +25,8 @@ export const layer = HttpApiBuilder.group(
   "webhooks",
   Effect.fnUntraced(function* (handlers) {
     const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+    const workflows = yield* Workflows.Workflows;
+    const managedPolicy = yield* ManagedPolicy.ManagedPolicy;
     /**
      * The endpoint is raw so the signature is checked over the exact body
      * bytes; the service checks the token and signature.
@@ -67,9 +72,43 @@ export const layer = HttpApiBuilder.group(
 
       const headers: Record<string, string> = {};
       for (const [name, value] of Object.entries(request.headers)) {
-        if (typeof value === "string") headers[name.toLowerCase()] = value;
+        // Webhook senders do not use cookies, so the request a task reads carries none.
+        if (typeof value === "string" && name.toLowerCase() !== "cookie") {
+          headers[name.toLowerCase()] = value;
+        }
       }
       const queryIndex = request.url.indexOf("?");
+      if (params.hookId.startsWith(Workflows.HOOK_PREFIX)) {
+        if (ManagedPolicy.deniedBy(managedPolicy, "webhookTasks") !== undefined) {
+          return json(403, { error: "blocked_by_policy" });
+        }
+        // Answered only once the run is stored, so a sender that hears nothing may send again.
+        const started = yield* workflows
+          .deliver({
+            hookId: params.hookId,
+            token: params.token,
+            request: {
+              method: request.method,
+              headers,
+              query: queryIndex === -1 ? "" : request.url.slice(queryIndex + 1),
+              body: new TextDecoder().decode(body.value),
+            },
+          })
+          .pipe(Effect.result);
+        if (Result.isFailure(started)) {
+          if (started.failure._tag === "WorkflowInputError") {
+            return json(400, { error: "invalid_request", problem: started.failure.problem });
+          }
+          if (started.failure._tag === "WorkflowHookBusyError") {
+            return json(429, { error: "rate_limited" }, { "retry-after": "60" });
+          }
+          yield* Effect.logWarning("Workflow hook delivery failed", { hookId: params.hookId });
+          return json(500, { error: "internal_error" });
+        }
+        return Option.isNone(started.success)
+          ? json(404, { error: "hook_not_found" })
+          : json(202, { runId: started.success.value.runId });
+      }
       const result = yield* scheduledTasks
         .triggerWebhook({
           hookId: params.hookId,

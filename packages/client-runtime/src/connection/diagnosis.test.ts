@@ -1,3 +1,4 @@
+import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
 import { presentConnectionDiagnosis } from "./diagnosis.ts";
@@ -30,5 +31,18 @@ describe("presentConnectionDiagnosis", () => {
     const state = { ...backoff(failure), network: "offline" as const };
     expect(diagnose(state)?.headline).toBe("This device is offline");
     expect(diagnose(state)?.hops.map((hop) => `${hop.hop}:${hop.result}`)[0]).toBe("device:failed");
+  });
+
+  it("tells a host that refused this device's login to sign in again, not to start the server", () => {
+    const failure = mapRemoteEnvironmentError(
+      new EnvironmentAuthInvalidError({
+        code: "auth_invalid",
+        reason: "invalid_credential",
+        traceId: "trace-1",
+      }),
+    );
+    const steps = diagnose(backoff(failure))?.steps.join(" ");
+    expect(steps).not.toContain("Make sure the server is running");
+    expect(steps).toMatch(/pair|sign in/i);
   });
 });

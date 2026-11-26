@@ -1,15 +1,16 @@
 // apps/mobile/src/fincke/use-sidebar-view.ts
 // projects/activity sidebar view, collapsed projects & per-project "show more" state
 
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { useState } from "react";
 
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../state/preferences";
+import { useAtomCommand } from "../state/use-atom-command";
 
 export function useSidebarView() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const loaded = AsyncResult.isSuccess(preferencesResult);
   // projects is the default, matching desktop's sidebar
   const projectsView = !loaded || preferencesResult.value.sidebarProjectsView !== false;
@@ -23,12 +24,12 @@ export function useSidebarView() {
 
   const setProjectsView = (value: boolean) => {
     if (!loaded) return;
-    savePreferences({ sidebarProjectsView: value });
+    void savePreferences({ sidebarProjectsView: value });
   };
   // transforms read the optimistic value so two quick taps still toggle twice
   const toggleProjectCollapsed = (scopeKey: string) => {
     if (!loaded) return;
-    savePreferences({
+    void savePreferences({
       transform: (current) => {
         const collapsed = new Set(current.collapsedProjectGroups ?? []);
         if (!collapsed.delete(scopeKey)) collapsed.add(scopeKey);
