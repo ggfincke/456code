@@ -15,6 +15,10 @@
       "types": "./src/fincke-folder-tint.ts",
       "import": "./src/fincke-folder-tint.ts"
     },
+    "./fincke-limit-pools": {
+      "types": "./src/fincke-limit-pools.ts",
+      "import": "./src/fincke-limit-pools.ts"
+    },
     "./png": {
       "types": "./src/png.ts",
       "import": "./src/png.ts"

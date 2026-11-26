@@ -12,7 +12,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
-import { checkCoralProviderStatus } from "./CoralProvider.ts";
+import {
+  checkCoralProviderStatus,
+  coralProviderModelsFromSessionSetup,
+  overlayCoralSessionModels,
+} from "./CoralProvider.ts";
 
 const decodeSettings = Schema.decodeUnknownEffect(CoralSettings);
 const encodeLiteral = Schema.encodeSync(Schema.fromJsonString(Schema.String));
@@ -144,6 +148,46 @@ it.effect("discovers configured hosted models before creating a Coral session", 
     ]);
     expect(f.requests).toEqual([]);
     expect(yield* f.log).toBe("initialize\n");
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    TestClock.withLive,
+  ),
+);
+
+it.effect("groups hosted vendor models and leaves local models ungrouped", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture("hosted");
+    const ready = yield* f.check();
+    expect(ready.models.map((model) => model.subProvider)).toEqual([
+      undefined,
+      "Anthropic",
+      "OpenAI",
+    ]);
+    expect(ready.subProviders).toEqual([{ name: "Anthropic" }, { name: "OpenAI" }]);
+
+    const sessionModels = coralProviderModelsFromSessionSetup({
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          type: "select",
+          currentValue: "qwen3.8:27b",
+          options: [
+            { value: "qwen3.8:27b", name: "qwen3.8:27b" },
+            { value: "orcarouter/Qwen3.8-27B", name: "orcarouter/Qwen3.8-27B" },
+            { value: "anthropic/claude-fable-5-2", name: "anthropic/claude-fable-5-2" },
+          ],
+        },
+      ],
+    });
+    const overlaid = overlayCoralSessionModels(ready, sessionModels);
+    expect(overlaid.models.map((model) => [model.slug, model.name, model.subProvider])).toEqual([
+      ["qwen3.8:27b", "qwen3.8:27b", undefined],
+      ["orcarouter/Qwen3.8-27B", "orcarouter/Qwen3.8-27B", undefined],
+      ["anthropic/claude-fable-5-2", "claude-fable-5-2", "Anthropic"],
+    ]);
+    expect(overlaid.subProviders).toEqual([{ name: "Anthropic" }]);
   }).pipe(
     Effect.scoped,
     Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),

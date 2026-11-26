@@ -5,6 +5,7 @@ import type {
   ModelCapabilities,
   ServerProvider,
   ServerProviderModel,
+  ServerProviderSubProvider,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
@@ -61,15 +62,37 @@ const CORAL_FALLBACK_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+// only these exact prefixes are hosted vendors, matching coral's parseModelRef
+const CORAL_VENDORS = [
+  { prefix: "anthropic/", name: "Anthropic" },
+  { prefix: "openai/", name: "OpenAI" },
+] as const;
+
+// the vendor heading replaces the prefix in the name; the slug keeps it for coral
+function coralModel(slug: string, name: string): ServerProviderModel {
+  const vendor = CORAL_VENDORS.find((candidate) => slug.startsWith(candidate.prefix));
+  return {
+    slug,
+    name: vendor && name.startsWith(vendor.prefix) ? name.slice(vendor.prefix.length) : name,
+    ...(vendor ? { subProvider: vendor.name } : {}),
+    isCustom: false,
+    capabilities: EMPTY_CAPABILITIES,
+  };
+}
+
+const coralSubProviders = (
+  models: ReadonlyArray<ServerProviderModel>,
+): ReadonlyArray<ServerProviderSubProvider> =>
+  CORAL_VENDORS.filter((vendor) => models.some((model) => model.subProvider === vendor.name)).map(
+    (vendor) => ({ name: vendor.name }),
+  );
+
 export function coralProviderModelsFromSessionSetup(
   sessionSetupResult: Parameters<typeof coralModelsFromSessionSetup>[0],
 ): ReadonlyArray<ServerProviderModel> {
-  return coralModelsFromSessionSetup(sessionSetupResult).map((model) => ({
-    slug: model.slug,
-    name: model.name,
-    isCustom: false,
-    capabilities: EMPTY_CAPABILITIES,
-  }));
+  return coralModelsFromSessionSetup(sessionSetupResult).map((model) =>
+    coralModel(model.slug, model.name),
+  );
 }
 
 // empty keeps the pre-session fallback so a resume without inventory does not wipe the picker
@@ -77,7 +100,7 @@ export function overlayCoralSessionModels<
   Snapshot extends { readonly models: ReadonlyArray<ServerProviderModel> },
 >(snapshot: Snapshot, sessionModels: ReadonlyArray<ServerProviderModel>): Snapshot {
   if (sessionModels.length === 0) return snapshot;
-  return { ...snapshot, models: sessionModels };
+  return { ...snapshot, models: sessionModels, subProviders: coralSubProviders(sessionModels) };
 }
 
 export const buildInitialCoralProviderSnapshot = Effect.fn("CoralProvider.buildInitialSnapshot")(
@@ -154,20 +177,25 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
     version?: string | null;
     message?: string;
     models?: ReadonlyArray<ServerProviderModel>;
-  }) =>
-    buildServerProvider({
-      presentation: CORAL_PRESENTATION,
-      enabled: true,
-      checkedAt,
-      models: input.models ?? lastKnownModels,
-      probe: {
-        installed: input.installed ?? true,
-        version: input.version ?? null,
-        status: input.message ? "error" : "ready",
-        auth: { status: "unknown", label: "No authentication required" },
-        ...(input.message ? { message: input.message } : {}),
-      },
-    });
+  }) => {
+    const models = input.models ?? lastKnownModels;
+    return {
+      ...buildServerProvider({
+        presentation: CORAL_PRESENTATION,
+        enabled: true,
+        checkedAt,
+        models,
+        probe: {
+          installed: input.installed ?? true,
+          version: input.version ?? null,
+          status: input.message ? "error" : "ready",
+          auth: { status: "unknown", label: "No authentication required" },
+          ...(input.message ? { message: input.message } : {}),
+        },
+      }),
+      subProviders: coralSubProviders(models),
+    };
+  };
   if (Result.isFailure(initialized))
     return snapshot({
       installed: !isCommandMissingCause(initialized.failure),
@@ -255,12 +283,7 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
     });
   return snapshot({
     version,
-    models: names.map((name) => ({
-      slug: name,
-      name,
-      isCustom: false,
-      capabilities: EMPTY_CAPABILITIES,
-    })),
+    models: names.map((name) => coralModel(name, name)),
   });
 });
 
