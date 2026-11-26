@@ -121,7 +121,10 @@ it("gives a subagent the same status as the background work line", async () => {
       })}
     />,
   );
-  await expect.element(page.getByText("Waiting · Review refactor diffs")).toBeVisible();
+  // fincke: the line keeps its Show button beside the title, so the text is not the whole element
+  await expect
+    .element(page.getByText("Waiting · Review refactor diffs", { exact: false }))
+    .toBeVisible();
   await screen.getByRole("button", { name: "Details", exact: true }).click();
   await expect
     .element(page.getByRole("dialog").getByText("Waiting", { exact: true }))
