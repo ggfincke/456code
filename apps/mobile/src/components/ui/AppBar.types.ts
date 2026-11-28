@@ -42,9 +42,13 @@ export type AppBarMenuItem =
       readonly items: ReadonlyArray<AppBarMenuItem>;
     };
 
+// fincke: the Duo rail folds new task & search into the menu carrying this identifier
+export const DUO_MORE_ACTIONS_IDENTIFIER = "duo-more-actions";
+
 export interface AppBarMenu {
   readonly title: string;
   readonly icon: AppSymbolName;
+  readonly identifier?: string;
   readonly status?: string;
   readonly separateBackground?: boolean;
   readonly items: ReadonlyArray<AppBarMenuItem>;
