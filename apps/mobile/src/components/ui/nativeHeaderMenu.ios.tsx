@@ -30,6 +30,7 @@ export function createNativeHeaderMenu(menu: AppBarMenu) {
       key={menu.title}
       title={menu.title}
       accessibilityLabel={menu.title}
+      identifier={menu.identifier}
       icon={typeof menu.icon === "string" ? menu.icon : menu.icon.ios}
       separateBackground={menu.separateBackground ?? true}
     >

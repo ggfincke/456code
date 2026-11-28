@@ -7,6 +7,7 @@ import { useGT } from "gt-react-native";
 import { isValidElement, useEffect, useRef } from "react";
 import { StyleSheet } from "react-native";
 import { KeyboardController, useKeyboardState } from "react-native-keyboard-controller";
+import { DUO_MORE_ACTIONS_IDENTIFIER } from "../components/ui/AppBar.types";
 import { isDuoDevice } from "../lib/device-type";
 import { useMobileNavigationTheme } from "../lib/useMobileNavigationTheme";
 import { useDeviceType, useNativeLayoutMetrics } from "./native-layout-metrics";
@@ -155,9 +156,9 @@ export function V5StackHeader(props: {
   readonly canGoBack: boolean;
   /** Workspace split columns share the vertical bar with the workspace tab bar. */
   readonly column?: "primary" | "detail";
-  /** The workspace's compose action, shown as its own group in this column's bar. */
+  /** The workspace's compose action, shown in this column's More menu. */
   readonly onCompose?: () => void;
-  // fincke: the Duo's bar adds sidebar & search beside compose as one navigation group
+  // fincke: the Duo's bar pairs a sidebar button with a More menu holding compose & search
   readonly onToggleSidebar?: () => void;
   readonly onSearch?: () => void;
   /** UIKit morphs search items that share an identifier between bars as columns change. */
@@ -248,25 +249,59 @@ export function V5StackHeader(props: {
     bottom.length = 0;
   }
   if (props.onCompose || props.onToggleSidebar || props.onSearch) {
-    if (trailing.length)
-      trailing.push({ type: "spacer", id: "compose-group", sizing: "fixed", width: 8 });
-    // items stack from the bar's edge inward, so this reads sidebar, new task, search downward
-    if (props.onSearch)
-      trailing.push({
-        type: "item",
-        id: "workspace-search",
-        title: gt("Search"),
-        icon: { type: "sfSymbol", name: "magnifyingglass" },
-        onPress: props.onSearch,
-      });
+    // fincke: a Live Activity leaves the Duo rail room for back plus two buttons, so new task &
+    // search join the screen's More menu and only sidebar & More stay as buttons
+    const workspaceActions: StackHeaderMenuElementIOS[] = [];
     if (props.onCompose)
-      trailing.push({
-        type: "item",
+      workspaceActions.push({
         id: "workspace-compose",
+        type: "menuItem",
+        itemType: "action",
         title: gt("New task"),
         icon: { type: "sfSymbol", name: "square.and.pencil" },
         onPress: props.onCompose,
       });
+    if (props.onSearch)
+      workspaceActions.push({
+        id: "workspace-search",
+        type: "menuItem",
+        itemType: "action",
+        title: gt("Search"),
+        icon: { type: "sfSymbol", name: "magnifyingglass" },
+        onPress: props.onSearch,
+      });
+    const moreIndex = trailing.findIndex((item) => item.id === DUO_MORE_ACTIONS_IDENTIFIER);
+    const screenMore = moreIndex === -1 ? undefined : trailing.splice(moreIndex, 1)[0];
+    const more: HeaderItem | undefined =
+      screenMore?.type === "item" && screenMore.menu
+        ? {
+            ...screenMore,
+            menu: {
+              ...screenMore.menu,
+              children: [
+                {
+                  id: "workspace-actions",
+                  type: "menu",
+                  displayInline: true,
+                  children: workspaceActions,
+                },
+                ...screenMore.menu.children,
+              ],
+            },
+          }
+        : workspaceActions.length
+          ? {
+              type: "item",
+              id: DUO_MORE_ACTIONS_IDENTIFIER,
+              title: gt("More actions"),
+              icon: { type: "sfSymbol", name: "ellipsis" },
+              menu: { id: "workspace-more", type: "menu", children: workspaceActions },
+            }
+          : screenMore;
+    if (trailing.length)
+      trailing.push({ type: "spacer", id: "compose-group", sizing: "fixed", width: 8 });
+    // items stack from the bar's edge inward, so this reads sidebar, then More, downward
+    if (more) trailing.push(more);
     if (props.onToggleSidebar)
       trailing.push({
         type: "item",

@@ -20,7 +20,13 @@ import {
   NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED,
 } from "../../features/layout/native-mail-search-toolbar";
 import { useAppearancePreferences } from "../../features/settings/appearance/AppearancePreferencesProvider";
-import type { AppBarMenu, AppBarMenuItem, AppBarProps } from "./AppBar.types";
+import {
+  DUO_MORE_ACTIONS_IDENTIFIER,
+  type AppBarMenu,
+  type AppBarMenuItem,
+  type AppBarProps,
+} from "./AppBar.types";
+import { usePaneRole } from "./Pane";
 import type { AppSymbolName } from "./AppSymbol";
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
 import { useControlTheme } from "./useControlTheme";
@@ -50,6 +56,7 @@ export function AppBar(props: AppBarProps) {
   const locale = useLocale();
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const deviceType = useDeviceType();
+  const paneRole = usePaneRole();
   const headerId = useId();
   const { layout } = useAdaptiveWorkspaceLayout();
   const sidebarToggle = useSidebarToggle();
@@ -113,18 +120,20 @@ export function AppBar(props: AppBarProps) {
     usesNativeMailSearchToolbar;
   const trailingMenus = compactSearch ? (menus?.slice(1) ?? []) : (menus ?? []);
   // The Duo's vertical bar never overflows: items that don't fit slide under the workspace tabs,
-  // and a Live Activity pushes them down further. More than one tool shares one menu there.
+  // and a Live Activity pushes them down further. More than one tool shares one menu there, and
+  // in the detail column even one does, since the rail folds new task & search into that menu.
   const groupTrailing =
     usesNativeWorkspaceColumns &&
     isDuoDevice(deviceType) &&
     props.onClose === undefined &&
-    (props.actions?.length ?? 0) + trailingMenus.length > 1;
+    (props.actions?.length ?? 0) + trailingMenus.length > (paneRole === "content" ? 0 : 1);
   const actions = groupTrailing ? [] : (props.actions ?? []);
   const visibleMenus: ReadonlyArray<AppBarMenu> = groupTrailing
     ? [
         {
           title: gt("More actions"),
           icon: "ellipsis",
+          identifier: DUO_MORE_ACTIONS_IDENTIFIER,
           items: [
             ...(props.actions ?? []).map((action) => ({
               id: action.accessibilityLabel,
